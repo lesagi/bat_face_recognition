@@ -1,0 +1,91 @@
+# Bat Face Recognition Project - Production Requirements
+# Core dependencies for running the application
+
+# Deep Learning Frameworks
+tensorflow==2.15.0
+tensorflow-io-gcs-filesystem==0.37.0
+torch==2.3.0
+torchvision==0.18.0
+
+# Computer Vision & YOLO
+ultralytics==8.2.18
+opencv-python==4.9.0.80
+opencv-python-headless>=4.9.0.80
+
+# Data Science & ML
+numpy>=1.24.4
+pandas==2.2.2
+scikit-learn==1.5.0
+scikit-image==0.23.2
+scipy==1.13.0
+
+# Image Processing & Augmentation
+Pillow==10.3.0
+albumentations==1.4.8
+albucore==0.0.7
+imageio==2.34.1
+tifffile==2024.5.22
+
+# Visualization
+matplotlib==3.8.4
+seaborn==0.13.2
+
+# Experiment Tracking & MLOps
+mlflow==2.10.2
+
+# Web Framework
+Flask==3.0.2
+
+# Utility Libraries
+tqdm==4.66.4
+requests==2.31.0
+requests-oauthlib==1.3.0
+PyYAML==6.0
+pathlib2>=2.3.0; python_version<"3.4"
+
+# Configuration & File Handling
+pydantic==2.7.2
+pydantic_core==2.18.3
+
+# TensorFlow Dependencies
+absl-py==2.1.0
+astunparse==1.6.3
+protobuf==3.20.3
+libclang==18.1.1
+
+# PyTorch Dependencies  
+optree==0.11.0
+thop==0.1.1.post2209072238
+
+# Scientific Computing
+networkx==3.3
+sympy==1.12
+mpmath==1.3.0
+
+# Performance & Optimization
+threadpoolctl==3.5.0
+joblib==1.4.2
+lazy_loader==0.4
+py-cpuinfo==9.0.0
+
+# Plotting Dependencies
+contourpy==1.2.1
+cycler>=0.10,<0.13
+fonttools==4.51.0
+pyparsing==3.1.2
+
+# File System & Storage
+fsspec==2024.5.0
+filelock==3.14.0
+
+# Security & Authentication
+pyasn1-modules==0.2.8
+
+# Date/Time Handling
+tzdata==2024.1
+
+# Text Processing
+webencodings==0.5.1
+
+# Type Annotations
+annotated-types==0.7.0

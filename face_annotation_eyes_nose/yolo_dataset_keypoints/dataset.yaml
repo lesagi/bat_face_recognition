@@ -1,0 +1,14 @@
+# Bat Face Dataset Configuration
+# Generated from CVAT annotations
+
+path: /Users/MAC/Documents/bat_face_rec/face_annotation_eyes_nose/yolo_dataset_keypoints
+train: train/images
+val: val/images
+
+# Keypoint detection format
+nc: 1  # number of classes
+names: ['face']
+
+# Keypoint configuration
+kpt_shape: [3, 3]  # [number_of_keypoints, coordinates_dimensions]
+flip_idx: [1, 0, 2]  # left_eye <-> right_eye when flipping, nose stays same

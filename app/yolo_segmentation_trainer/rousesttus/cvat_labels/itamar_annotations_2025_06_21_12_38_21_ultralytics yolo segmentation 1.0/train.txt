@@ -1,0 +1,7 @@
+data/images/train/IMG_20250518_151227.jpg
+data/images/train/IMG_20250518_151228.jpg
+data/images/train/IMG_20250518_151229.jpg
+data/images/train/IMG_20250518_151232.jpg
+data/images/train/IMG_20250518_151239.jpg
+data/images/train/IMG_20250518_151240.jpg
+data/images/train/IMG_20250518_151301.jpg

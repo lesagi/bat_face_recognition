@@ -1,0 +1,4 @@
+names:
+  0: bat
+path: .
+train: train.txt
