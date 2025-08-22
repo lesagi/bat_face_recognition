@@ -10,6 +10,7 @@ Functions are organized into:
 import cv2
 import numpy as np
 from typing import Optional, Tuple, Union
+import os
 
 
 class ImageTransforms:
@@ -18,6 +19,47 @@ class ImageTransforms:
     # =========================================================================
     # MASK-BASED TRANSFORMS (Require prediction masks)
     # =========================================================================
+
+    @staticmethod
+    def _get_model_from_config(type: str) -> Optional[str]:
+        try:
+            from config import load_config
+            config = load_config()
+            
+            models_config = config.models
+            
+            if not models_config._config:
+                print("⚠️  No models found in configuration")
+                return None
+            
+            if type == "segmentation":
+                model_config = models_config.segmentation
+            elif type == "pose":
+                model_config = models_config.pose
+            else:
+                raise ValueError(f"Invalid model type: {type}")
+            
+            if not model_config:
+                print(f"⚠️  No {type} model configuration found")
+                return None
+            
+            model_path = model_config.get('model_path')
+            if not model_path:
+                print(f"⚠️  No model path found for {type} model")
+                return None
+            
+            if not os.path.exists(model_path):
+                print(f"⚠️  Model file not found: {model_path}")
+                return None
+            
+            return model_path
+            
+        except ImportError:
+            print("⚠️  Config module not available")
+            return None
+        except Exception as e:
+            print(f"⚠️  Error loading model from config: {e}")
+            return None
 
     @staticmethod
     def apply_background_replacement(
@@ -37,8 +79,17 @@ class ImageTransforms:
         Returns:
             Image with replaced background
         """
-        # Ensure mask is 3D for broadcasting
-        if len(mask.shape) == 2:
+        # Ensure mask matches image size and is binary 0/1
+        if mask.dtype != np.uint8:
+            mask = mask.astype(np.uint8)
+        if mask.max() > 1:
+            mask = (mask > 127).astype(np.uint8)
+        if mask.shape[:2] != original_image.shape[:2]:
+            import cv2
+            mask = cv2.resize(mask, (original_image.shape[1], original_image.shape[0]), interpolation=cv2.INTER_NEAREST)
+            mask = (mask > 0).astype(np.uint8)
+        # Broadcast to 3 channels
+        if mask.ndim == 2:
             mask_3d = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
         else:
             mask_3d = mask
@@ -55,7 +106,8 @@ class ImageTransforms:
 
         # Apply mask: keep foreground, replace background
         result = background_image.copy()
-        result[mask_3d == 1] = original_image[mask_3d == 1]
+        foreground = mask_3d > 0
+        result[foreground] = original_image[foreground]
 
         return result
 
@@ -80,7 +132,9 @@ class ImageTransforms:
         # Create blurred version of the image
         blurred = cv2.GaussianBlur(original_image, (blur_strength, blur_strength), 0)
 
-        # Ensure mask is 3D for broadcasting
+        # Ensure mask is 3D for broadcasting and binary
+        if mask.max() > 1:
+            mask = (mask > 127).astype(np.uint8)
         if len(mask.shape) == 2:
             mask_3d = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
         else:
@@ -88,7 +142,8 @@ class ImageTransforms:
 
         # Keep original foreground, use blurred background
         result = blurred.copy()
-        result[mask_3d == 1] = original_image[mask_3d == 1]
+        foreground = mask_3d > 0
+        result[foreground] = original_image[foreground]
 
         return result
 
@@ -113,7 +168,9 @@ class ImageTransforms:
         # Create solid color background
         background = np.full((height, width, 3), background_color, dtype=np.uint8)
 
-        # Ensure mask is 3D for broadcasting
+        # Ensure mask is 3D for broadcasting and binary
+        if mask.max() > 1:
+            mask = (mask > 127).astype(np.uint8)
         if len(mask.shape) == 2:
             mask_3d = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
         else:
@@ -121,7 +178,8 @@ class ImageTransforms:
 
         # Keep original foreground, use color background
         result = background.copy()
-        result[mask_3d == 1] = original_image[mask_3d == 1]
+        foreground = mask_3d > 0
+        result[foreground] = original_image[foreground]
 
         return result
 
@@ -163,6 +221,9 @@ class ImageTransforms:
         mean_subtract: Optional[Union[float, Tuple[float, float, float]]] = None,
         std_divide: Optional[Union[float, Tuple[float, float, float]]] = None,
         clip_range: Optional[Tuple[float, float]] = None,
+        debug: bool = False,
+        debug_dir: Optional[str] = None,
+        base_filename: Optional[str] = None
     ) -> np.ndarray:
         """Normalize image pixel values with advanced options.
 
@@ -202,6 +263,23 @@ class ImageTransforms:
         # Clip to range
         if clip_range is not None:
             normalized = np.clip(normalized, clip_range[0], clip_range[1])
+
+        # Debug output if enabled
+        if debug and debug_dir and base_filename:
+            try:
+                import cv2
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                print(f"🔍 Final image shape: {normalized.shape}, dtype: {normalized.dtype}")
+                print(f"🔍 Value range: [{normalized.min():.3f}, {normalized.max():.3f}]")
+                
+                # Save final normalized image (convert back to uint8 for saving)
+                final_image_uint8 = (normalized * 255).astype(np.uint8)
+                debug_path = os.path.join(debug_dir, f"{base_filename}_step7_final_normalized.jpg")
+                cv2.imwrite(debug_path, final_image_uint8)
+                print(f"🔍 Saved debug final image: {debug_path}")
+            except Exception as e:
+                print(f"⚠️ Debug output failed: {e}")
 
         return normalized
 
@@ -338,58 +416,114 @@ class ImageTransforms:
                 raise ValueError(f"Unknown color conversion: {conversion}")
 
     @staticmethod
+    def segment_image(
+        original_image: np.ndarray,
+        debug: bool = False,
+        debug_dir: Optional[str] = None,
+        base_filename: Optional[str] = None
+    ) -> Optional[np.ndarray]:
+        try:
+            from ultralytics import YOLO
+        except Exception:
+            return None
+
+        # Load segmentation model path and confidence from config
+        try:
+            from config.loader import load_config
+            cfg = load_config()
+            seg_model_path = cfg.models.segmentation.get("model_path")
+            confidence_threshold = cfg.models.segmentation.get("confidence_threshold", 0.3)
+            if not seg_model_path or not os.path.exists(seg_model_path):
+                return None
+        except Exception:
+            return None
+
+        try:
+            model = YOLO(seg_model_path)
+            results = model(original_image, conf=confidence_threshold)
+            if not results or len(results) == 0:
+                return None
+            result = results[0]
+            if result.masks is None or len(result.masks) == 0:
+                return None
+            masks = result.masks.data.cpu().numpy()  # shape [N, h, w] at model scale
+            areas = [np.sum(m) for m in masks]
+            mask = masks[int(np.argmax(areas))].astype(np.uint8)  # 0/1
+            # Resize mask to original image size
+            orig_h, orig_w = original_image.shape[:2]
+            if mask.shape[0] != orig_h or mask.shape[1] != orig_w:
+                import cv2
+                mask = cv2.resize(mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+                mask = (mask > 0).astype(np.uint8)
+            
+            # Debug output if enabled
+            if debug and debug_dir and base_filename:
+                try:
+                    import cv2
+                    os.makedirs(debug_dir, exist_ok=True)
+                    
+                    # Save mask visualization
+                    mask_overlay = original_image.copy()
+                    mask_colored = np.zeros_like(original_image)
+                    mask_colored[:, :, 1] = mask * 255  # Green channel
+                    mask_overlay = cv2.addWeighted(mask_overlay, 0.7, mask_colored, 0.3, 0)
+                    
+                    debug_path = os.path.join(debug_dir, f"{base_filename}_step2_mask_overlay.jpg")
+                    cv2.imwrite(debug_path, mask_overlay)
+                    print(f"🔍 Saved debug mask overlay: {debug_path}")
+                    
+                    # Save pure mask
+                    debug_path = os.path.join(debug_dir, f"{base_filename}_step2_mask.jpg")
+                    cv2.imwrite(debug_path, mask * 255)
+                    print(f"🔍 Saved debug mask: {debug_path}")
+                    
+                    print(f"🔍 Segmentation mask shape: {mask.shape}")
+                except Exception as e:
+                    print(f"⚠️ Debug output failed: {e}")
+            
+            return mask
+            
+        except Exception:
+            return None
+
+    @staticmethod
     def crop_square_around_segmentation(
-        original_image: np.ndarray, mask: np.ndarray, buffer_factor: float = 1.2
-    ) -> np.ndarray:
-        """Crop square around segmented region from mask with buffer padding.
+        original_image: np.ndarray,
+        margin_ratio: float = 0.5,
+        debug: bool = False,
+    ) -> Optional[np.ndarray]:
+        mask = ImageTransforms.segment_image(original_image)
+        if mask is None:
+            if debug:
+                print("Segmentation failed for crop_square_around_segmentation")
+            return None
+        return ImageTransforms.crop_square_around_segmentation_mask(
+            original_image, mask, margin_ratio, debug
+        )
 
-        Args:
-            original_image: Original image array
-            mask: Binary segmentation mask (foreground = 1, background = 0)
-            buffer_factor: Factor to expand bounding box (1.0 = no buffer, 1.2 = 20% buffer)
-
-        Returns:
-            Cropped square image around segmented region with buffer
-        """
-        # Find bounding box of segmented region
-        # Get coordinates where mask is positive
-        y_coords, x_coords = np.where(mask > 0)
-
-        if len(y_coords) == 0:
-            # If no segmented region found, return center crop of entire image
-            return ImageTransforms.center_crop_square(original_image)
-
-        # Calculate tight bounding box from segmented coordinates
-        min_x1 = float(np.min(x_coords))
-        min_y1 = float(np.min(y_coords))
-        max_x2 = float(np.max(x_coords))
-        max_y2 = float(np.max(y_coords))
-
-        # Add buffer to bounding box
-        box_width = max_x2 - min_x1
-        box_height = max_y2 - min_y1
-
-        # Calculate buffer amounts
-        width_buffer = (box_width * (buffer_factor - 1.0)) / 2
-        height_buffer = (box_height * (buffer_factor - 1.0)) / 2
-
-        # Expand bounding box with buffer
-        buffered_min_x1 = min_x1 - width_buffer
-        buffered_min_y1 = min_y1 - height_buffer
-        buffered_max_x2 = max_x2 + width_buffer
-        buffered_max_y2 = max_y2 + height_buffer
-
-        # Clamp to image boundaries
-        img_height, img_width = original_image.shape[:2]
-        buffered_min_x1 = max(0, buffered_min_x1)
-        buffered_min_y1 = max(0, buffered_min_y1)
-        buffered_max_x2 = min(img_width, buffered_max_x2)
-        buffered_max_y2 = min(img_height, buffered_max_y2)
-
-        bbox = (buffered_min_x1, buffered_min_y1, buffered_max_x2, buffered_max_y2)
-
-        # Use the bbox cropping method
-        return ImageTransforms._crop_square_from_bbox(original_image, bbox)
+    @staticmethod
+    def apply_background_replacement_auto(
+        original_image: np.ndarray,
+        background_source: callable,
+        debug: bool = False,
+        **generator_kwargs,
+    ) -> Optional[np.ndarray]:
+        mask = ImageTransforms.segment_image(original_image)
+        if mask is None:
+            if debug:
+                print("Segmentation failed for background replacement")
+            return None
+        result = ImageTransforms.apply_background_replacement(
+            original_image, mask, background_source, **generator_kwargs
+        )
+        if debug:
+            try:
+                import cv2
+                contours, _ = cv2.findContours((mask > 0).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cv2.drawContours(result, contours, -1, (0, 0, 255), 3)
+            except Exception:
+                pass
+        return result
 
     @staticmethod
     def _crop_square_from_bbox(
@@ -471,35 +605,12 @@ class ImageTransforms:
         face_detector_type: str = "yolo_pose",
         scale_factor: float = 1.1,
         min_neighbors: int = 5,
-        yolo_model_path: Optional[str] = None,
-        confidence_threshold: float = 0.3,
         debug: bool = False,
+        debug_dir: Optional[str] = None,
+        base_filename: Optional[str] = None
     ) -> Optional[np.ndarray]:
-        """Align face by rotating so eye line is horizontal to the top border.
-
-        This method detects facial landmarks (eyes and nose) and rotates the image
-        so that the line connecting the eyes becomes parallel to the top of the image.
-
-        Args:
-            original_image: Input image array
-            target_eye_distance: Optional target distance between eyes in pixels
-            face_detector_type: Type of face detector ('opencv', 'mediapipe', 'yolo_pose')
-            scale_factor: Scale factor for face detection (OpenCV)
-            min_neighbors: Minimum neighbors for face detection (OpenCV)
-            yolo_model_path: Path to YOLO pose model (.pt file) - required for 'yolo_pose'
-            confidence_threshold: Confidence threshold for YOLO pose detection
-            debug: If True, return debug information
-
-        Returns:
-            Aligned image array, or None if alignment fails
-
-        Note:
-            For 'yolo_pose' mode, a trained YOLO pose model is required that can detect
-            bat face keypoints (left_eye, right_eye, nose).
-        """
         try:
             if face_detector_type == "opencv":
-                # Convert to grayscale for face detection
                 gray = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
                 return ImageTransforms._align_face_opencv(
                     original_image,
@@ -514,17 +625,56 @@ class ImageTransforms:
                     original_image, target_eye_distance, debug
                 )
             elif face_detector_type == "yolo_pose":
+                yolo_model_path = ImageTransforms._get_model_from_config("pose")
                 if yolo_model_path is None:
                     raise ValueError(
-                        "yolo_model_path is required for yolo_pose face detection"
+                        "Pose model not found in config for yolo_pose face detection"
                     )
-                return ImageTransforms._align_face_yolo_pose(
+                try:
+                    from config.loader import load_config
+                    cfg = load_config()
+                    confidence_threshold = cfg.models.pose.get("confidence_threshold", 0.3)
+                except Exception:
+                    confidence_threshold = 0.3
+                
+                result = ImageTransforms._align_face_yolo_pose(
                     original_image,
                     yolo_model_path,
                     target_eye_distance,
                     confidence_threshold,
                     debug,
                 )
+                
+                # Debug output if enabled
+                if debug and debug_dir and base_filename:
+                    try:
+                        import cv2
+                        os.makedirs(debug_dir, exist_ok=True)
+                        
+                        # Save original image (step 0)
+                        debug_path = os.path.join(debug_dir, f"{base_filename}_step0_original.jpg")
+                        cv2.imwrite(debug_path, original_image)
+                        print(f"🔍 Saved debug image: {debug_path}")
+                        print(f"🔍 Original image shape: {original_image.shape}")
+                        
+                        if result is not None:
+                            print("🔍 Face alignment successful!")
+                            
+                            # Save aligned image
+                            debug_path = os.path.join(debug_dir, f"{base_filename}_step1_aligned.jpg")
+                            cv2.imwrite(debug_path, result)
+                            print(f"🔍 Saved debug aligned image: {debug_path}")
+                        else:
+                            print("⚠️ Face alignment failed, continuing with original image...")
+                            
+                            # Save original image as step1 result since alignment failed
+                            debug_path = os.path.join(debug_dir, f"{base_filename}_step1_alignment_failed_using_original.jpg")
+                            cv2.imwrite(debug_path, original_image)
+                            print(f"🔍 Saved debug original image (alignment failed): {debug_path}")
+                    except Exception as e:
+                        print(f"⚠️ Debug output failed: {e}")
+                
+                return result
             else:
                 raise ValueError(f"Unknown face_detector_type: {face_detector_type}")
 
@@ -785,28 +935,23 @@ class ImageTransforms:
                     print("No face detections from YOLO pose model")
                 return None
 
-            # Get keypoints from the first (highest confidence) detection
-            keypoints = result.keypoints.xy.cpu().numpy()  # [N, num_keypoints, 2]
-
-            if len(keypoints) == 0:
+            # Prefer keypoints with confidence and choose leftmost/rightmost as eyes
+            kpts_with_conf = result.keypoints.data.cpu().numpy()  # [N, K, 3] -> x,y,conf
+            if len(kpts_with_conf) == 0:
                 if debug:
                     print("No keypoints found in detection")
                 return None
-
-            # Get keypoints for the first detection [num_keypoints, 2]
-            kpts = keypoints[0]
-
-            # Your trained model should output keypoints in order: [left_eye, right_eye, nose]
-            if len(kpts) < 2:
+            kpts3 = kpts_with_conf[0]  # [K,3]
+            valid = kpts3[kpts3[:, 2] >= confidence_threshold]
+            if len(valid) < 2:
                 if debug:
-                    print(
-                        "Not enough keypoints detected (need at least left_eye and right_eye)"
-                    )
+                    print("Not enough confident keypoints for alignment")
                 return None
-
-            # Extract eye coordinates
-            left_eye = kpts[0]  # [x, y] for left eye
-            right_eye = kpts[1]  # [x, y] for right eye
+            # Choose leftmost and rightmost points as eye proxies
+            left_idx = int(np.argmin(valid[:, 0]))
+            right_idx = int(np.argmax(valid[:, 0]))
+            left_eye = valid[left_idx][:2]
+            right_eye = valid[right_idx][:2]
 
             # Check if keypoints are valid (not zeros or NaN)
             if (
@@ -840,9 +985,21 @@ class ImageTransforms:
             # Create rotation matrix
             rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
 
+            # Optionally draw keypoints before rotation so they rotate with the face
+            to_rotate = original_image
+            if debug:
+                try:
+                    annotated = original_image.copy()
+                    cv2.circle(annotated, left_eye_center, 5, (0, 0, 255), -1)
+                    cv2.circle(annotated, right_eye_center, 5, (255, 0, 0), -1)
+                    cv2.line(annotated, left_eye_center, right_eye_center, (0, 255, 255), 3)
+                    to_rotate = annotated
+                except Exception:
+                    to_rotate = original_image
+
             # Apply rotation
             aligned_image = cv2.warpAffine(
-                original_image,
+                to_rotate,
                 rotation_matrix,
                 (original_image.shape[1], original_image.shape[0]),
                 flags=cv2.INTER_LINEAR,
@@ -884,27 +1041,28 @@ class ImageTransforms:
         eye_y_ratio: float = 0.35,
         face_width_ratio: float = 0.8,
         face_detector_type: str = "opencv",
-        yolo_model_path: Optional[str] = None,
-        confidence_threshold: float = 0.3,
         debug: bool = False,
     ) -> Optional[np.ndarray]:
-        """Center and standardize face position based on facial landmarks.
+        """Center face landmarks and resize to target size.
 
-        This method ensures that eyes and nose are positioned consistently across images
-        by cropping around facial landmarks at standardized positions.
+        This method detects facial landmarks and centers them in the image,
+        then resizes to the target face size while maintaining proportions.
 
         Args:
             original_image: Input image array
-            target_face_size: Target size for the standardized face crop
-            eye_y_ratio: Ratio from top where eye line should be positioned (0.35 = 35% from top)
-            face_width_ratio: Ratio of face width to total crop width (0.8 = face takes 80% of width)
+            target_face_size: Target size for the face (width and height)
+            eye_y_ratio: Ratio of eye Y position from top (0.0-1.0)
+            face_width_ratio: Ratio of face width to image width (0.0-1.0)
             face_detector_type: Type of face detector ('opencv', 'mediapipe', 'yolo_pose')
-            yolo_model_path: Path to YOLO pose model (.pt file) - required for 'yolo_pose'
             confidence_threshold: Confidence threshold for YOLO pose detection
-            debug: If True, show debug information
+            debug: If True, return debug information
 
         Returns:
-            Standardized face crop with consistent landmark positions, or None if failed
+            Centered and resized image array, or None if centering fails
+
+        Note:
+            For 'yolo_pose' mode, a trained YOLO pose model is required that can detect
+            bat face keypoints (left_eye, right_eye, nose).
         """
         try:
             if face_detector_type == "opencv":
@@ -927,10 +1085,18 @@ class ImageTransforms:
                     debug,
                 )
             elif face_detector_type == "yolo_pose":
+                yolo_model_path = ImageTransforms._get_model_from_config("pose")
                 if yolo_model_path is None:
                     raise ValueError(
-                        "yolo_model_path is required for yolo_pose face detection"
+                        "Pose model not found in config for yolo_pose face detection"
                     )
+                try:
+                    from config.loader import load_config
+                    cfg = load_config()
+                    confidence_threshold = cfg.models.pose.get("confidence_threshold", 0.3)
+                except Exception:
+                    confidence_threshold = 0.3
+                
                 return ImageTransforms._center_face_yolo_pose(
                     original_image,
                     yolo_model_path,
@@ -1241,9 +1407,25 @@ class ImageTransforms:
                     print("Invalid eye keypoints detected for centering")
                 return None
 
+            # Optionally draw eye keypoints
+            if debug:
+                try:
+                    # Draw all confident keypoints
+                    kpts3 = result.keypoints.data.cpu().numpy()[0]
+                    for pt in kpts3:
+                        if pt[2] >= confidence_threshold:
+                            cv2.circle(original_image, (int(pt[0]), int(pt[1])), 3, (0, 255, 0), -1)
+                    # Emphasize eyes and connecting line
+                    cv2.circle(original_image, (int(left_eye[0]), int(left_eye[1])), 5, (0, 0, 255), -1)
+                    cv2.circle(original_image, (int(right_eye[0]), int(right_eye[1])), 5, (255, 0, 0), -1)
+                    cv2.line(original_image, (int(left_eye[0]), int(left_eye[1])), (int(right_eye[0]), int(right_eye[1])), (0, 255, 255), 3)
+                except Exception:
+                    pass
+
             # Calculate midpoint between eyes
             eye_center_x = int((left_eye[0] + right_eye[0]) / 2)
             eye_center_y = int((left_eye[1] + right_eye[1]) / 2)
+            # No debug prints here
 
             # Calculate crop region to center the face
             crop_top = int(eye_center_y - (target_face_size * eye_y_ratio))
@@ -1301,215 +1483,101 @@ class ImageTransforms:
         original_image: np.ndarray,
         margin_ratio: float = 0.2,
         make_square: bool = True,
-        yolo_model_path: str = None,
-        confidence_threshold: float = 0.3,
         debug: bool = False,
     ) -> Optional[np.ndarray]:
-        """Crop around face bounding box using YOLO pose model with configurable margin.
+        """Crop image around detected face with margin.
 
-        This method uses the YOLO pose model to detect the face bounding box,
-        then crops around it with a configurable margin to include more context.
+        This method detects facial landmarks and crops the image around the face
+        with an optional margin and square aspect ratio.
 
         Args:
             original_image: Input image array
-            margin_ratio: Ratio of margin to add around the detected face box (0.2 = 20% on each side)
-            make_square: If True, make the crop square by using the larger dimension
-            yolo_model_path: Path to YOLO pose model (.pt file) - required
+            margin_ratio: Ratio of margin to add around face (0.0-1.0)
+            make_square: If True, crop to square aspect ratio
+            yolo_model_path: Path to YOLO pose model (.pt file)
             confidence_threshold: Confidence threshold for YOLO pose detection
-            debug: If True, print debug information
+            debug: If True, return debug information
 
         Returns:
-            Cropped image around face with margin, or None if no face detected
+            Cropped image array, or None if cropping fails
         """
-        if yolo_model_path is None:
-            if debug:
-                print("YOLO model path is required for face box cropping")
-            return None
-
         try:
+            yolo_model_path = ImageTransforms._get_model_from_config("pose")
+            if yolo_model_path is None:
+                raise ValueError(
+                    "Pose model not found in config for face detection"
+                )
+            try:
+                from config.loader import load_config
+                cfg = load_config()
+                confidence_threshold = cfg.models.pose.get("confidence_threshold", 0.3)
+            except Exception:
+                confidence_threshold = 0.3
+            
             from ultralytics import YOLO
-            import torch
-
-            # Load YOLO pose model
-            device = "mps" if torch.backends.mps.is_available() else "cpu"
             model = YOLO(yolo_model_path)
-
-            # Run inference
-            results = model(original_image, device=device, verbose=False)
-
-            # Extract detections
-            detections = []
-            for result in results:
-                if hasattr(result, "boxes") and result.boxes is not None:
-                    boxes = (
-                        result.boxes.xyxy.cpu().numpy()
-                    )  # [N, 4] format: x1, y1, x2, y2
-                    confidences = result.boxes.conf.cpu().numpy()  # [N]
-
-                    # Get keypoints if available
-                    keypoints = None
-                    if hasattr(result, "keypoints") and result.keypoints is not None:
-                        keypoints = (
-                            result.keypoints.xy.cpu().numpy()
-                        )  # [N, num_keypoints, 2]
-
-                    for i in range(len(boxes)):
-                        if confidences[i] >= confidence_threshold:
-                            detections.append(
-                                {
-                                    "box": boxes[i],  # [x1, y1, x2, y2]
-                                    "confidence": confidences[i],
-                                    "keypoints": (
-                                        keypoints[i] if keypoints is not None else None
-                                    ),
-                                }
-                            )
-
-            if not detections:
+            
+            results = model(original_image, conf=confidence_threshold)
+            
+            if not results or len(results) == 0:
                 if debug:
-                    print("No face detections found above confidence threshold")
+                    print("No face detected")
                 return None
-
-            # Use the highest confidence detection
-            best_detection = max(detections, key=lambda x: x["confidence"])
-            face_box = best_detection["box"]  # [x1, y1, x2, y2]
-
-            if debug:
-                print(f"Face detection confidence: {best_detection['confidence']:.3f}")
-                print(
-                    f"Face box: [{face_box[0]:.0f}, {face_box[1]:.0f}, {face_box[2]:.0f}, {face_box[3]:.0f}]"
-                )
-
-            # Calculate face box dimensions
-            x1, y1, x2, y2 = face_box
-            face_width = x2 - x1
-            face_height = y2 - y1
-
-            # Calculate face center
-            face_center_x = (x1 + x2) / 2
-            face_center_y = (y1 + y2) / 2
-
+            
+            result = results[0]
+            
+            if result.keypoints is None or len(result.keypoints) == 0:
+                if debug:
+                    print("No keypoints detected")
+                return None
+            
+            keypoints = result.keypoints.data.cpu().numpy()[0]
+            
+            valid_keypoints = keypoints[keypoints[:, 2] > confidence_threshold]
+            
+            if len(valid_keypoints) < 3:
+                if debug:
+                    print(f"Insufficient keypoints detected: {len(valid_keypoints)}")
+                return None
+            
+            x_coords = valid_keypoints[:, 0]
+            y_coords = valid_keypoints[:, 1]
+            
+            x_min, x_max = np.min(x_coords), np.max(x_coords)
+            y_min, y_max = np.min(y_coords), np.max(y_coords)
+            
+            width = x_max - x_min
+            height = y_max - y_min
+            margin_x = width * margin_ratio
+            margin_y = height * margin_ratio
+            
+            x_min = max(0, x_min - margin_x)
+            x_max = min(original_image.shape[1], x_max + margin_x)
+            y_min = max(0, y_min - margin_y)
+            y_max = min(original_image.shape[0], y_max + margin_y)
+            
+            cropped = original_image[int(y_min):int(y_max), int(x_min):int(x_max)]
+            
             if make_square:
-                # For square: use max edge of original box as base, apply margin uniformly
-                max_edge = max(face_width, face_height)
-
-                # Calculate final square size (0 margin = perfect square using max edge)
-                square_size = max_edge * (
-                    1 + 2 * margin_ratio
-                )  # margin applied to both sides
-                half_square = square_size / 2
-
-                # Check if target square fits in image, if not reduce the size
-                max_possible_width = original_image.shape[1]  # image width
-                max_possible_height = original_image.shape[0]  # image height
-                max_possible_square = min(max_possible_width, max_possible_height)
-
-                # If target square is larger than what fits, reduce it
-                if square_size > max_possible_square:
-                    square_size = max_possible_square
-                    half_square = square_size / 2
-
-                # Center the square around face center
-                square_x1 = face_center_x - half_square
-                square_y1 = face_center_y - half_square
-                square_x2 = face_center_x + half_square
-                square_y2 = face_center_y + half_square
-
-                # Adjust position if we go outside image boundaries (maintaining square size)
-                if square_x1 < 0:
-                    # Shift right
-                    shift = -square_x1
-                    square_x1 = 0
-                    square_x2 = square_size
-                elif square_x2 > original_image.shape[1]:
-                    # Shift left
-                    shift = square_x2 - original_image.shape[1]
-                    square_x2 = original_image.shape[1]
-                    square_x1 = original_image.shape[1] - square_size
-
-                if square_y1 < 0:
-                    # Shift down
-                    shift = -square_y1
-                    square_y1 = 0
-                    square_y2 = square_size
-                elif square_y2 > original_image.shape[0]:
-                    # Shift up
-                    shift = square_y2 - original_image.shape[0]
-                    square_y2 = original_image.shape[0]
-                    square_y1 = original_image.shape[0] - square_size
-
-                crop_x1, crop_y1, crop_x2, crop_y2 = (
-                    square_x1,
-                    square_y1,
-                    square_x2,
-                    square_y2,
-                )
-            else:
-                # For rectangle: apply margin separately to width and height
-                margin_x = face_width * margin_ratio
-                margin_y = face_height * margin_ratio
-
-                # Expand the box with margin
-                crop_x1 = max(0, x1 - margin_x)
-                crop_y1 = max(0, y1 - margin_y)
-                crop_x2 = min(original_image.shape[1], x2 + margin_x)
-                crop_y2 = min(original_image.shape[0], y2 + margin_y)
-
-            # Convert to integers
-            crop_x1, crop_y1, crop_x2, crop_y2 = map(
-                int, [crop_x1, crop_y1, crop_x2, crop_y2]
-            )
-
+                height, width = cropped.shape[:2]
+                size = max(height, width)
+                
+                square = np.zeros((size, size, 3), dtype=cropped.dtype)
+                
+                y_offset = (size - height) // 2
+                x_offset = (size - width) // 2
+                
+                square[y_offset:y_offset + height, x_offset:x_offset + width] = cropped
+                cropped = square
+            
             if debug:
-                original_box_size = f"{face_width:.0f}x{face_height:.0f}"
-                crop_size = f"{crop_x2-crop_x1}x{crop_y2-crop_y1}"
-                print(f"Original face box: {original_box_size}")
-
-                if make_square:
-                    max_edge = max(face_width, face_height)
-                    original_square_size = max_edge * (1 + 2 * margin_ratio)
-                    margin_pixels = max_edge * margin_ratio
-                    actual_square_size = crop_x2 - crop_x1  # The actual size used
-                    print(f"Max edge: {max_edge:.0f}px")
-                    print(
-                        f"Margin ratio: {margin_ratio} ({margin_pixels:.0f}px on each side)"
-                    )
-                    print(
-                        f"Target square size: {original_square_size:.0f}x{original_square_size:.0f}"
-                    )
-                    if actual_square_size != original_square_size:
-                        print(
-                            f"Reduced to fit image: {actual_square_size:.0f}x{actual_square_size:.0f}"
-                        )
-                    else:
-                        print(
-                            f"Actual square size: {actual_square_size:.0f}x{actual_square_size:.0f}"
-                        )
-                else:
-                    margin_x = face_width * margin_ratio
-                    margin_y = face_height * margin_ratio
-                    print(
-                        f"Margin ratio: {margin_ratio} ({margin_x:.0f}px x {margin_y:.0f}px)"
-                    )
-
-                print(
-                    f"Final crop: {crop_size} at [{crop_x1}, {crop_y1}, {crop_x2}, {crop_y2}]"
-                )
-                print(f"Square crop: {make_square}")
-
-            # Crop the image
-            cropped_image = original_image[crop_y1:crop_y2, crop_x1:crop_x2]
-
-            if cropped_image.size == 0:
-                if debug:
-                    print("Cropped image is empty")
-                return None
-
-            return cropped_image
-
+                print(f"Face crop: {cropped.shape}")
+            
+            return cropped
+            
         except Exception as e:
             if debug:
-                print(f"Face box cropping failed: {e}")
+                print(f"Face cropping failed: {e}")
             return None
 
     @staticmethod
@@ -1518,20 +1586,22 @@ class ImageTransforms:
         segmentation_mask: np.ndarray,
         margin_ratio: float = 0.2,
         debug: bool = False,
+        debug_dir: Optional[str] = None,
+        base_filename: Optional[str] = None
     ) -> Optional[np.ndarray]:
-        """Crop a square around segmentation mask ensuring all mask points are included.
+        """Crop and center image using segmentation mask and pose keypoints.
 
-        This method finds the bounding box of the segmentation mask and creates a square
-        crop that includes all mask points with optional margin.
+        Creates a dummy image of target size, extracts max possible crop from input,
+        then centers the crop using the pose model's keypoint triangle center.
 
         Args:
             original_image: Input image array
             segmentation_mask: Binary segmentation mask (0s and 1s or 0s and 255s)
-            margin_ratio: Ratio of margin to add around the mask bounding box (0.2 = 20% on each side)
+            margin_ratio: Ratio of margin to add around the mask bounding box
             debug: If True, print debug information
 
         Returns:
-            Cropped square image that includes all mask points, or None if no mask found
+            Centered square image of target size, or None if processing fails
         """
         try:
             # Ensure mask is binary
@@ -1539,126 +1609,499 @@ class ImageTransforms:
                 binary_mask = (segmentation_mask > 127).astype(np.uint8)
             else:
                 binary_mask = segmentation_mask.astype(np.uint8)
-
+ 
             # Find all non-zero (mask) points
             mask_points = np.where(binary_mask > 0)
-
+ 
             if len(mask_points[0]) == 0:
                 if debug:
                     print("No mask points found")
                 return None
-
+ 
             # Get bounding box of mask
             min_y, max_y = mask_points[0].min(), mask_points[0].max()
             min_x, max_x = mask_points[1].min(), mask_points[1].max()
-
-            # Calculate mask dimensions
+ 
+            # Calculate mask dimensions and center
             mask_width = max_x - min_x + 1
             mask_height = max_y - min_y + 1
             mask_center_x = (min_x + max_x) / 2
             mask_center_y = (min_y + max_y) / 2
-
+ 
             if debug:
                 print(f"Mask bounding box: [{min_x}, {min_y}, {max_x}, {max_y}]")
                 print(f"Mask dimensions: {mask_width}x{mask_height}")
                 print(f"Mask center: ({mask_center_x:.1f}, {mask_center_y:.1f})")
-
-            # Calculate square size based on max dimension + margin
+ 
+            # Calculate target square size with margin
             max_mask_dim = max(mask_width, mask_height)
             square_size = max_mask_dim * (1 + 2 * margin_ratio)
-            half_square = square_size / 2
-
+             
+            # Use computed size directly
+            target_size = int(square_size)
+             
             if debug:
-                print(f"Max mask dimension: {max_mask_dim}")
-                print(
-                    f"Margin ratio: {margin_ratio} ({max_mask_dim * margin_ratio:.0f}px on each side)"
-                )
-                print(f"Target square size: {square_size:.0f}x{square_size:.0f}")
-
-            # Check if target square fits in image
-            max_possible_width = original_image.shape[1]
-            max_possible_height = original_image.shape[0]
-            max_possible_square = min(max_possible_width, max_possible_height)
-
-            # If target square is larger than what fits, reduce it
-            original_square_size = square_size
-            if square_size > max_possible_square:
-                square_size = max_possible_square
-                half_square = square_size / 2
-                if debug:
-                    print(
-                        f"Reduced square size to fit image: {square_size:.0f}x{square_size:.0f}"
-                    )
-
-            # Center the square around mask center
-            square_x1 = mask_center_x - half_square
-            square_y1 = mask_center_y - half_square
-            square_x2 = mask_center_x + half_square
-            square_y2 = mask_center_y + half_square
-
-            # Adjust position if we go outside image boundaries (maintaining square size)
-            if square_x1 < 0:
-                # Shift right
-                shift = -square_x1
-                square_x1 = 0
-                square_x2 = square_size
-            elif square_x2 > original_image.shape[1]:
-                # Shift left
-                shift = square_x2 - original_image.shape[1]
-                square_x2 = original_image.shape[1]
-                square_x1 = original_image.shape[1] - square_size
-
-            if square_y1 < 0:
-                # Shift down
-                shift = -square_y1
-                square_y1 = 0
-                square_y2 = square_size
-            elif square_y2 > original_image.shape[0]:
-                # Shift up
-                shift = square_y2 - original_image.shape[0]
-                square_y2 = original_image.shape[0]
-                square_y1 = original_image.shape[0] - square_size
-
-            # Convert to integers
-            crop_x1, crop_y1, crop_x2, crop_y2 = map(
-                int, [square_x1, square_y1, square_x2, square_y2]
-            )
-
+                print(f"Target output size: {target_size}x{target_size}")
+ 
+            # Create dummy image with neutral background
+            dummy_image = np.full((target_size, target_size, 3), 128, dtype=np.uint8)  # Gray background
+ 
+            # Calculate crop coordinates (max possible within image bounds)
+            margin_pixels = int(max_mask_dim * margin_ratio)
+            crop_x1 = max(0, int(mask_center_x - max_mask_dim//2 - margin_pixels))
+            crop_y1 = max(0, int(mask_center_y - max_mask_dim//2 - margin_pixels))
+            crop_x2 = min(original_image.shape[1], crop_x1 + int(square_size))
+            crop_y2 = min(original_image.shape[0], crop_y1 + int(square_size))
+             
+            # Extract the crop from original image
+            crop = original_image[crop_y1:crop_y2, crop_x1:crop_x2]
+             
             if debug:
-                final_size = f"{crop_x2-crop_x1}x{crop_y2-crop_y1}"
-                print(
-                    f"Final crop: {final_size} at [{crop_x1}, {crop_y1}, {crop_x2}, {crop_y2}]"
-                )
-
-                # Verify all mask points are included
-                mask_included = (
-                    crop_x1 <= min_x
-                    and crop_x2 >= max_x
-                    and crop_y1 <= min_y
-                    and crop_y2 >= max_y
-                )
-                print(f"All mask points included: {mask_included}")
-
-            # Crop the image
-            cropped_image = original_image[crop_y1:crop_y2, crop_x1:crop_x2]
-
-            if cropped_image.size == 0:
+                print(f"Crop region: [{crop_x1}, {crop_y1}, {crop_x2}, {crop_y2}]")
+                print(f"Crop size: {crop.shape}")
+ 
+            # Get pose keypoints to determine centering
+            try:
+                from config.loader import load_config
+                cfg = load_config()
+                pose_model_path = cfg.models.pose.get("model_path")
+                confidence_threshold = cfg.models.pose.get("confidence_threshold", 0.5)
+                 
+                if pose_model_path and os.path.exists(pose_model_path):
+                    from ultralytics import YOLO
+                    model = YOLO(pose_model_path)
+                    results = model.predict(source=crop, conf=confidence_threshold, verbose=False, save=False)
+                     
+                    if results and len(results) > 0:
+                        result = results[0]
+                        if hasattr(result, "keypoints") and result.keypoints is not None:
+                            kpts3 = result.keypoints.data.cpu().numpy()[0]  # [K,3]
+                            valid = kpts3[kpts3[:, 2] >= confidence_threshold]
+                             
+                            if len(valid) >= 3:  # Need left eye, right eye, nose
+                                # Calculate triangle center from 3 keypoints
+                                triangle_center_x = np.mean(valid[:3, 0])
+                                triangle_center_y = np.mean(valid[:3, 1])
+                                 
+                                if debug:
+                                    print(f"Triangle center: ({triangle_center_x:.1f}, {triangle_center_y:.1f})")
+                                 
+                                # Calculate offset to center in dummy image
+                                crop_height, crop_width = crop.shape[:2]
+                                offset_x = (target_size - crop_width) // 2
+                                offset_y = (target_size - crop_height) // 2
+                                 
+                                # Adjust offset based on triangle center relative to crop center
+                                crop_center_x = crop_width // 2
+                                crop_center_y = crop_height // 2
+                                 
+                                # Fine-tune positioning based on triangle center
+                                triangle_offset_x = int(triangle_center_x - crop_center_x)
+                                triangle_offset_y = int(triangle_center_y - crop_center_y)
+                                 
+                                final_offset_x = offset_x - triangle_offset_x
+                                final_offset_y = offset_y - triangle_offset_y
+                                 
+                                # Ensure offsets keep crop within dummy bounds
+                                final_offset_x = max(0, min(final_offset_x, target_size - crop_width))
+                                final_offset_y = max(0, min(final_offset_y, target_size - crop_height))
+                                 
+                                if debug:
+                                    print(f"Final offset: ({final_offset_x}, {final_offset_y})")
+                                 
+                                # Place crop in dummy image
+                                dummy_image[final_offset_y:final_offset_y+crop_height, 
+                                          final_offset_x:final_offset_x+crop_width] = crop
+                                
+                                # Debug output if enabled
+                                if debug and debug_dir and base_filename:
+                                    try:
+                                        import cv2
+                                        os.makedirs(debug_dir, exist_ok=True)
+                                        
+                                        debug_path = os.path.join(debug_dir, f"{base_filename}_step3_cropped.jpg")
+                                        cv2.imwrite(debug_path, dummy_image)
+                                        print(f"🔍 Saved debug cropped image: {debug_path}")
+                                        print(f"🔍 Cropped image shape: {dummy_image.shape}")
+                                    except Exception as e:
+                                        print(f"⚠️ Debug output failed: {e}")
+                                
+                                return dummy_image
+                            else:
+                                if debug:
+                                    print("Insufficient keypoints for triangle center")
+                        else:
+                            if debug:
+                                print("No keypoints detected")
+                    else:
+                        if debug:
+                            print("Pose model produced no results")
+                else:
+                    if debug:
+                        print("Pose model not available")
+            except Exception as e:
                 if debug:
-                    print("Cropped image is empty")
-                return None
-
-            return cropped_image
-
+                    print(f"Pose processing error: {e}")
+             
+            # Fallback: center crop in dummy image without pose adjustment
+            if debug:
+                print("Using fallback centering")
+             
+            crop_height, crop_width = crop.shape[:2]
+            offset_x = (target_size - crop_width) // 2
+            offset_y = (target_size - crop_height) // 2
+             
+            dummy_image[offset_y:offset_y+crop_height, offset_x:offset_x+crop_width] = crop
+            
+            # Debug output if enabled
+            if debug and debug_dir and base_filename:
+                try:
+                    import cv2
+                    os.makedirs(debug_dir, exist_ok=True)
+                    
+                    debug_path = os.path.join(debug_dir, f"{base_filename}_step3_cropped.jpg")
+                    cv2.imwrite(debug_path, dummy_image)
+                    print(f"🔍 Saved debug cropped image: {debug_path}")
+                    print(f"🔍 Cropped image shape: {dummy_image.shape}")
+                except Exception as e:
+                    print(f"⚠️ Debug output failed: {e}")
+            
+            return dummy_image
+ 
         except Exception as e:
             if debug:
                 print(f"Segmentation mask cropping failed: {e}")
             return None
 
     @staticmethod
+    def draw_all_predictions(
+        original_image: np.ndarray,
+        debug: bool = False
+    ) -> Optional[np.ndarray]:
+        """Draw segmentation and pose predictions on the image.
+        
+        This method runs both segmentation and pose models on the input image
+        and draws their predictions with different colors and styles:
+        - Segmentation masks: Green contours with mask indices
+        - Pose bounding boxes: Red rectangles with detection indices  
+        - Pose keypoints: Blue circles with keypoint indices
+        - Keypoint connections: Yellow triangle connecting first 3 keypoints
+
+        Args:
+            original_image: Input image array (can be any size)
+            debug: If True, print debug information
+
+        Returns:
+            Image with all predictions drawn, or None if processing fails
+        """
+        try:
+            annotated_image = original_image.copy()
+            original_height, original_width = original_image.shape[:2]
+            
+            if debug:
+                print(f"🖼️  Processing image size: {original_width}x{original_height}")
+            
+            # Load config
+            try:
+                from config.loader import load_config
+                cfg = load_config()
+            except Exception as e:
+                if debug:
+                    print(f"⚠️  Config loading failed: {e}")
+                return annotated_image
+            
+            # Step 1: Run segmentation model
+            seg_model_path = cfg.models.segmentation.get("model_path")
+            seg_confidence = cfg.models.segmentation.get("confidence_threshold", 0.3)
+            
+            if seg_model_path and os.path.exists(seg_model_path):
+                try:
+                    from ultralytics import YOLO
+                    seg_model = YOLO(seg_model_path)
+                    seg_results = seg_model.predict(
+                        source=original_image, 
+                        conf=seg_confidence, 
+                        verbose=False, 
+                        save=False
+                        # Don't specify imgsz - let YOLO handle it automatically
+                    )
+                    
+                    if seg_results and len(seg_results) > 0:
+                        result = seg_results[0]
+                        
+                        # Get the original image shape that YOLO processed
+                        yolo_orig_shape = result.orig_shape  # (height, width)
+                        yolo_img_shape = result.masks.data.shape[-2:] if hasattr(result, "masks") and result.masks is not None else None
+                        
+                        if debug:
+                            print(f"🎯 YOLO original shape: {yolo_orig_shape}")
+                            print(f"🎯 Current image shape: ({original_height}, {original_width})")
+                            if yolo_img_shape:
+                                print(f"🎯 YOLO mask shape: {yolo_img_shape}")
+                        
+                        if hasattr(result, "masks") and result.masks is not None and len(result.masks) > 0:
+                            masks = result.masks.data.cpu().numpy()
+                            if debug:
+                                print(f"🎯 Segmentation: {len(masks)} masks found")
+                            
+                            # Draw each mask contour
+                            for i, mask in enumerate(masks):
+                                # Always resize mask to match original image dimensions
+                                # YOLO masks are at model resolution, need to scale to original image
+                                mask_resized = cv2.resize(
+                                    mask.astype(np.float32), 
+                                    (original_width, original_height), 
+                                    interpolation=cv2.INTER_NEAREST
+                                )
+                                mask_uint8 = (mask_resized > 0.5).astype(np.uint8)
+                                
+                                # Find and draw contours
+                                contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                                
+                                if contours:
+                                    # Draw contours with adaptive thickness based on image size
+                                    thickness = max(1, min(original_width, original_height) // 200)
+                                    cv2.drawContours(annotated_image, contours, -1, (0, 255, 0), thickness)  # Green contours
+                                    
+                                    # Draw mask index at centroid
+                                    largest_contour = max(contours, key=cv2.contourArea)
+                                    M = cv2.moments(largest_contour)
+                                    if M["m00"] != 0:
+                                        cx = int(M["m10"] / M["m00"])
+                                        cy = int(M["m01"] / M["m00"])
+                                        
+                                        # Adaptive font size and thickness
+                                        font_scale = max(0.4, min(original_width, original_height) / 1000)
+                                        font_thickness = max(1, int(font_scale * 2))
+                                        
+                                        cv2.putText(
+                                            annotated_image, f"SEG{i}", 
+                                            (cx - 15, cy), 
+                                            cv2.FONT_HERSHEY_SIMPLEX, 
+                                            font_scale, (0, 255, 0), font_thickness
+                                        )
+                                        
+                                        if debug:
+                                            print(f"   Mask {i}: center=({cx}, {cy}), area={cv2.contourArea(largest_contour):.0f}")
+                        else:
+                            if debug:
+                                print("🎯 Segmentation: No masks found")
+                    else:
+                        if debug:
+                            print("🎯 Segmentation: No results")
+                except Exception as e:
+                    if debug:
+                        print(f"❌ Segmentation error: {e}")
+            else:
+                if debug:
+                    print("⚠️  Segmentation model not available or path invalid")
+            
+            # Step 2: Run pose model
+            pose_model_path = cfg.models.pose.get("model_path")
+            pose_confidence = cfg.models.pose.get("confidence_threshold", 0.3)
+            
+            if pose_model_path and os.path.exists(pose_model_path):
+                try:
+                    from ultralytics import YOLO
+                    pose_model = YOLO(pose_model_path)
+                    pose_results = pose_model.predict(
+                        source=original_image, 
+                        conf=pose_confidence, 
+                        verbose=False, 
+                        save=False
+                        # Don't specify imgsz - let YOLO handle it automatically
+                    )
+                    
+                    if pose_results and len(pose_results) > 0:
+                        result = pose_results[0]
+                        
+                        # Get YOLO's processed image dimensions for coordinate scaling
+                        yolo_orig_shape = result.orig_shape  # (height, width) - original image size YOLO saw
+                        
+                        if debug:
+                            print(f"📦 YOLO original shape: {yolo_orig_shape}")
+                            print(f"📦 Current image shape: ({original_height}, {original_width})")
+                        
+                        # Modern YOLO versions return coordinates in original image space
+                        # Only scale if there's actually a size mismatch
+                        need_scaling = (yolo_orig_shape[1] != original_width or yolo_orig_shape[0] != original_height)
+                        
+                        if need_scaling:
+                            scale_x = original_width / yolo_orig_shape[1]
+                            scale_y = original_height / yolo_orig_shape[0]
+                            if debug:
+                                print(f"📦 Scaling needed: x={scale_x:.3f}, y={scale_y:.3f}")
+                        else:
+                            scale_x = scale_y = 1.0
+                            if debug:
+                                print(f"📦 No scaling needed - coordinates already in original image space")
+                        
+                        # Adaptive styling based on image size
+                        box_thickness = max(1, min(original_width, original_height) // 300)
+                        font_scale = max(0.4, min(original_width, original_height) / 1000)
+                        font_thickness = max(1, int(font_scale * 2))
+                        keypoint_radius = max(2, min(original_width, original_height) // 200)
+                        
+                        # Draw bounding boxes if available
+                        if hasattr(result, "boxes") and result.boxes is not None and len(result.boxes) > 0:
+                            boxes_xyxy = result.boxes.xyxy.cpu().numpy()
+                            confidences = result.boxes.conf.cpu().numpy() if hasattr(result.boxes, 'conf') else [1.0] * len(boxes_xyxy)
+                            
+                            if debug:
+                                print(f"📦 Pose: {len(boxes_xyxy)} bounding boxes found")
+                            
+                            for i, ((x1, y1, x2, y2), conf) in enumerate(zip(boxes_xyxy, confidences)):
+                                # Scale coordinates if needed
+                                if need_scaling:
+                                    x1_final = int(x1 * scale_x)
+                                    y1_final = int(y1 * scale_y)
+                                    x2_final = int(x2 * scale_x)
+                                    y2_final = int(y2 * scale_y)
+                                else:
+                                    x1_final = int(x1)
+                                    y1_final = int(y1)
+                                    x2_final = int(x2)
+                                    y2_final = int(y2)
+                                
+                                # Clamp coordinates to image bounds
+                                x1_clamped = max(0, min(x1_final, original_width - 1))
+                                y1_clamped = max(0, min(y1_final, original_height - 1))
+                                x2_clamped = max(x1_clamped + 1, min(x2_final, original_width))
+                                y2_clamped = max(y1_clamped + 1, min(y2_final, original_height))
+                                
+                                # Draw bounding box
+                                cv2.rectangle(annotated_image, (x1_clamped, y1_clamped), (x2_clamped, y2_clamped), (0, 0, 255), box_thickness)  # Red boxes
+                                
+                                # Draw label with confidence
+                                label = f"POSE{i} {conf:.2f}"
+                                label_y = max(y1_clamped - 5, 15)  # Ensure label is visible
+                                cv2.putText(
+                                    annotated_image, label, 
+                                    (x1_clamped, label_y), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 
+                                    font_scale, (0, 0, 255), font_thickness
+                                )
+                                
+                                if debug:
+                                    if need_scaling:
+                                        print(f"   Box {i}: orig=({x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f}) -> scaled=({x1_clamped}, {y1_clamped}, {x2_clamped}, {y2_clamped}), conf={conf:.3f}")
+                                    else:
+                                        print(f"   Box {i}: ({x1_clamped}, {y1_clamped}, {x2_clamped}, {y2_clamped}), conf={conf:.3f}")
+                        
+                        # Draw keypoints if available
+                        if hasattr(result, "keypoints") and result.keypoints is not None:
+                            kpts3 = result.keypoints.data.cpu().numpy()  # [N, K, 3] where 3 = (x, y, confidence)
+                            
+                            if len(kpts3) > 0 and kpts3.shape[1] > 0:
+                                if debug:
+                                    print(f"🔵 Pose: {len(kpts3)} detections, {kpts3.shape[1]} keypoints each")
+                                
+                                for det_idx, detection in enumerate(kpts3):
+                                    # Get all keypoints with their original indices
+                                    all_keypoints = [(i, kpt) for i, kpt in enumerate(detection) if kpt[2] >= pose_confidence]
+                                    
+                                    if debug and len(all_keypoints) > 0:
+                                        print(f"   Detection {det_idx}: {len(all_keypoints)} valid keypoints")
+                                    
+                                    # Draw each valid keypoint
+                                    triangle_points = []
+                                    for original_kpt_idx, (x, y, conf) in all_keypoints:
+                                        # Validate coordinates
+                                        if x < 0 or y < 0 or not np.isfinite(x) or not np.isfinite(y):
+                                            if debug:
+                                                print(f"     Skipping invalid keypoint {original_kpt_idx}: ({x}, {y})")
+                                            continue
+                                        
+                                        # Scale coordinates if needed
+                                        if need_scaling:
+                                            x_final = int(x * scale_x)
+                                            y_final = int(y * scale_y)
+                                        else:
+                                            x_final = int(x)
+                                            y_final = int(y)
+                                        
+                                        # Clamp coordinates to image bounds
+                                        x_clamped = max(0, min(x_final, original_width - 1))
+                                        y_clamped = max(0, min(y_final, original_height - 1))
+                                        
+                                        # Draw keypoint circle
+                                        cv2.circle(annotated_image, (x_clamped, y_clamped), keypoint_radius, (255, 0, 0), -1)  # Blue keypoints
+                                        
+                                        # Draw keypoint index (use original index, not enumeration index)
+                                        cv2.putText(
+                                            annotated_image, f"{original_kpt_idx}", 
+                                            (x_clamped + keypoint_radius + 2, y_clamped - keypoint_radius - 2), 
+                                            cv2.FONT_HERSHEY_SIMPLEX, 
+                                            font_scale * 0.7, (255, 0, 0), font_thickness
+                                        )
+                                        
+                                        # Collect points for triangle (first 3 keypoints)
+                                        if len(triangle_points) < 3:
+                                            triangle_points.append([x_clamped, y_clamped])
+                                        
+                                        if debug:
+                                            if need_scaling:
+                                                print(f"     Keypoint {original_kpt_idx}: orig=({x:.1f}, {y:.1f}) -> scaled=({x_clamped}, {y_clamped}), conf={conf:.3f}")
+                                            else:
+                                                print(f"     Keypoint {original_kpt_idx}: ({x_clamped}, {y_clamped}), conf={conf:.3f}")
+                                    
+                                    # Draw triangle connecting first 3 keypoints if available
+                                    if len(triangle_points) >= 3:
+                                        triangle_points = np.array(triangle_points[:3], dtype=np.int32)
+                                        triangle_thickness = max(1, box_thickness)
+                                        cv2.polylines(annotated_image, [triangle_points], True, (255, 255, 0), triangle_thickness)  # Yellow triangle
+                                        
+                                        # Calculate and draw triangle center
+                                        center_x = int(np.mean(triangle_points[:, 0]))
+                                        center_y = int(np.mean(triangle_points[:, 1]))
+                                        center_radius = max(3, keypoint_radius + 2)
+                                        cv2.circle(annotated_image, (center_x, center_y), center_radius, (255, 255, 0), -1)  # Yellow center
+                                        cv2.putText(
+                                            annotated_image, "C", 
+                                            (center_x + center_radius + 2, center_y + center_radius + 2), 
+                                            cv2.FONT_HERSHEY_SIMPLEX, 
+                                            font_scale * 0.8, (255, 255, 0), font_thickness
+                                        )
+                                        
+                                        if debug:
+                                            print(f"   Triangle center: ({center_x}, {center_y})")
+                            else:
+                                if debug:
+                                    print("🔵 Pose: No keypoints data available")
+                        else:
+                            if debug:
+                                print("🔵 Pose: No keypoints found")
+                    else:
+                        if debug:
+                            print("📦 Pose: No results")
+                except Exception as e:
+                    if debug:
+                        print(f"❌ Pose error: {e}")
+            else:
+                if debug:
+                    print("⚠️  Pose model not available or path invalid")
+            
+            if debug:
+                print("✅ Prediction drawing completed")
+            
+            return annotated_image
+            
+        except Exception as e:
+            if debug:
+                print(f"❌ draw_all_predictions failed: {e}")
+                import traceback
+                traceback.print_exc()
+            return None
+
+
+    @staticmethod
     def resize_square_image(
         original_image: np.ndarray,
         target_size: int,
         interpolation: str = "bilinear",
+        debug: bool = False,
+        debug_dir: Optional[str] = None,
+        base_filename: Optional[str] = None
     ) -> np.ndarray:
         """Resize a square image to specified dimension.
 
@@ -1670,8 +2113,23 @@ class ImageTransforms:
         Returns:
             Resized square image array
         """
-        return ImageTransforms.resize_image(
+        resized_image = ImageTransforms.resize_image(
             original_image,
             target_size=(target_size, target_size),
             interpolation=interpolation,
         )
+        
+        # Debug output if enabled
+        if debug and debug_dir and base_filename:
+            try:
+                import cv2
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                debug_path = os.path.join(debug_dir, f"{base_filename}_step6_resized.jpg")
+                cv2.imwrite(debug_path, resized_image)
+                print(f"🔍 Saved debug resized image: {debug_path}")
+                print(f"🔍 Resized image shape: {resized_image.shape}")
+            except Exception as e:
+                print(f"⚠️ Debug output failed: {e}")
+        
+        return resized_image

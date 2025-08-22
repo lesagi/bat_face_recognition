@@ -7,7 +7,7 @@ for the siamese network model. This processor includes segmentation-based backgr
 replacement and cropping for optimal siamese network training.
 
 Pipeline steps:
-1. YOLO Segmentation → 2. Background Replacement → 3. Square Cropping → 4. Face Alignment → 5. Face Centering → 6. Normalize to [0,1]
+1. Face Alignment → 2. YOLO Segmentation → 3. Square Cropping → 4. Background Replacement → 5. Resize to Target → 6. Normalize to [0,1]
 
 Features:
 - YOLO-based bat face segmentation
@@ -18,198 +18,227 @@ Features:
 - Standardized 224x224 output for siamese network
 - Batch and single image processing support
 
-Note: A YOLO segmentation model is REQUIRED for this pipeline.
-Optional: A YOLO pose model can be used for more accurate face alignment.
+Note: Both YOLO segmentation and YOLO pose models are REQUIRED for this pipeline.
+The segmentation model is used for bat face detection and background replacement.
+The pose model is used for accurate face alignment and landmark detection.
 
 Usage:
-    # Basic usage with OpenCV face alignment
-    python input_processor.py --input image.jpg --output processed.jpg --model face_segmentation.pt
+    # Process single image
+    python input_processor.py process-single --input image.jpg --output processed.jpg --segmentation-model face_segmentation.pt --pose-model face_pose.pt
     
-    # With YOLO pose alignment for better accuracy
-    python input_processor.py --input image.jpg --output processed.jpg --model face_segmentation.pt --pose_model face_pose.pt --use_yolo_pose
+    # Process batch of images
+    python input_processor.py process-batch --input-dir /path/to/images/ --output-dir /path/to/processed/ --segmentation-model face_segmentation.pt --pose-model face_pose.pt
     
-    # Batch processing with YOLO pose alignment
-    python input_processor.py --input_dir /path/to/images/ --output_dir /path/to/processed/ --model face_segmentation.pt --pose_model face_pose.pt --use_yolo_pose
+    # Get help
+    python input_processor.py --help
+    python input_processor.py process-single --help
+    python input_processor.py process-batch --help
 """
 
-import argparse
 import os
 import sys
 
 from typing import List, Optional, Tuple, Union
 import numpy as np
 import cv2
+import click
 
 # Add parent directory to path for imports
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
-from image_processor import ImageProcessor, ImageTransforms
+from image_processor import ImageTransforms
 from background_generation.background_generator import BackgroundGenerator
 from utils.image_utils import is_img_file
+from config.loader import load_config
 
 
 class SiamesePreprocessingPipeline:
-    """Advanced preprocessing pipeline for siamese network with segmentation-based processing.
+    """Advanced preprocessing pipeline for siamese network with segmentation and pose-based processing.
 
-    This pipeline uses YOLO segmentation to detect bat faces, replaces backgrounds with
-    generated content, and performs smart cropping for optimal siamese network performance.
+    This pipeline uses YOLO segmentation to detect bat faces and YOLO pose for face alignment.
+    It replaces backgrounds with generated content and performs smart cropping for optimal 
+    siamese network performance.
     """
 
-    def __init__(
-        self,
-        model_path: str,
-        confidence_threshold: float = 0.5,
-        background_generator: callable = BackgroundGenerator.blur,
-        pose_model_path: Optional[str] = None,
-        use_yolo_pose_alignment: bool = False,
-    ):
-        """Initialize the advanced preprocessing pipeline.
+    def __init__(self):
+        # Load configuration
+        config = load_config()
+        siamese_dp = config.siamese_network.training.get('data_preprocessing', {})
+        
+        # Margin ratio for cropping
+        face_outer_margin_ratio = siamese_dp.get('face_outer_margin_ratio', 0.5)
 
-        Args:
-            model_path: Path to YOLO segmentation model (.pt file) - REQUIRED
-            confidence_threshold: Minimum confidence for detections (0.0-1.0)
-            background_generator: Background generator function from BackgroundGenerator class
-            pose_model_path: Optional path to YOLO pose model (.pt file) for face alignment
-            use_yolo_pose_alignment: If True, use YOLO pose model for face alignment instead of OpenCV
-        """
-        if not model_path:
-            raise ValueError(
-                "Model path is required for advanced siamese preprocessing pipeline"
-            )
+        # Background generator type from config
+        background_generators = {
+            "blur": BackgroundGenerator.blur,
+            "noise": BackgroundGenerator.noise,
+            "gradient": BackgroundGenerator.gradient,
+            "picsum": BackgroundGenerator.picsum,
+            "solid_color": BackgroundGenerator.solid_color,
+        }
+        bg_type = siamese_dp.get('background', {}).get('type', 'blur')
+        self.background_generator = background_generators.get(bg_type, BackgroundGenerator.blur)
 
-        self.processor = ImageProcessor(
-            model=model_path, confidence_threshold=confidence_threshold
-        )
-        self.target_size = 224  # Standard input size for siamese network
-        self.background_generator = background_generator
-        self.pose_model_path = pose_model_path
-        self.use_yolo_pose_alignment = use_yolo_pose_alignment
+        self.face_outer_margin_ratio = face_outer_margin_ratio
+        self.target_size = siamese_dp.get('target_size', 224)
+        self.normalize_scale = siamese_dp.get('scale_factor', 255.0)
 
-        # Validate pose model path if YOLO pose alignment is requested
-        if use_yolo_pose_alignment and not pose_model_path:
-            raise ValueError(
-                "pose_model_path is required when use_yolo_pose_alignment=True"
-            )
-
-        # Determine face detector type and parameters for alignment
-        if use_yolo_pose_alignment:
-            face_detector_type = "yolo_pose"
-            alignment_kwargs = {
-                "face_detector_type": face_detector_type,
-                "yolo_model_path": pose_model_path,
-            }
-            centering_kwargs = {
-                "target_face_size": self.target_size,
-                "face_detector_type": face_detector_type,  # Use same detector for centering
-                "yolo_model_path": (
-                    pose_model_path if face_detector_type == "yolo_pose" else None
-                ),
-            }
-        else:
-            face_detector_type = "opencv"
-            alignment_kwargs = {"face_detector_type": face_detector_type}
-            centering_kwargs = {
-                "target_face_size": self.target_size,
-                "face_detector_type": face_detector_type,
-            }
-
-        # Define advanced siamese pipeline with segmentation and background replacement
-        self.advanced_pipeline_steps = [
-            # Step 1: Replace background with generated background (requires segmentation mask)
-            (
-                ImageTransforms.apply_background_replacement,
-                {"background_source": self.background_generator},
-            ),
-            # Step 2: Crop square around segmented region with buffer (requires segmentation mask)
-            (ImageTransforms.crop_square_around_segmentation, {"buffer_factor": 1.5}),
-            # Step 3: Face alignment (rotate to make eyes horizontal) - plain transform
-            (ImageTransforms.align_face_landmarks, alignment_kwargs),
-            # Step 4: Center face based on landmarks for consistent positioning - plain transform
-            (ImageTransforms.center_face_landmarks, centering_kwargs),
-            # Step 5: Normalize to [0,1] range - plain transform
-            (ImageTransforms.normalize_image, {"scale": 255.0}),
-        ]
-
-    def preprocess_single_image(self, image_path: str) -> Optional[np.ndarray]:
-        """Process a single image through the complete advanced preprocessing pipeline.
-
-        Args:
-            image_path: Path to input image
-
-        Returns:
-            Preprocessed image ready for siamese network (224x224, normalized [0,1])
-            Returns None if processing fails or no bat face detected
-        """
+    def preprocess_single_image(self, image_path: str, debug: bool = False, output_dir: str = None) -> Optional[np.ndarray]:
         try:
             # Load image
-            current_image = self.processor._load_image_array(image_path)
+            image_array = cv2.imread(image_path)
+            if image_array is None:
+                print(f"❌ Failed to load image: {image_path}")
+                return None
+            
+            current_image = image_array
+            
+            # Setup debug output and base filename
+            base_filename = os.path.splitext(os.path.basename(image_path))[0]
+            
+            if debug:
+                if not output_dir:
+                    raise Exception("Debug flag is True but no debug directory provided. Please specify --debug-dir.")
+                
+                os.makedirs(output_dir, exist_ok=True)
+            
+            # Step 1: Face alignment using YOLO pose landmarks
+            # Align face using YOLO pose landmarks (model loaded from config automatically)
+            aligned_image = ImageTransforms.align_face_landmarks(
+                current_image,
+                face_detector_type="yolo_pose",
+                debug=debug,
+                debug_dir=output_dir,
+                base_filename=base_filename
+            )
+            
+            if aligned_image is not None:
+                current_image = aligned_image
+            
+            # Step 2: Get segmentation mask from aligned/original image
+            # Get segmentation mask from aligned/original image
+            mask = ImageTransforms.segment_image(
+                current_image,
+                debug=debug,
+                debug_dir=output_dir,
+                base_filename=base_filename
+            )
+            
+            if mask is None:
+                print(f"⚠️  Segmentation failed for: {image_path} - no bat face detected")
+                return None
+            
+            # Step 3: Crop square around segmented region using the mask
+            cropped_image = ImageTransforms.crop_square_around_segmentation_mask(
+                current_image,
+                mask,
+                margin_ratio=self.face_outer_margin_ratio,
+                debug=debug,
+                debug_dir=output_dir,
+                base_filename=base_filename
+            )
+            
+            if cropped_image is None:
+                print(f"⚠️  Cropping failed for: {image_path}")
+                return None
+            
+            current_image = cropped_image
 
-            # Process through advanced pipeline steps
-            for step_idx, (processing_function, kwargs) in enumerate(
-                self.advanced_pipeline_steps
-            ):
-                processing_type = self.processor._detect_processing_type(
-                    processing_function
-                )
+            # Step 4: Try to get mask for cropped image (resize first to help detection)
+            # Resize cropped image to a size that works better for segmentation
+            temp_size = 640
+            h, w = current_image.shape[:2]
+            if h != temp_size or w != temp_size:
+                temp_image = cv2.resize(current_image, (temp_size, temp_size))
+            else:
+                temp_image = current_image
+            
+            cropped_mask = ImageTransforms.segment_image(
+                temp_image,
+                debug=debug,
+                debug_dir=output_dir,
+                base_filename=base_filename
+            )
+            
+            if cropped_mask is not None:
+                # Resize mask back to original cropped image size
+                if h != temp_size or w != temp_size:
+                    cropped_mask = cv2.resize(cropped_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                    cropped_mask = (cropped_mask > 0).astype(np.uint8)
+            else:
+                print("⚠️ No mask found for cropped image")
 
-                if processing_type == "model":
-                    # Get segmentation mask (model is guaranteed to be loaded)
-                    segmentation_result = self.processor.segment_image(current_image)
-                    if segmentation_result is None:
-                        print(f"⚠️  No bat face detected in: {image_path}")
-                        return None  # No object detected
-                    current_image, mask = segmentation_result
-                    processed_result = processing_function(
-                        current_image, mask, **kwargs
-                    )
-                    if processed_result is not None:
-                        current_image = processed_result
-                    # If processing_function returns None, keep current_image unchanged
-                else:
-                    # Plain processing (resize, normalize, etc.)
-                    processed_result = processing_function(current_image, **kwargs)
+            # Step 5: Replace background using the cropped mask (if available)
+            # if debug:
+            #     print("🔍 Step 5: Replacing background...")
+            
+            # if cropped_mask is not None:
+            #     background_replaced = ImageTransforms.apply_background_replacement(
+            #         current_image,
+            #         cropped_mask,
+            #         self.background_generator,
+            #     )
+                
+            #     if background_replaced is not None:
+            #         current_image = background_replaced
+            #         if debug:
+            #             print("🔍 Background replacement successful!")
+                        
+            #             # Save background replaced image
+            #             debug_path = os.path.join(output_dir, f"{base_filename}_step5_background_replaced.jpg")
+            #             cv2.imwrite(debug_path, background_replaced)
+            #             print(f"🔍 Saved debug background replaced image: {debug_path}")
+            #     else:
+            #         print("⚠️ Background replacement failed, continuing without...")
+            # else:
+            #     print("⚠️ No mask available, skipping background replacement...")
 
-                    # Special handling for face alignment and centering - REQUIRED for processing
-                    if (
-                        processing_function.__name__
-                        in ["align_face_landmarks", "center_face_landmarks"]
-                    ) and processed_result is None:
-                        print(
-                            f"❌ {processing_function.__name__} failed for {image_path} - skipping image (face landmarks required)"
-                        )
-                        return None  # Skip this image entirely
-                    elif processed_result is not None:
-                        current_image = processed_result
-                    else:
-                        # For other functions that return None, this is an error
-                        print(
-                            f"❌ Processing step {processing_function.__name__} failed for {image_path}"
-                        )
-                        return None
+            # Step 6: Resize to target size
+            resized_image = ImageTransforms.resize_square_image(
+                current_image, 
+                self.target_size, 
+                interpolation="bilinear",
+                debug=debug,
+                debug_dir=output_dir,
+                base_filename=base_filename
+            )
+            
+            if resized_image is None:
+                print(f"⚠️  Resizing failed for: {image_path}")
+                return None
+            
+            current_image = resized_image
 
-            return current_image
+            # Step 7: Normalize to [0,1] range
+            normalized_image = ImageTransforms.normalize_image(
+                current_image, 
+                scale=self.normalize_scale,
+                debug=debug,
+                debug_dir=output_dir,
+                base_filename=base_filename
+            )
+            
+            if normalized_image is None:
+                print(f"⚠️  Normalization failed for: {image_path}")
+                return None
+            
+            return normalized_image
 
         except Exception as e:
             print(f"❌ Error processing {image_path}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
-    def preprocess_batch(self, input_dir: str, output_dir: Optional[str] = None):
-        """Process multiple images through the advanced pipeline with recursive directory support.
-
-        Args:
-            input_dir: Directory containing input images (supports nested directories)
-            output_dir: Optional directory to save processed images
-
-        Returns:
-            List of (relative_path, processed_array) tuples for successful processing
-        """
+    def preprocess_batch(self, input_dir: str, output_dir: str, debug: bool = False, debug_dir: str = None):
         if not os.path.exists(input_dir):
             raise ValueError(f"Input directory does not exist: {input_dir}")
 
         results = []
         successful = 0
         total_files = 0
+        failed_files = []
 
         # Count total image files first
         for dirpath, dirnames, filenames in os.walk(input_dir):
@@ -224,6 +253,7 @@ class SiamesePreprocessingPipeline:
         print(
             f"🔄 Processing {total_files} images with advanced pipeline using {self.background_generator.__name__} backgrounds..."
         )
+        print(f"🔧 Config: margin_ratio={self.face_outer_margin_ratio}, target_size={self.target_size}, normalize_scale={self.normalize_scale}")
 
         # Process all images recursively
         for dirpath, dirnames, filenames in os.walk(input_dir):
@@ -231,7 +261,7 @@ class SiamesePreprocessingPipeline:
             relative_path = os.path.relpath(dirpath, input_dir)
             current_output_dir = (
                 os.path.join(output_dir, relative_path)
-                if output_dir and relative_path != "."
+                if relative_path != "."
                 else output_dir
             )
 
@@ -239,130 +269,153 @@ class SiamesePreprocessingPipeline:
                 if is_img_file(filename):
                     image_path = os.path.join(dirpath, filename)
                     relative_image_path = os.path.relpath(image_path, input_dir)
-                    print(f"Processing: {relative_image_path}...")
+                    print(f"\n📷 Processing: {relative_image_path}...")
 
-                    result = self.preprocess_single_image(image_path)
+                    # Create debug directory for this image if debug is enabled
+                    if debug:
+                        if debug_dir:
+                            # Create subdirectory for each image to avoid conflicts
+                            image_debug_dir = os.path.join(debug_dir, os.path.splitext(filename)[0])
+                            os.makedirs(image_debug_dir, exist_ok=True)
+                        else:
+                            # Fallback to default behavior
+                            image_debug_dir = os.path.join(output_dir, "debug_steps", os.path.splitext(filename)[0])
+                            os.makedirs(image_debug_dir, exist_ok=True)
+                    else:
+                        image_debug_dir = None
+                    
+                    result = self.preprocess_single_image(image_path, debug=debug, output_dir=image_debug_dir)
 
                     if result is not None:
                         results.append((relative_image_path, result))
                         successful += 1
 
-                        # Save processed image if output directory specified
-                        if current_output_dir:
-                            os.makedirs(current_output_dir, exist_ok=True)
-                            # Convert back to uint8 for saving
-                            output_image = (result * 255).astype(np.uint8)
-                            output_file = os.path.join(
-                                current_output_dir, f"processed_{filename}"
-                            )
-                            cv2.imwrite(output_file, output_image)
+                        # Save processed image
+                        os.makedirs(current_output_dir, exist_ok=True)
+                        # Convert back to uint8 for saving
+                        output_image = (result * 255).astype(np.uint8)
+                        output_file = os.path.join(
+                            current_output_dir, f"processed_{filename}"
+                        )
+                        success = cv2.imwrite(output_file, output_image)
+                        if success:
+                            print(f"✅ Saved: {output_file}")
+                        else:
+                            print(f"❌ Failed to save: {output_file}")
+                    else:
+                        failed_files.append(relative_image_path)
+                        print(f"❌ Failed to process: {relative_image_path}")
 
-        print(f"✅ Successfully processed {successful}/{total_files} images")
+        print(f"\n🎯 BATCH PROCESSING COMPLETE!")
+        print(f"✅ Successfully processed: {successful}/{total_files} images")
         if successful < total_files:
-            print(
-                f"⚠️  {total_files - successful} images failed (likely no bat faces detected)"
-            )
+            print(f"⚠️  Failed: {total_files - successful} images")
+            if failed_files:
+                print("Failed files:")
+                for failed_file in failed_files[:10]:  # Show first 10 failed files
+                    print(f"  - {failed_file}")
+                if len(failed_files) > 10:
+                    print(f"  ... and {len(failed_files) - 10} more")
+        
         return results
 
 
-def main():
-    """Main command-line interface for advanced siamese network image processing."""
-    parser = argparse.ArgumentParser(
-        description="Siamese Network Advanced Image Processor",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Process single image with blur background
-  python image_adjuster_processor.py --input image.jpg --output processed.jpg --model face_segmentation.pt
-  
-  # Process directory with gradient backgrounds  
-  python image_adjuster_processor.py --input_dir /path/to/images/ --output_dir /path/to/processed/ --model face_segmentation.pt --background gradient
-        """,
-    )
+@click.group()
+@click.version_option(version="1.0.0")
+def cli():
+    """Siamese Network Advanced Image Processor
+    
+    Advanced preprocessing pipeline for siamese network with segmentation and pose-based processing.
+    This pipeline uses YOLO segmentation to detect bat faces and YOLO pose for face alignment.
+    """
+    pass
 
-    # Input options
-    parser.add_argument("--input", type=str, help="Single input image path")
-    parser.add_argument("--input_dir", type=str, help="Input directory with images")
-    # Output options
-    parser.add_argument("--output", type=str, help="Output path for single image")
-    parser.add_argument(
-        "--output_dir", type=str, help="Output directory for batch processing"
-    )
 
-    # Model options (required)
-    parser.add_argument(
-        "--model",
-        type=str,
-        required=True,
-        help="Path to YOLO segmentation model (.pt file) - REQUIRED",
-    )
-    parser.add_argument(
-        "--confidence", type=float, default=0.5, help="Detection confidence threshold"
-    )
-
-    # Background options
-    parser.add_argument(
-        "--background",
-        type=str,
-        default="blur",
-        choices=["blur", "noise", "gradient", "picsum", "solid_color"],
-        help="Background generator type",
-    )
-
-    args = parser.parse_args()
-
-    # Validate arguments
-    if not any([args.input, args.input_dir]):
-        parser.error("Must specify either --input or --input_dir")
-
-    # Select background generator
-    background_generators = {
-        "blur": BackgroundGenerator.blur,
-        "noise": BackgroundGenerator.noise,
-        "gradient": BackgroundGenerator.gradient,
-        "picsum": BackgroundGenerator.picsum,
-        "solid_color": BackgroundGenerator.solid_color,
-    }
-
-    background_gen = background_generators[args.background]
-
+@cli.command()
+@click.option("--input", "-i", type=click.Path(exists=True, file_okay=True, dir_okay=False), 
+              required=True, help="Single input image path")
+@click.option("--output", "-o", type=click.Path(file_okay=True, dir_okay=False), 
+              required=True, help="Output path for single image")
+@click.option("--debug", "-d", is_flag=True, help="Enable debug output")
+@click.option("--debug-dir", type=click.Path(file_okay=False, dir_okay=True), 
+              help="Directory to save debug step images (optional when using --debug)")
+def process_single(input, output, debug, debug_dir):
+    """Process a single image through the advanced preprocessing pipeline."""
+    
+    # Set default debug directory if debug is enabled but no debug_dir provided
+    if debug and not debug_dir:
+        debug_dir = os.path.join(os.path.dirname(output), "debug_steps")
+        print(f"🔧 Using default debug directory: {debug_dir}")
+    
     # Initialize advanced pipeline
-    pipeline = SiamesePreprocessingPipeline(
-        model_path=args.model,
-        confidence_threshold=args.confidence,
-        background_generator=background_gen,
-    )
-
+    pipeline = SiamesePreprocessingPipeline()
+    
+    # thresholds and background come from config
+    
     try:
-        if args.input:
-            # Single image processing
-            print(f"🔄 Processing single image: {args.input}")
-            result = pipeline.preprocess_single_image(args.input)
-
-            if result is not None:
-                print("✅ Processing successful!")
-                print(f"   Output shape: {result.shape}, dtype: {result.dtype}")
-                print(f"   Value range: [{result.min():.3f}, {result.max():.3f}]")
-
-                if args.output:
-                    # Save processed image
-                    output_image = (result * 255).astype(np.uint8)
-                    cv2.imwrite(args.output, output_image)
-                    print(f"💾 Saved processed image to: {args.output}")
-                else:
-                    print("💡 Use --output to save the processed image")
+        print(f"🔄 Processing single image: {input}")
+        result = pipeline.preprocess_single_image(input, debug=debug, output_dir=debug_dir)
+        
+        if result is not None:
+            print("✅ Processing successful!")
+            print(f"   Output shape: {result.shape}, dtype: {result.dtype}")
+            print(f"   Value range: [{result.min():.3f}, {result.max():.3f}]")
+            
+            # Save processed image
+            output_image = (result * 255).astype(np.uint8)
+            success = cv2.imwrite(output, output_image)
+            if success:
+                print(f"💾 Saved processed image to: {output}")
             else:
-                print("❌ Processing failed - no bat face detected or processing error")
-
-        elif args.input_dir:
-            # Batch processing
-            print(f"🔄 Processing batch: {args.input_dir}")
-            results = pipeline.preprocess_batch(args.input_dir, args.output_dir)
-            print(f"✅ Batch processing complete!")
-
+                print(f"❌ Failed to save image to: {output}")
+        else:
+            print("❌ Processing failed - no bat face detected or processing error")
+            
     except Exception as e:
         print(f"❌ Error: {e}")
+        if debug:
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
+
+
+@cli.command()
+@click.option("--input-dir", "-i", type=click.Path(exists=True, file_okay=False, dir_okay=True), 
+              required=True, help="Input directory with images")
+@click.option("--output-dir", "-o", type=click.Path(file_okay=False, dir_okay=True), 
+              required=True, help="Output directory for batch processing")
+@click.option("--debug", "-d", is_flag=True, help="Enable debug output")
+@click.option("--debug-dir", type=click.Path(file_okay=False, dir_okay=True), 
+              help="Directory to save debug step images (optional when using --debug)")
+def process_batch(input_dir, output_dir, debug, debug_dir):
+    """Process multiple images through the advanced preprocessing pipeline."""
+    
+    # Set default debug directory if debug is enabled but no debug_dir provided
+    if debug and not debug_dir:
+        debug_dir = os.path.join(output_dir, "debug_steps")
+        print(f"🔧 Using default debug directory: {debug_dir}")
+    
+    # Initialize advanced pipeline
+    pipeline = SiamesePreprocessingPipeline()
+    
+    # thresholds and background come from config
+    
+    try:
+        print(f"🔄 Processing batch: {input_dir}")
+        results = pipeline.preprocess_batch(input_dir, output_dir, debug=debug, debug_dir=debug_dir)
+        print(f"✅ Batch processing complete!")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        if debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
+def main():
+    """Main entry point for the CLI."""
+    cli()
 
 
 if __name__ == "__main__":

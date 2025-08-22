@@ -1,10 +1,9 @@
-# Bat Face Recognition Project - Production Requirements
-# Core dependencies for running the application
-# Compatible with Python 3.10 - using currently working versions
+# Bat Face Recognition Project - Linux Requirements
+# Compatible with Python 3.10 on Ubuntu/Linux systems
+# Use this file on Linux systems (not macOS)
 
 # Deep Learning Frameworks
-tensorflow-macos>=2.13.0
-tensorflow-metal>=1.0.0
+tensorflow>=2.13.0
 tensorflow-io-gcs-filesystem>=0.37.0
 torch>=2.0.1
 torchvision>=0.15.2
@@ -91,3 +90,8 @@ webencodings>=0.5.1
 
 # Type Annotations
 annotated-types>=0.5.0
+
+# Linux-specific notes:
+# - tensorflow-macos is replaced with tensorflow
+# - tensorflow-metal is not needed (GPU support via CUDA)
+# - Install CUDA drivers if you want GPU acceleration

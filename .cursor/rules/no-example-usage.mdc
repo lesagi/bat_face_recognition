@@ -1,0 +1,5 @@
+---
+description: don't create example usage files unless specifically asked to
+globs:
+alwaysApply: true
+---

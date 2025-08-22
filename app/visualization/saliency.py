@@ -43,29 +43,14 @@ class SiameseModelSaliencyMapCreator:
             input_dir_path if not nesting else os.path.join(input_dir_path, nesting)
         )
 
-        # Get all subdirectories
-        self.subdirs = [
-            d
-            for d in os.listdir(self.input_dir_path)
-            if os.path.isdir(os.path.join(self.input_dir_path, d))
-        ]
-
-        # Get images from each subdirectory
-        self.images = []
-        for subdir in self.subdirs:
-            subdir_path = os.path.join(self.input_dir_path, subdir)
-            subdir_images = [
-                os.path.join(subdir, f)
-                for f in os.listdir(subdir_path)
-                if is_img_file(f)
-            ]
-            self.images.extend(subdir_images)
+        # Detect directory structure and collect images accordingly
+        self.images, self.subdirs = self._detect_structure_and_collect_images()
 
         self.num_images = len(self.images)
 
         if self.num_images == 0:
             raise ValueError(
-                f"No images found in any subdirectory of: {self.input_dir_path}"
+                f"No images found in: {self.input_dir_path}"
             )
 
         # Create output directory if it doesn't exist
@@ -83,6 +68,56 @@ class SiameseModelSaliencyMapCreator:
             print(f"🔧 Custom integration steps: {self.integration_steps}")
         if self.smoothing_samples is not None:
             print(f"🔧 Custom smoothing samples: {self.smoothing_samples}")
+
+    def _detect_structure_and_collect_images(self):
+        """
+        Detect whether the directory uses nested structure or flat structure with double-dash naming.
+        Returns tuple of (images_list, subdirs_list)
+        """
+        # Check if directory contains subdirectories
+        subdirs = [
+            d for d in os.listdir(self.input_dir_path) 
+            if os.path.isdir(os.path.join(self.input_dir_path, d))
+        ]
+        
+        if subdirs:
+            # Nested structure detected
+            print(f"📁 Detected nested directory structure with {len(subdirs)} subdirectories")
+            images = []
+            for subdir in subdirs:
+                subdir_path = os.path.join(self.input_dir_path, subdir)
+                subdir_images = [
+                    os.path.join(subdir, f)
+                    for f in os.listdir(subdir_path)
+                    if is_img_file(f)
+                ]
+                images.extend(subdir_images)
+            return images, subdirs
+        else:
+            # Check for flat structure with double-dash naming
+            all_files = [f for f in os.listdir(self.input_dir_path) if is_img_file(f)]
+            if all_files and any('--' in f for f in all_files):
+                print(f"📁 Detected flat structure with double-dash naming convention")
+                print(f"   Found {len(all_files)} image files")
+                
+                # Extract unique individual names from filenames
+                individual_names = set()
+                for filename in all_files:
+                    if '--' in filename:
+                        individual_name = filename.split('--')[0]
+                        individual_names.add(individual_name)
+                
+                print(f"   Found {len(individual_names)} unique individuals: {sorted(individual_names)}")
+                
+                # Create images list with full paths
+                images = [os.path.join(self.input_dir_path, f) for f in all_files if is_img_file(f)]
+                return images, sorted(individual_names)
+            else:
+                # Fallback: treat as flat structure without double-dash naming
+                print(f"📁 Detected flat structure (no subdirectories)")
+                all_files = [f for f in os.listdir(self.input_dir_path) if is_img_file(f)]
+                images = [os.path.join(self.input_dir_path, f) for f in all_files]
+                return images, []
 
     def compute_integrated_gradients(self, image, counterpart, steps=None):
         """
@@ -517,24 +552,49 @@ class MeanSaliencyMapCreator:
             raise ValueError(f"No images found in: {self.input_dir_path}")
 
     def _collect_all_images(self):
-        """Collect all image paths from all subdirectories."""
+        """Collect all image paths from all subdirectories or flat structure."""
         all_images = []
 
-        # Get all subdirectories
+        # Check if directory contains subdirectories
         subdirs = [
             d
             for d in os.listdir(self.input_dir_path)
             if os.path.isdir(os.path.join(self.input_dir_path, d))
         ]
 
-        for subdir in subdirs:
-            subdir_path = os.path.join(self.input_dir_path, subdir)
-            subdir_images = [
-                os.path.join(subdir_path, f)
-                for f in os.listdir(subdir_path)
-                if is_img_file(f)
-            ]
-            all_images.extend(subdir_images)
+        if subdirs:
+            # Nested structure detected
+            print(f"📁 Detected nested directory structure with {len(subdirs)} subdirectories")
+            for subdir in subdirs:
+                subdir_path = os.path.join(self.input_dir_path, subdir)
+                subdir_images = [
+                    os.path.join(subdir_path, f)
+                    for f in os.listdir(subdir_path)
+                    if is_img_file(f)
+                ]
+                all_images.extend(subdir_images)
+        else:
+            # Check for flat structure with double-dash naming
+            all_files = [f for f in os.listdir(self.input_dir_path) if is_img_file(f)]
+            if all_files and any('--' in f for f in all_files):
+                print(f"📁 Detected flat structure with double-dash naming convention")
+                print(f"   Found {len(all_files)} image files")
+                
+                # Extract unique individual names from filenames
+                individual_names = set()
+                for filename in all_files:
+                    if '--' in filename:
+                        individual_name = filename.split('--')[0]
+                        individual_names.add(individual_name)
+                
+                print(f"   Found {len(individual_names)} unique individuals: {sorted(individual_names)}")
+                
+                # Create images list with full paths
+                all_images = [os.path.join(self.input_dir_path, f) for f in all_files]
+            else:
+                # Fallback: treat as flat structure without double-dash naming
+                print(f"📁 Detected flat structure (no subdirectories)")
+                all_images = [os.path.join(self.input_dir_path, f) for f in all_files]
 
         return all_images
 

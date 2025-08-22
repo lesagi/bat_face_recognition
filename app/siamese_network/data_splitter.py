@@ -7,9 +7,7 @@ import random
 import tensorflow as tf
 from itertools import combinations, permutations
 
-# Training data constants
-TRAINING_DATA_MAX_SIZE_LIMIT = 10000
-SIAMESE_INPUT_EDGE_LENGTH = 224
+from config.loader import load_config
 
 
 def get_files_from_dir(directory):
@@ -32,10 +30,12 @@ def preprocess_siamese_input(file_path):
         except:
             img = tf.io.decode_jpeg(byte_img)
 
+        # Read input size from config locally
+        cfg = load_config()
+        input_edge = cfg.siamese_network.model.get("input_edge_length", 224)
+
         # Preprocessing steps - resizing the image
-        img = tf.image.resize(
-            img, (SIAMESE_INPUT_EDGE_LENGTH, SIAMESE_INPUT_EDGE_LENGTH)
-        )
+        img = tf.image.resize(img, (input_edge, input_edge))
         # Scale image to be between 0 and 1
         img = img / 255.0
 
@@ -49,10 +49,10 @@ def preprocess_siamese_input(file_path):
         return img
     except Exception as e:
         tf.print(f"Error processing {file_path}: {e}")
-        # Return a black image as fallback
-        return tf.zeros(
-            (SIAMESE_INPUT_EDGE_LENGTH, SIAMESE_INPUT_EDGE_LENGTH, 3), dtype=tf.float32
-        )
+        # Return a black image as fallback (use local config)
+        cfg = load_config()
+        input_edge = cfg.siamese_network.model.get("input_edge_length", 224)
+        return tf.zeros((input_edge, input_edge, 3), dtype=tf.float32)
 
 
 def preprocess_twin_input_function(input_img_path, validation_img_path, label):
@@ -99,9 +99,7 @@ class SiameseNetworkTrainingDataSplitter:
         for images_dir in self.class_dirs:
             anchors = self.__create_anchor_pairs(get_files_from_dir(images_dir))
             # Apply preprocessing to convert file paths to image tensors
-            anchors = anchors.map(
-                preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE
-            )
+            anchors = anchors.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
             self.__add_to_self_labelled_data(anchors)
 
         dir_pairs = combinations(self.class_dirs, 2)
@@ -114,9 +112,7 @@ class SiameseNetworkTrainingDataSplitter:
                     self.__create_negative_pairs(files_dir_b, files_dir_a, False)
                 )
             # Apply preprocessing to convert file paths to image tensors
-            negatives = negatives.map(
-                preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE
-            )
+            negatives = negatives.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
             self.__add_to_self_labelled_data(negatives)
 
         self.__build_train_test_data()
@@ -130,15 +126,13 @@ class SiameseNetworkTrainingDataSplitter:
         pairs_a = tf.data.Dataset.from_tensor_slices([a for a, b in pairs])
         pairs_b = tf.data.Dataset.from_tensor_slices([b for a, b in pairs])
         samples_count = len(pairs)
-        dataset = tf.data.Dataset.zip(
-            (
-                pairs_a,
-                pairs_b,
-                tf.data.Dataset.from_tensor_slices(tf.ones(samples_count)),
-            )
-        )
-        if TRAINING_DATA_MAX_SIZE_LIMIT is not None:
-            dataset = dataset.take(TRAINING_DATA_MAX_SIZE_LIMIT)
+        dataset = tf.data.Dataset.zip((pairs_a, pairs_b, tf.data.Dataset.from_tensor_slices(tf.ones(samples_count))))
+
+        # Local config for size limit
+        cfg = load_config()
+        max_limit = cfg.siamese_network.training.get("max_data_size_limit")
+        if max_limit is not None:
+            dataset = dataset.take(max_limit)
         print(f"anchors pairs count: {dataset.cardinality().numpy()}")
         return dataset
 
@@ -150,30 +144,22 @@ class SiameseNetworkTrainingDataSplitter:
         data_set_b = tf.data.Dataset.from_tensor_slices(list_b)
 
         if should_shuffle:
-            data_set_a = data_set_a.shuffle(
-                data_set_a.cardinality(), seed=random.randint(20, 80)
-            )
-            data_set_b = data_set_b.shuffle(
-                data_set_b.cardinality(), seed=random.randint(20, 80)
-            )
+            data_set_a = data_set_a.shuffle(data_set_a.cardinality(), seed=random.randint(20, 80))
+            data_set_b = data_set_b.shuffle(data_set_b.cardinality(), seed=random.randint(20, 80))
+
+        # Local config for size limit
+        cfg = load_config()
+        max_limit = cfg.siamese_network.training.get("max_data_size_limit")
 
         min_size = min(list_a_size, list_b_size)
-        if TRAINING_DATA_MAX_SIZE_LIMIT is not None:
-            min_size = min(min_size, TRAINING_DATA_MAX_SIZE_LIMIT)
+        if max_limit is not None:
+            min_size = min(min_size, max_limit)
 
         data_set_a = data_set_a.take(min_size)
         data_set_b = data_set_b.take(min_size)
 
-        dataset = tf.data.Dataset.zip(
-            (
-                data_set_a,
-                data_set_b,
-                tf.data.Dataset.from_tensor_slices(tf.zeros(min_size)),
-            )
-        )
-        print(
-            f"negative pairs count: {dataset.cardinality().numpy()}, min size: {min_size}"
-        )
+        dataset = tf.data.Dataset.zip((data_set_a, data_set_b, tf.data.Dataset.from_tensor_slices(tf.zeros(min_size))))
+        print(f"negative pairs count: {dataset.cardinality().numpy()}, min size: {min_size}")
         return dataset
 
     def __build_train_test_data(self):

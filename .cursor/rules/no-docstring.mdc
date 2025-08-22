@@ -1,0 +1,5 @@
+---
+description: dont add docstring to methods unless specifically asked to
+globs:
+alwaysApply: true
+---

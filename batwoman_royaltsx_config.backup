@@ -1,0 +1,255 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RTSZDocument>
+  <RoyalDocument>
+    <ID>e71c1a47-ec19-40f3-a140-13810183e31e</ID>
+    <Modified>07/24/2025 09:16:28.779</Modified>
+    <ModifiedBy>sagilevi</ModifiedBy>
+    <Name>batwoman_royaltsx_config</Name>
+    <Created>07/05/2025 14:37:40.455</Created>
+    <CreatedBy>sagilevi</CreatedBy>
+    <PositionNr>0</PositionNr>
+    <IsExpanded>True</IsExpanded>
+    <DocumentType>Workspace</DocumentType>
+    <CustomField11 />
+    <CustomField12 />
+    <CustomField13 />
+    <CustomField14 />
+    <CustomField15 />
+    <CustomField16 />
+    <CustomField17 />
+    <CustomField18 />
+    <CustomField19 />
+    <CustomField20 />
+    <CustomProperties />
+    <CredentialPassword />
+    <CredentialPassphrase />
+    <PasswordHash />
+    <AutoMergeOption>1</AutoMergeOption>
+    <SaveOption>2</SaveOption>
+  </RoyalDocument>
+  <RoyalTrash>
+    <ID>7c2f6176-7b07-4fb7-a908-de10109bed01</ID>
+    <Name>Trashcan</Name>
+    <Modified>07/05/2025 14:37:40.471</Modified>
+    <Created>07/05/2025 14:37:40.455</Created>
+    <ModifiedBy>sagilevi</ModifiedBy>
+    <CreatedBy>sagilevi</CreatedBy>
+    <PositionNr>2</PositionNr>
+    <IsExpanded>False</IsExpanded>
+    <ParentID>e71c1a47-ec19-40f3-a140-13810183e31e</ParentID>
+    <CustomField11 />
+    <CustomField12 />
+    <CustomField13 />
+    <CustomField14 />
+    <CustomField15 />
+    <CustomField16 />
+    <CustomField17 />
+    <CustomField18 />
+    <CustomField19 />
+    <CustomField20 />
+    <CustomProperties />
+    <CredentialPassword />
+    <CredentialPassphrase />
+  </RoyalTrash>
+  <RoyalFolder>
+    <ID>00992131-7d93-40e1-b6fb-664b51dfe41c</ID>
+    <Name>Connections</Name>
+    <Modified>07/05/2025 14:37:40.471</Modified>
+    <Created>07/05/2025 14:37:40.455</Created>
+    <ModifiedBy>sagilevi</ModifiedBy>
+    <CreatedBy>sagilevi</CreatedBy>
+    <PositionNr>4</PositionNr>
+    <IsExpanded>True</IsExpanded>
+    <ParentID>e71c1a47-ec19-40f3-a140-13810183e31e</ParentID>
+    <ObjectSpecialUsage />
+    <CustomField11 />
+    <CustomField12 />
+    <CustomField13 />
+    <CustomField14 />
+    <CustomField15 />
+    <CustomField16 />
+    <CustomField17 />
+    <CustomField18 />
+    <CustomField19 />
+    <CustomField20 />
+    <CustomProperties />
+    <CredentialPassword />
+    <CredentialPassphrase />
+  </RoyalFolder>
+  <RoyalSSHConnection>
+    <ID>32ed66f2-f931-4d83-9e31-ffd6a3c68f11</ID>
+    <Name>Terminal</Name>
+    <Modified>07/05/2025 14:40:15.291</Modified>
+    <Created>07/05/2025 14:39:19.331</Created>
+    <ModifiedBy>sagilevi</ModifiedBy>
+    <CreatedBy>sagilevi</CreatedBy>
+    <PositionNr>2</PositionNr>
+    <IsConnectionTemplate>False</IsConnectionTemplate>
+    <ParentID>00992131-7d93-40e1-b6fb-664b51dfe41c</ParentID>
+    <ObjectSpecialUsage />
+    <URI>batwoman.tau.ac.il</URI>
+    <CustomField11 />
+    <CustomField12 />
+    <CustomField13 />
+    <CustomField14 />
+    <CustomField15 />
+    <CustomField16 />
+    <CustomField17 />
+    <CustomField18 />
+    <CustomField19 />
+    <CustomField20 />
+    <CustomProperties />
+    <CredentialPassword />
+    <CredentialPassphrase />
+    <Passphrase />
+    <ProxyPassword />
+    <ConnectionType>ssh;SSH</ConnectionType>
+    <IsTelnetConnection>False</IsTelnetConnection>
+    <IsSerialPortConnection>False</IsSerialPortConnection>
+    <Port>22</Port>
+    <Description />
+    <PhysicalAddress />
+    <CustomImageName />
+    <CustomImageList>{}</CustomImageList>
+    <CustomImage />
+    <ColorFromParent>False</ColorFromParent>
+    <ColorName />
+    <Color />
+    <CredentialFromParent>False</CredentialFromParent>
+    <CredentialMode>3</CredentialMode>
+    <CredentialAutologon>True</CredentialAutologon>
+    <CredentialOmitDomain>False</CredentialOmitDomain>
+    <CredentialUsername />
+    <CredentialId>d4d5a3f9-ffe1-47f1-a976-d2ba251c3251</CredentialId>
+    <CredentialName />
+    <CredentialKeyMode>0</CredentialKeyMode>
+    <CredentialKeyFile />
+    <PrivateKeyPath />
+    <CredentialKeyContent />
+    <PreConnectTaskFromParent>False</PreConnectTaskFromParent>
+    <PreConnectTaskMode>1</PreConnectTaskMode>
+    <PreConnectTaskId>00000000-0000-0000-0000-000000000000</PreConnectTaskId>
+    <PreConnectTaskName />
+    <PreConnectTaskWait>False</PreConnectTaskWait>
+    <PostDisconnectTaskFromParent>False</PostDisconnectTaskFromParent>
+    <PostDisconnectTaskMode>1</PostDisconnectTaskMode>
+    <PostDisconnectTaskId>00000000-0000-0000-0000-000000000000</PostDisconnectTaskId>
+    <PostDisconnectTaskName />
+    <PostDisconnectTaskWait>False</PostDisconnectTaskWait>
+    <KeySequenceFromParent>False</KeySequenceFromParent>
+    <KeySequenceEnabled>False</KeySequenceEnabled>
+    <KeySequence />
+    <KeySequenceId>00000000-0000-0000-0000-000000000000</KeySequenceId>
+    <KeySequenceName />
+    <Favorite>False</Favorite>
+  </RoyalSSHConnection>
+  <RoyalFileTransferConnection>
+    <ID>fada1d2c-a2bd-4329-b3e9-33c8f632afdf</ID>
+    <Name>batwoman_files</Name>
+    <Modified>07/05/2025 14:41:34.499</Modified>
+    <Created>07/05/2025 14:40:54.171</Created>
+    <ModifiedBy>sagilevi</ModifiedBy>
+    <CreatedBy>sagilevi</CreatedBy>
+    <PositionNr>4</PositionNr>
+    <IsConnectionTemplate>False</IsConnectionTemplate>
+    <ParentID>00992131-7d93-40e1-b6fb-664b51dfe41c</ParentID>
+    <ObjectSpecialUsage />
+    <URI>batwoman.tau.ac.il</URI>
+    <CustomField11 />
+    <CustomField12 />
+    <CustomField13 />
+    <CustomField14 />
+    <CustomField15 />
+    <CustomField16 />
+    <CustomField17 />
+    <CustomField18 />
+    <CustomField19 />
+    <CustomField20 />
+    <CustomProperties />
+    <CredentialPassword />
+    <CredentialPassphrase />
+    <Passphrase />
+    <ProxyPassword />
+    <Protocol>3</Protocol>
+    <Port>22</Port>
+    <Description />
+    <PhysicalAddress />
+    <CustomImageName />
+    <CustomImageList>{}</CustomImageList>
+    <CustomImage />
+    <ColorFromParent>False</ColorFromParent>
+    <ColorName />
+    <Color />
+    <Favorite>False</Favorite>
+  </RoyalFileTransferConnection>
+  <RoyalFolder>
+    <ID>4ccc302b-dd6e-4ba2-ad6b-ae9e6049cf4f</ID>
+    <Name>Credentials</Name>
+    <Modified>07/05/2025 14:37:40.471</Modified>
+    <Created>07/05/2025 14:37:40.466</Created>
+    <ModifiedBy>sagilevi</ModifiedBy>
+    <CreatedBy>sagilevi</CreatedBy>
+    <PositionNr>6</PositionNr>
+    <IsExpanded>True</IsExpanded>
+    <ParentID>e71c1a47-ec19-40f3-a140-13810183e31e</ParentID>
+    <ObjectSpecialUsage />
+    <CustomField11 />
+    <CustomField12 />
+    <CustomField13 />
+    <CustomField14 />
+    <CustomField15 />
+    <CustomField16 />
+    <CustomField17 />
+    <CustomField18 />
+    <CustomField19 />
+    <CustomField20 />
+    <CustomProperties />
+    <CredentialPassword />
+    <CredentialPassphrase />
+  </RoyalFolder>
+  <RoyalCredential>
+    <ID>d4d5a3f9-ffe1-47f1-a976-d2ba251c3251</ID>
+    <Name>batwoman</Name>
+    <Modified>07/05/2025 14:38:42.763</Modified>
+    <Created>07/05/2025 14:38:13.024</Created>
+    <ModifiedBy>sagilevi</ModifiedBy>
+    <CreatedBy>sagilevi</CreatedBy>
+    <PositionNr>2</PositionNr>
+    <ParentID>4ccc302b-dd6e-4ba2-ad6b-ae9e6049cf4f</ParentID>
+    <UserName>sagilevi1</UserName>
+    <Password>XERUQFARffLpiOXtBtSNK55/pkoWNx4Bt/7CmCLeG0KZxTESOC5qZzLIEguZ18YeEHx2hv//M1o1oZlNcbBVlDJLGhBYTHdFkcziQIwmcVw=</Password>
+    <Description />
+    <CustomImageName />
+    <CustomImageList>{}</CustomImageList>
+    <CustomImage />
+    <ColorFromParent>False</ColorFromParent>
+    <ColorName />
+    <Color />
+    <Favorite>False</Favorite>
+  </RoyalCredential>
+  <RoyalFolder>
+    <ID>3e018922-9e9c-4ba6-967a-c45e9c4732bf</ID>
+    <Name>Tasks</Name>
+    <Modified>07/05/2025 14:37:40.471</Modified>
+    <Created>07/05/2025 14:37:40.467</Created>
+    <ModifiedBy>sagilevi</ModifiedBy>
+    <CreatedBy>sagilevi</CreatedBy>
+    <PositionNr>8</PositionNr>
+    <IsExpanded>False</IsExpanded>
+    <ParentID>e71c1a47-ec19-40f3-a140-13810183e31e</ParentID>
+    <ObjectSpecialUsage />
+    <CustomField11 />
+    <CustomField12 />
+    <CustomField13 />
+    <CustomField14 />
+    <CustomField15 />
+    <CustomField16 />
+    <CustomField17 />
+    <CustomField18 />
+    <CustomField19 />
+    <CustomField20 />
+    <CustomProperties />
+    <CredentialPassword />
+    <CredentialPassphrase />
+  </RoyalFolder>
+</RTSZDocument>

@@ -102,7 +102,7 @@ def load_model(model_path):
 
 def validate_input_directory(input_dir):
     """
-    Validate that the input directory exists and contains subdirectories with images.
+    Validate that the input directory exists and contains images organized by individual.
 
     Args:
         input_dir (str): Path to the input directory
@@ -114,20 +114,43 @@ def validate_input_directory(input_dir):
         print(f"Error: Input directory does not exist: {input_dir}")
         return False
 
-    # Check if directory contains subdirectories
+    # Check if directory contains subdirectories (nested structure)
     subdirs = [
         d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))
     ]
 
-    if not subdirs:
-        print(f"Error: No subdirectories found in {input_dir}")
-        print(
-            "Input directory should contain subdirectories with images organized by class/individual"
-        )
-        return False
+    if subdirs:
+        print(f"Found {len(subdirs)} subdirectories (nested structure): {subdirs}")
+        return True
+    
+    # Check for flat structure with double-dash naming
+    all_files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+    image_files = [f for f in all_files if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff'))]
+    
+    if image_files and any('--' in f for f in image_files):
+        # Extract unique individual names
+        individual_names = set()
+        for filename in image_files:
+            if '--' in filename:
+                individual_name = filename.split('--')[0]
+                individual_names.add(individual_name)
+        
+        print(f"Found {len(image_files)} image files in flat structure")
+        print(f"Detected {len(individual_names)} unique individuals: {sorted(individual_names)}")
+        return True
+    
+    # Check for any image files (fallback)
+    if image_files:
+        print(f"Found {len(image_files)} image files in flat structure")
+        return True
 
-    print(f"Found {len(subdirs)} subdirectories: {subdirs}")
-    return True
+    print(f"Error: No valid image files or subdirectories found in {input_dir}")
+    print(
+        "Input directory should contain either:\n"
+        "1. Subdirectories with images organized by class/individual, or\n"
+        "2. Image files with 'individual--image.jpg' naming convention"
+    )
+    return False
 
 
 def main():
@@ -136,8 +159,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Basic usage (original method)
+    # Basic usage with nested directory structure
     python run_saliency_maps.py --input_dir /path/to/data --model_path /path/to/model
+    
+    # Basic usage with flat structure (individual--image.jpg naming)
+    python run_saliency_maps.py --input_dir /path/to/flat_data --model_path /path/to/model
     
     # Advanced method: Integrated Gradients (recommended for detailed analysis)
     python run_saliency_maps.py --input_dir /path/to/data --model_path /path/to/model --method integrated_gradients
@@ -180,13 +206,16 @@ Examples:
     
     # With nested subdirectory structure
     python run_saliency_maps.py --input_dir /path/to/data --model_path /path/to/model --nesting validation --method integrated_gradients
+    
+    # With flat structure and nested subdirectories
+    python run_saliency_maps.py --input_dir /path/to/flat_data --model_path /path/to/model --nesting validation --method integrated_gradients
         """,
     )
 
     parser.add_argument(
         "--input_dir",
         required=True,
-        help="Path to input directory containing subdirectories with images",
+        help="Path to input directory containing images organized by individual (supports both nested subdirectories and flat structure with 'individual--image.jpg' naming)",
     )
 
     parser.add_argument(
@@ -326,6 +355,18 @@ Examples:
             smoothing_samples=args.smoothing_samples,
         )
 
+        # Show detected structure information
+        if saliency_creator.subdirs:
+            if any('--' in subdir for subdir in saliency_creator.subdirs):
+                print(f"📁 Detected flat structure with {len(saliency_creator.subdirs)} unique individuals")
+            else:
+                print(f"📁 Detected nested structure with {len(saliency_creator.subdirs)} subdirectories")
+        else:
+            print(f"📁 Detected flat structure with {saliency_creator.num_images} image files")
+        
+        print(f"📊 Found {saliency_creator.num_images} total images")
+        print(f"🎯 Will process {saliency_creator.actual_sample_size} images for saliency maps")
+
         # Generate saliency maps
         start_time = time.time()
 
@@ -348,6 +389,11 @@ Examples:
                 smoothing_samples=args.smoothing_samples,
                 fast_mode=args.fast,
             )
+
+            # Show detected structure information for mean saliency
+            print(f"📊 Found {len(mean_creator.all_images)} total images for mean computation")
+            if args.max_images:
+                print(f"🎯 Will process up to {args.max_images} images for mean saliency")
 
             # Determine which base method to use for mean computation
             base_method = args.base_method

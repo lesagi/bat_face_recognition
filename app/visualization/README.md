@@ -18,10 +18,11 @@ Saliency maps are visual representations that highlight the regions in an input 
 - NumPy
 - A trained Siamese model (in TensorFlow SavedModel format)
 
-## Directory Structure
+## Input Directory Structure
 
-Your input directory should be organized as follows:
+The script supports two directory structures:
 
+### 1. Nested Directory Structure (Original)
 ```
 input_directory/
 ├── individual_1/
@@ -51,6 +52,37 @@ input_directory/
     ├── individual_1/
     └── ...
 ```
+
+### 2. Flat Directory Structure (New)
+```
+input_directory/
+├── individual_1--image1.jpg
+├── individual_1--image2.jpg
+├── individual_1--image3.jpg
+├── individual_2--image1.jpg
+├── individual_2--image2.jpg
+└── ...
+```
+
+Or with nested structure:
+
+```
+input_directory/
+├── validation/
+│  ├── individual_1--image1.jpg
+│  ├── individual_1--image2.jpg
+│  ├── individual_2--image1.jpg
+│  ├── individual_2--image2.jpg
+│  └── ...
+├── test/
+│  ├── individual_1--image1.jpg
+│  ├── individual_1--image2.jpg
+│  ├── individual_2--image1.jpg
+│  ├── individual_2--image2.jpg
+│  └── ...
+```
+
+**Note:** The script automatically detects which structure you're using. For the flat structure, individual names are extracted from the filename prefix before the double dash (`--`).
 
 ## Usage
 
@@ -168,61 +200,3 @@ Based on the current project structure, you can use these pre-trained models:
    ```
    OutOfMemoryError
    ```
-   - Reduce the `--sample_size` parameter
-   - Consider using a smaller batch of images
-
-4. **Import Errors**
-   ```
-   ModuleNotFoundError
-   ```
-   - Ensure you're running the script from the correct directory
-   - Check that all dependencies are installed
-
-### Getting Help
-
-If you encounter issues:
-
-1. Check that your directory structure matches the expected format
-2. Verify that your model path is correct
-3. Ensure all required dependencies are installed
-4. Try with a smaller sample size first
-
-## Technical Details
-
-### How Saliency Maps are Generated
-
-1. **Gradient Calculation**: Uses TensorFlow's GradientTape to compute gradients of the model output with respect to the input image
-2. **Attention Visualization**: Highlights regions where changes in pixel values would most affect the model's prediction
-3. **Random Pairing**: Each image is paired with a random counterpart to generate the saliency map
-4. **Visualization**: Uses matplotlib with a "hot" colormap to display attention intensity
-
-### Performance Considerations
-
-- Processing time depends on:
-  - Number of images (sample_size parameter)
-  - Model complexity
-  - Available computational resources
-- Large datasets may require significant processing time
-- Consider using GPU acceleration for faster processing
-
-## Configuration
-
-You can modify the default behavior by editing the configuration values in `app/visualization/config.py`:
-
-```python
-MODEL_PATH = "path/to/your/default/model"
-INPUT_DIR = "path/to/your/default/input"
-OUTPUT_DIR = "path/to/your/default/output"
-SAMPLE_SIZE = "50"
-FIGURE_SIZE = ('15.0', '3.0')
-```
-
-## Related Files
-
-- `saliency.py`: Core saliency map generation functionality
-- `config.py`: Configuration settings
-- `run_saliency_maps.py`: Command-line interface script
-
-## License
-
-This module is part of the bat face recognition project and follows the same licensing terms as the main project. 

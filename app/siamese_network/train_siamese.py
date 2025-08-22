@@ -12,7 +12,6 @@ def main():
 
     print("🚀 Starting Siamese Network Training")
     print(f"📁 Input directory: {input_dir}")
-    print("⏳ This may take a while (80 epochs)...")
     print()
 
     try:

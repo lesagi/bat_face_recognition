@@ -1,0 +1,268 @@
+# Bat Face Recognition Project - General Configuration
+# This file contains all configuration parameters for the entire project
+
+# =============================================================================
+# GENERAL APPLICATION SETTINGS
+# =============================================================================
+general:
+  # GPU Configuration
+  gpu_enabled: true
+  
+  # Random seed for reproducibility
+  random_seed: 42
+
+# =============================================================================
+# MLFLOW CONFIGURATION
+# =============================================================================
+mlflow:
+  enabled: true
+  experiment_name: "bat_face_recognition"
+  tracking:
+    host: "localhost"
+    port: 8080
+    uri: "file:./mlruns"
+
+# =============================================================================
+# MODELS CONFIGURATION
+# =============================================================================
+models:
+  # Trained YOLO Segmentation Model
+  segmentation:
+    model_path: "/Users/MAC/Documents/bat_face_rec/unified_segmentation/data/runs/weights/best.pt"
+    model_type: "yolo_segmentation"
+    confidence_threshold: 0.5
+  
+  # Trained YOLO Pose Model
+  pose:
+    model_path: "/Users/MAC/Documents/bat_face_rec/face_annotation_eyes_nose/best.pt"
+    model_type: "yolo_pose"
+    confidence_threshold: 0.5
+  
+  # Trained Siamese Network Model
+  siamese:
+    model_path: "face_rec_rousettus_#1/runs/model/siamesemodelv2_v40"
+    model_type: "siamese_network"
+
+# =============================================================================
+# SIAMESE NETWORK CONFIGURATION
+# =============================================================================
+siamese_network:
+  # Model architecture
+  model:
+    input_edge_length: 224
+    embedding:
+      output_size: 4096
+      activation: "sigmoid"
+    distance:
+      type: "L1"
+      layer_name: "distance"
+  
+  # Training configuration
+  training:
+    input_dir: "face_rec_rousettus_#1/background_replacement/processed_siamese_picsum"
+    output_dir: "face_rec_rousettus_#1/runs/model"
+    epochs: 80
+    batch_size: 16
+    learning_rate: 0.0001
+    optimizer:
+      type: "Adam"
+      beta_1: 0.9
+      beta_2: 0.999
+      epsilon: 1e-07
+    loss:
+      type: "BinaryCrossentropy"
+      from_logits: false
+    train_val_split: 0.7
+    pair_mode: "permutation" # "permutation" or "combination"
+    max_data_size_limit: 10000
+    early_stopping:
+      enabled: true
+      patience: 10
+      min_delta: 0.001
+      restore_best_weights: true
+    checkpoint:
+      save_frequency: 10
+      save_best_only: true
+      max_checkpoints: 3
+    # Training data preprocessing configuration (pipeline-specific)
+    data_preprocessing:
+      target_size: 224
+      interpolation: "bilinear"
+      normalize: true
+      scale_factor: 255.0
+      face_outer_margin_ratio: 0
+      background:
+        type: "picsum"
+        # color: [0, 255, 0]  # options: blur, noise, gradient, picsum, solid_color
+  
+  # Evaluation
+  evaluation:
+    metrics:
+      - "accuracy"
+      - "precision"
+      - "recall"
+      - "f1_score"
+    frequency: 5
+    confusion_matrix:
+      enabled: true
+      save_path: "confusion_matrix.png"
+  
+  # Logging
+  logging:
+    tensorboard: true
+    level: "INFO"
+    plots:
+      enabled: true
+      save_path: "training_plots.png"
+    console:
+      show_progress: true
+      metrics_frequency: 10
+  
+  # Advanced
+  advanced:
+    mixed_precision: false
+    gradient_clipping:
+      enabled: false
+      clip_norm: 1.0
+    prefetch:
+      buffer_size: 8
+    memory:
+      allow_growth: true
+      gpu_memory_limit: null
+  
+  # Deployment
+  deployment:
+    save_format: "tf"
+    versioning:
+      enabled: true
+      version_prefix: "siamesemodel"
+    optimization:
+      tensorrt: false
+      quantization: false
+
+# =============================================================================
+# YOLO SEGMENTATION TRAINER CONFIGURATION
+# =============================================================================
+yolo_segmentation:
+  # Default training parameters
+  training:
+    default_epochs: 80
+    default_batch_size: 16
+    default_image_size: 640
+    default_patience: 50
+    default_workers: 8
+    default_confidence: 0.25
+    data_path: "/Users/MAC/Documents/bat_face_rec/unified_segmentation/data/data.yaml"
+    name: "bat_face_seg"
+  
+  # Supported models
+  supported_base_models:
+    - "yolov8n-seg.pt"
+    - "yolov8s-seg.pt"
+    - "yolov8m-seg.pt"
+    - "yolov8l-seg.pt"
+    - "yolov8x-seg.pt"
+  
+  # Data preparation
+  data:
+    default_min_contour_area: 200
+    supported_image_extensions:
+      - ".png"
+      - ".jpg"
+      - ".jpeg"
+      - ".bmp"
+      - ".tiff"
+  
+  # Training outputs
+  outputs:
+    weights_dir: "weights"
+    best_model: "best.pt"
+    last_model: "last.pt"
+    results_file: "results.csv"
+    confusion_matrix: "confusion_matrix.png"
+    validation_batch: "val_batch*.jpg"
+  
+  # Data augmentation settings
+  augmentation:
+    default_augmentations_per_image: 10
+    postfix_format: "_a-{index:03d}"
+    geometric_transforms:
+      rotation_limit: 25
+      scale_range: [0.8, 1.2]
+      translate_percent: 0.1
+      shear_limit: 8
+      perspective_scale: [0.02, 0.08]
+    color_transforms:
+      brightness_limit: 0.2
+      contrast_limit: 0.2
+      saturation_limit: 0.2
+      hue_shift_limit: 15
+    noise_transforms:
+      gaussian_var_limit: [5, 30]
+      iso_noise_intensity: [0.1, 0.3]
+    blur_transforms:
+      blur_limit: 2
+      motion_blur_limit: 2
+    scale_crop_transforms:
+      tight_crop_scale: [0.7, 0.9]  # Simulate tighter margins
+      loose_crop_scale: [0.4, 0.7]  # Simulate looser margins
+      resize_variations: [480, 640, 800]  # Different input sizes
+      crop_ratio_range: [0.9, 1.1]  # Keep roughly square
+
+# =============================================================================
+# VIDEO PROCESSING CONFIGURATION
+# =============================================================================
+video_processing:
+  # Processing limits
+  processing_limit: 10
+  
+  # Paths
+  paths:
+    base_dir: "video_processing"
+    input_dir: "raw_data/videos/input"
+    processed_base_dir: "raw_data/videos/processed"
+    processed_sub_dir: "segmentation"
+  
+  # Processing settings
+  settings:
+    frame_extraction_rate: 1
+    output_format: "jpg"
+    quality: 95
+
+# =============================================================================
+# VISUALIZATION CONFIGURATION
+# =============================================================================
+visualization:
+  paths:
+    model_path: "/Users/MAC/Documents/bat_face_rec/output_siamese_20250406_014341/train/model/siamesemodelv2_v40"
+    input_dir: "/Users/MAC/Documents/bat_face_rec/face_recognition-with_bg_31_03_25/data/unseen"
+    output_dir: "/Users/MAC/Documents/bat_face_rec/output_siamese_20250406_014341"
+  display:
+    nesting: "saliency"
+    sample_size: 10
+    figure_size: [15.0, 3.0]
+    row_spacing: 0.5
+    image_size: [224, 224]
+  plots:
+    dpi: 300
+    save_format: "png"
+    show_grid: false
+    color_map: "viridis"
+
+# =============================================================================
+# UTILS CONFIGURATION
+# =============================================================================
+utils:
+  file:
+    max_file_size: 100
+    supported_image_formats: [".jpg", ".jpeg", ".png", ".bmp", ".tiff"]
+    supported_video_formats: [".mp4", ".avi", ".mov", ".mkv"]
+  image:
+    default_quality: 95
+    default_format: "JPEG"
+    max_dimension: 4096
+  logging:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file_logging: true
+    console_logging: true

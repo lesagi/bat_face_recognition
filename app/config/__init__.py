@@ -1,14 +1,10 @@
 """
-Configuration package initialization.
+Configuration module for Bat Face Recognition Project.
+
+This module provides centralized configuration management for the entire project.
 """
 
-# Core configs
-from .general import *
+from .loader import ConfigLoader, load_config
+from .model_config import ImageModelConfig
 
-# Module-specific configs
-from siamese_network.paths import *
-from siamese_network.config import *
-
-# from background_replacement.config import *  # File doesn't exist
-from video_processing.config import *
-from data_augmentation.config import *
+__all__ = ["ConfigLoader", "load_config", "ImageModelConfig"] 
