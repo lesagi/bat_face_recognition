@@ -9,7 +9,7 @@ Functions are organized into:
 
 import cv2
 import numpy as np
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Any
 import os
 
 
@@ -21,44 +21,38 @@ class ImageTransforms:
     # =========================================================================
 
     @staticmethod
-    def _get_model_from_config(type: str) -> Optional[str]:
+    def _get_model_from_config(model_type: str):
+        """Get model configuration and create model instance using factory pattern.
+        
+        Args:
+            model_type: Type of model to create ("segmentation" or "pose")
+            
+        Returns:
+            Model instance created by factory, or None if creation fails
+        """
         try:
-            from config import load_config
+            from config.loader import load_config
+            from models.yolo_factory import create_yolo_model
+            
             config = load_config()
             
-            models_config = config.models
-            
-            if not models_config._config:
-                print("⚠️  No models found in configuration")
-                return None
-            
-            if type == "segmentation":
-                model_config = models_config.segmentation
-            elif type == "pose":
-                model_config = models_config.pose
+            if model_type == "segmentation":
+                model_config = config.models.segmentation
+            elif model_type == "pose":
+                model_config = config.models.pose
             else:
-                raise ValueError(f"Invalid model type: {type}")
+                raise ValueError(f"Invalid model type: {model_type}")
             
             if not model_config:
-                print(f"⚠️  No {type} model configuration found")
+                print(f"⚠️  No {model_type} model configuration found")
                 return None
             
-            model_path = model_config.get('model_path')
-            if not model_path:
-                print(f"⚠️  No model path found for {type} model")
-                return None
+            # Create model using factory (heavy import happens here)
+            model = create_yolo_model(model_config)
+            return model
             
-            if not os.path.exists(model_path):
-                print(f"⚠️  Model file not found: {model_path}")
-                return None
-            
-            return model_path
-            
-        except ImportError:
-            print("⚠️  Config module not available")
-            return None
         except Exception as e:
-            print(f"⚠️  Error loading model from config: {e}")
+            print(f"⚠️  Error creating model: {e}")
             return None
 
     @staticmethod
@@ -422,24 +416,21 @@ class ImageTransforms:
         debug_dir: Optional[str] = None,
         base_filename: Optional[str] = None
     ) -> Optional[np.ndarray]:
-        try:
-            from ultralytics import YOLO
-        except Exception:
+        """Segment image using YOLO model created via factory pattern."""
+        # Get model instance using factory (heavy work happens here, not during import)
+        model = ImageTransforms._get_model_from_config("segmentation")
+        if model is None:
             return None
-
-        # Load segmentation model path and confidence from config
+        
+        # Get confidence threshold from config
         try:
             from config.loader import load_config
-            cfg = load_config()
-            seg_model_path = cfg.models.segmentation.get("model_path")
-            confidence_threshold = cfg.models.segmentation.get("confidence_threshold", 0.3)
-            if not seg_model_path or not os.path.exists(seg_model_path):
-                return None
+            config = load_config()
+            confidence_threshold = config.models.segmentation.confidence_threshold
         except Exception:
-            return None
+            confidence_threshold = 0.3
 
         try:
-            model = YOLO(seg_model_path)
             results = model(original_image, conf=confidence_threshold)
             if not results or len(results) == 0:
                 return None
@@ -625,21 +616,22 @@ class ImageTransforms:
                     original_image, target_eye_distance, debug
                 )
             elif face_detector_type == "yolo_pose":
-                yolo_model_path = ImageTransforms._get_model_from_config("pose")
-                if yolo_model_path is None:
+                # Get model instance using factory pattern
+                model = ImageTransforms._get_model_from_config("pose")
+                if model is None:
                     raise ValueError(
                         "Pose model not found in config for yolo_pose face detection"
                     )
                 try:
                     from config.loader import load_config
                     cfg = load_config()
-                    confidence_threshold = cfg.models.pose.get("confidence_threshold", 0.3)
+                    confidence_threshold = cfg.models.pose.confidence_threshold
                 except Exception:
                     confidence_threshold = 0.3
                 
                 result = ImageTransforms._align_face_yolo_pose(
                     original_image,
-                    yolo_model_path,
+                    model,
                     target_eye_distance,
                     confidence_threshold,
                     debug,
@@ -893,17 +885,14 @@ class ImageTransforms:
     @staticmethod
     def _align_face_yolo_pose(
         original_image: np.ndarray,
-        yolo_model_path: str,
+        yolo_model: Any,
         target_eye_distance: Optional[float] = None,
         confidence_threshold: float = 0.3,
         debug: bool = False,
     ) -> Optional[np.ndarray]:
         """Align face using trained YOLO pose model for bat face landmarks."""
         try:
-            from ultralytics import YOLO
-
-            # Load YOLO pose model
-            yolo_model = YOLO(yolo_model_path)
+            # Model instance is already created by factory
 
             # Perform inference on original image (YOLO handles color conversion internally)
             results = yolo_model.predict(
@@ -1023,12 +1012,7 @@ class ImageTransforms:
 
             return aligned_image
 
-        except ImportError:
-            if debug:
-                print(
-                    "YOLO (ultralytics) not available. Install with: pip install ultralytics"
-                )
-            return None
+
         except Exception as e:
             if debug:
                 print(f"YOLO pose face alignment failed: {e}")
@@ -1085,21 +1069,22 @@ class ImageTransforms:
                     debug,
                 )
             elif face_detector_type == "yolo_pose":
-                yolo_model_path = ImageTransforms._get_model_from_config("pose")
-                if yolo_model_path is None:
+                # Get model instance using factory pattern
+                model = ImageTransforms._get_model_from_config("pose")
+                if model is None:
                     raise ValueError(
                         "Pose model not found in config for yolo_pose face detection"
                     )
                 try:
                     from config.loader import load_config
                     cfg = load_config()
-                    confidence_threshold = cfg.models.pose.get("confidence_threshold", 0.3)
+                    confidence_threshold = cfg.models.pose.confidence_threshold
                 except Exception:
                     confidence_threshold = 0.3
                 
                 return ImageTransforms._center_face_yolo_pose(
                     original_image,
-                    yolo_model_path,
+                    model,
                     target_face_size,
                     eye_y_ratio,
                     face_width_ratio,
@@ -1332,7 +1317,7 @@ class ImageTransforms:
     @staticmethod
     def _center_face_yolo_pose(
         original_image: np.ndarray,
-        yolo_model_path: str,
+        yolo_model: Any,
         target_face_size: int = 224,
         eye_y_ratio: float = 0.35,
         face_width_ratio: float = 0.8,
@@ -1341,10 +1326,7 @@ class ImageTransforms:
     ) -> Optional[np.ndarray]:
         """Center face using YOLO pose model for bat face landmarks."""
         try:
-            from ultralytics import YOLO
-
-            # Load YOLO pose model
-            yolo_model = YOLO(yolo_model_path)
+            # Model instance is already created by factory
 
             # Perform inference
             results = yolo_model.predict(
@@ -1469,10 +1451,7 @@ class ImageTransforms:
 
             return face_crop
 
-        except ImportError:
-            if debug:
-                print("YOLO (ultralytics) not available for face centering")
-            return None
+
         except Exception as e:
             if debug:
                 print(f"YOLO pose face centering failed: {e}")
@@ -1502,20 +1481,18 @@ class ImageTransforms:
             Cropped image array, or None if cropping fails
         """
         try:
-            yolo_model_path = ImageTransforms._get_model_from_config("pose")
-            if yolo_model_path is None:
+            # Get model instance using factory pattern
+            model = ImageTransforms._get_model_from_config("pose")
+            if model is None:
                 raise ValueError(
                     "Pose model not found in config for face detection"
                 )
             try:
                 from config.loader import load_config
                 cfg = load_config()
-                confidence_threshold = cfg.models.pose.get("confidence_threshold", 0.3)
+                confidence_threshold = cfg.models.pose.confidence_threshold
             except Exception:
                 confidence_threshold = 0.3
-            
-            from ultralytics import YOLO
-            model = YOLO(yolo_model_path)
             
             results = model(original_image, conf=confidence_threshold)
             
@@ -1660,16 +1637,15 @@ class ImageTransforms:
                 print(f"Crop region: [{crop_x1}, {crop_y1}, {crop_x2}, {crop_y2}]")
                 print(f"Crop size: {crop.shape}")
  
-            # Get pose keypoints to determine centering
+            # Get pose keypoints to determine centering using factory pattern
             try:
                 from config.loader import load_config
                 cfg = load_config()
-                pose_model_path = cfg.models.pose.get("model_path")
-                confidence_threshold = cfg.models.pose.get("confidence_threshold", 0.5)
+                confidence_threshold = cfg.models.pose.confidence_threshold
                  
-                if pose_model_path and os.path.exists(pose_model_path):
-                    from ultralytics import YOLO
-                    model = YOLO(pose_model_path)
+                # Get model instance using factory pattern
+                model = ImageTransforms._get_model_from_config("pose")
+                if model is not None:
                     results = model.predict(source=crop, conf=confidence_threshold, verbose=False, save=False)
                      
                     if results and len(results) > 0:
@@ -1810,14 +1786,12 @@ class ImageTransforms:
                     print(f"⚠️  Config loading failed: {e}")
                 return annotated_image
             
-            # Step 1: Run segmentation model
-            seg_model_path = cfg.models.segmentation.get("model_path")
-            seg_confidence = cfg.models.segmentation.get("confidence_threshold", 0.3)
+            # Step 1: Run segmentation model using factory pattern
+            seg_model = ImageTransforms._get_model_from_config("segmentation")
+            seg_confidence = cfg.models.segmentation.confidence_threshold
             
-            if seg_model_path and os.path.exists(seg_model_path):
+            if seg_model is not None:
                 try:
-                    from ultralytics import YOLO
-                    seg_model = YOLO(seg_model_path)
                     seg_results = seg_model.predict(
                         source=original_image, 
                         conf=seg_confidence, 
@@ -1896,14 +1870,12 @@ class ImageTransforms:
                 if debug:
                     print("⚠️  Segmentation model not available or path invalid")
             
-            # Step 2: Run pose model
-            pose_model_path = cfg.models.pose.get("model_path")
-            pose_confidence = cfg.models.pose.get("confidence_threshold", 0.3)
+            # Step 2: Run pose model using factory pattern
+            pose_model = ImageTransforms._get_model_from_config("pose")
+            pose_confidence = cfg.models.pose.confidence_threshold
             
-            if pose_model_path and os.path.exists(pose_model_path):
+            if pose_model is not None:
                 try:
-                    from ultralytics import YOLO
-                    pose_model = YOLO(pose_model_path)
                     pose_results = pose_model.predict(
                         source=original_image, 
                         conf=pose_confidence, 

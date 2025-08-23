@@ -28,20 +28,20 @@ Convert the configuration system from mixed data/model holders to pure data repr
   - Create specialized functions for segmentation and pose models with validation
   - _Requirements: 6.2, 6.4_
 
-- [ ] 5. Update ImageTransforms to use model factory pattern
+- [x] 5. Update ImageTransforms to use model factory pattern
   - Modify ImageTransforms._get_model_from_config to use factory functions instead of direct model access
   - Update segment_image method to create models on-demand using factory
   - Update align_face_landmarks method to use factory for pose model creation
   - Ensure all model creation happens through factory functions, not config classes
   - _Requirements: 2.1, 2.2_
 
-- [ ] 6. Update image_processor package imports
+- [x] 6. Update image_processor package imports
   - Simplify app/image_processor/__init__.py to remove circular dependency imports
   - Remove import of ImageModelConfig from package level
   - Update package documentation to reflect new import patterns
   - _Requirements: 3.1_
 
-- [ ] 7. Update consuming modules to use direct imports
+- [x] 7. Update consuming modules to use direct imports
   - Update app/siamese_network/input_processor.py to import directly from transforms module
   - Update any other modules using package-level imports to use direct imports
   - Remove any code expecting loaded models from configuration classes

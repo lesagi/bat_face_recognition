@@ -1,5 +1,4 @@
 import os
-import tensorflow as tf
 import cv2
 
 def is_DS_Store(file):
@@ -14,6 +13,8 @@ def strip_filename_from_path(full_path):
     return filename
 
 def create_random_image(image):
+    # Import TensorFlow only when this function is actually called
+    import tensorflow as tf
     shape = tf.shape(image).numpy()
     random_image = tf.random.uniform(shape, minval=0, maxval=256, dtype=tf.int32)
     return random_image

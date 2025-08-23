@@ -14,7 +14,7 @@ app_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, app_dir)
 
 from image_processor.transforms import ImageTransforms
-from image_processor import ImageProcessor
+from image_processor.processor import ImageProcessor
 from background_generation.background_generator import BackgroundGenerator
 
 

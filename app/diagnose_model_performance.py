@@ -13,7 +13,7 @@ import numpy as np
 app_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, app_dir)
 
-from image_processor import ImageProcessor
+from image_processor.processor import ImageProcessor
 from ultralytics import YOLO
 
 
