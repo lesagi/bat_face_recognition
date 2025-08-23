@@ -1,15 +1,58 @@
 #!/usr/bin/env python3
 """
-CLI interface for YOLO Segmentation Data Augmentation
+CLI interface for the YOLO Augmenter system using Click.
 
-Usage:
-    python -m app.yolo_augmenter --input /path/to/source --output /path/to/target [options]
+This module provides a unified command-line interface that can auto-detect
+data types and route to appropriate augmenters.
 """
 
 import click
 import sys
 from pathlib import Path
-from .segmentation_augmenter import YoloSegmentationAugmenter
+from .base.config import AugmentationConfig
+from .base.pipeline_factory import AugmentationPipelineFactory
+from .augmenters.plain_image_augmenter import PlainImageAugmenter
+
+
+def detect_data_type(input_dir: Path) -> str:
+    """Auto-detect the type of data in the input directory."""
+    input_dir = Path(input_dir)
+    
+    # Check for YOLO dataset structure
+    train_images = input_dir / "train" / "images"
+    train_labels = input_dir / "train" / "labels"
+    
+    if train_images.exists() and train_labels.exists():
+        # Check if labels are segmentation or detection format
+        label_files = list(train_labels.glob("*.txt"))
+        if label_files:
+            # Read first label file to determine format
+            try:
+                with open(label_files[0], 'r') as f:
+                    first_line = f.readline().strip()
+                    if first_line:
+                        parts = first_line.split()
+                        if len(parts) > 5:  # More than class + bbox coords
+                            return "segmentation"
+                        else:
+                            return "detection"
+            except Exception:
+                pass
+        
+        # Default to detection if we can't determine
+        return "detection"
+    
+    # Check for plain images
+    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']
+    image_files = []
+    for ext in image_extensions:
+        image_files.extend(list(input_dir.glob(f"*{ext}")))
+        image_files.extend(list(input_dir.glob(f"*{ext.upper()}")))
+    
+    if image_files:
+        return "plain"
+    
+    return "unknown"
 
 
 def check_dependencies():
@@ -41,12 +84,6 @@ def check_dependencies():
         missing_deps.append("pyyaml")
     
     try:
-        import tqdm
-        click.echo("✅ tqdm available")
-    except ImportError:
-        missing_deps.append("tqdm")
-    
-    try:
         import click as click_lib
         click.echo(f"✅ Click version: {click_lib.__version__}")
     except ImportError:
@@ -60,208 +97,156 @@ def check_dependencies():
     return True
 
 
-def validate_input_structure(input_dir: Path) -> bool:
-    """Validate that input directory has correct YOLO dataset structure."""
-    required_dirs = [
-        input_dir / "train" / "images",
-        input_dir / "train" / "labels"
-    ]
-    
-    # Check required directories
-    for dir_path in required_dirs:
-        if not dir_path.exists():
-            click.echo(f"❌ Required directory not found: {dir_path}", err=True)
-            return False
-    
-    # Check if there are images
-    train_images = input_dir / "train" / "images"
-    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
-    image_files = []
-    
-    for ext in image_extensions:
-        image_files.extend(list(train_images.glob(f"*{ext}")))
-        image_files.extend(list(train_images.glob(f"*{ext.upper()}")))
-    
-    if not image_files:
-        click.echo(f"❌ No image files found in {train_images}", err=True)
-        click.echo(f"   Supported formats: {', '.join(image_extensions)}")
-        return False
-    
-    click.echo(f"✅ Found {len(image_files)} images in training set")
-    
-    # Check validation set (optional)
-    val_images = input_dir / "val" / "images"
-    if val_images.exists():
-        val_image_files = []
-        for ext in image_extensions:
-            val_image_files.extend(list(val_images.glob(f"*{ext}")))
-            val_image_files.extend(list(val_images.glob(f"*{ext.upper()}")))
-        click.echo(f"✅ Found {len(val_image_files)} images in validation set")
-    else:
-        click.echo("⚠️ No validation set found (optional)")
-    
-    return True
+@click.group()
+@click.option('--config', '-c', type=click.Path(exists=True), help='Configuration file path')
+@click.option('--debug', '-d', is_flag=True, help='Enable debug mode')
+@click.pass_context
+def cli(ctx, config, debug):
+    """🦇 YOLO Augmenter - Modular image augmentation system."""
+    ctx.ensure_object(dict)
+    ctx.obj['config'] = config
+    ctx.obj['debug'] = debug
 
 
-@click.command()
-@click.option(
-    '--input', '-i', 'input_dir',
-    required=True,
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    help='Input directory containing YOLO segmentation dataset'
-)
-@click.option(
-    '--output', '-o', 'output_dir',
-    required=True,
-    type=click.Path(path_type=Path),
-    help='Output directory for augmented dataset'
-)
-@click.option(
-    '--count', '-c',
-    default=10,
-    type=click.IntRange(1, 1000),
-    help='Number of augmentations per image (default: 10)'
-)
-@click.option(
-    '--verbose', '-v',
-    is_flag=True,
-    help='Enable verbose output'
-)
-@click.option(
-    '--check-deps',
-    is_flag=True,
-    help='Check if required dependencies are installed and exit'
-)
-@click.option(
-    '--force', '-f',
-    is_flag=True,
-    help='Overwrite output directory if it exists without prompting'
-)
-@click.help_option('--help', '-h')
-def main(input_dir: Path, output_dir: Path, count: int, verbose: bool, check_deps: bool, force: bool):
-    """
-    🦇 YOLO Segmentation Dataset Augmentation Tool
+@cli.command()
+@click.option('--input', '-i', required=True, type=click.Path(exists=True), help='Input directory')
+@click.option('--output', '-o', required=True, type=click.Path(), help='Output directory')
+@click.option('--preset', '-p', default='medium', help='Augmentation preset (light/medium/heavy)')
+@click.option('--force', '-f', is_flag=True, help='Overwrite output directory without prompting')
+@click.pass_context
+def auto(ctx, input, output, preset, force):
+    """Auto-detect data type and apply appropriate augmentation (default mode)."""
+    input_dir = Path(input)
+    output_dir = Path(output)
     
-    Augments YOLO segmentation datasets with proper mask and bbox transformations.
+    click.echo("🔍 Auto-detecting data type...")
+    data_type = detect_data_type(input_dir)
     
-    \b
-    Expected input directory structure:
-      input_dir/
-      ├── train/
-      │   ├── images/
-      │   │   ├── image1.jpg
-      │   │   └── image2.png
-      │   └── labels/
-      │       ├── image1.txt
-      │       └── image2.txt
-      └── val/ (optional)
-          ├── images/
-          └── labels/
-    
-    \b
-    Output structure:
-      output_dir/
-      ├── train/
-      │   ├── images/
-      │   │   ├── image1_a-000.jpg
-      │   │   ├── image1_a-001.jpg
-      │   │   └── ...
-      │   └── labels/
-      │       ├── image1_a-000.txt
-      │       ├── image1_a-001.txt
-      │       └── ...
-      ├── val/
-      │   ├── images/
-      │   └── labels/
-      └── dataset.yaml
-    
-    \b
-    Examples:
-      # Basic usage
-      python -m app.yolo_augmenter -i ./data/original -o ./data/augmented
-      
-      # With 20 augmentations per image
-      python -m app.yolo_augmenter -i ./data/original -o ./data/augmented -c 20
-      
-      # Force overwrite existing output
-      python -m app.yolo_augmenter -i ./data/original -o ./data/augmented --force
-    """
-    
-    # Check dependencies if requested
-    if check_deps:
-        if check_dependencies():
-            click.echo("✅ All dependencies are available!")
-        else:
-            sys.exit(1)
-        return
-    
-    click.echo("🦇 YOLO Segmentation Dataset Augmentation Tool")
-    click.echo("=" * 60)
-    
-    # Validate input structure
-    if not validate_input_structure(input_dir):
-        click.echo("\n❌ Input directory structure is invalid", err=True)
-        click.echo("Expected structure:")
-        click.echo("  input_dir/")
-        click.echo("  ├── train/")
-        click.echo("  │   ├── images/")
-        click.echo("  │   └── labels/")
-        click.echo("  └── val/ (optional)")
-        click.echo("      ├── images/")
-        click.echo("      └── labels/")
+    if data_type == "unknown":
+        click.echo("❌ Could not determine data type. Please specify manually.")
         sys.exit(1)
     
-    # Check dependencies
-    if not check_dependencies():
-        sys.exit(1)
+    click.echo(f"✅ Detected data type: {data_type}")
     
-    click.echo(f"\n📂 Input: {input_dir.absolute()}")
-    click.echo(f"📂 Output: {output_dir.absolute()}")
-    click.echo(f"🔢 Augmentations per image: {count}")
+    # Route to appropriate augmenter
+    if data_type == "plain":
+        plain(ctx, input, output, preset, force)
+    elif data_type == "detection":
+        detection(ctx, input, output, preset, force)
+    elif data_type == "segmentation":
+        segmentation(ctx, input, output, preset, force)
+
+
+@cli.command()
+@click.option('--input', '-i', required=True, type=click.Path(exists=True), help='Input directory with images')
+@click.option('--output', '-o', required=True, type=click.Path(), help='Output directory for augmented images')
+@click.option('--preset', '-p', default='medium', help='Augmentation preset (light/medium/heavy)')
+@click.option('--force', '-f', is_flag=True, help='Overwrite output directory without prompting')
+@click.pass_context
+def plain(ctx, input, output, preset, force):
+    """Augment plain images without labels."""
+    input_dir = Path(input)
+    output_dir = Path(output)
     
     # Handle existing output directory
     if output_dir.exists() and not force:
-        if not click.confirm(f"\n⚠️ Output directory exists: {output_dir}\nContinue?"):
+        if not click.confirm(f"⚠️ Output directory exists: {output_dir}\nContinue?"):
             click.echo("Aborted.")
-            sys.exit(0)
+            return
     
     try:
         # Create augmenter
-        augmenter = YoloSegmentationAugmenter(
+        augmenter = PlainImageAugmenter(
             source_dir=str(input_dir),
             target_dir=str(output_dir),
-            augmentations_per_image=count
+            preset=preset,
+            config_path=ctx.obj['config'],
+            debug=ctx.obj['debug']
         )
         
         # Run augmentation
-        with click.progressbar(length=1, label='Running augmentation') as bar:
-            results = augmenter.augment_dataset()
-            bar.update(1)
+        results = augmenter.augment_dataset()
         
-        click.echo("\n🎉 AUGMENTATION COMPLETE!")
-        click.echo("=" * 40)
-        click.echo("📈 Results:")
-        for split, result_count in results.items():
-            click.echo(f"   {split}: {result_count} successful augmentations")
-        
-        click.echo(f"\n📁 Augmented dataset: {output_dir.absolute()}")
-        click.echo(f"📝 Dataset config: {output_dir.absolute() / 'dataset.yaml'}")
-        
-        click.echo(f"\n💡 Next steps:")
-        click.echo("1. Review the augmented images and labels")
-        click.echo("2. Train your YOLO model with:")
-        click.echo(f"   yolo segment train data={output_dir.absolute() / 'dataset.yaml'} model=yolov8n-seg.pt epochs=100")
-        
-    except KeyboardInterrupt:
-        click.echo("\n\n⚠️ Interrupted by user", err=True)
-        sys.exit(1)
+        if results:
+            click.echo(f"\n🎉 Augmentation completed!")
+            click.echo(f"📁 Output: {output_dir.absolute()}")
+        else:
+            click.echo("❌ Augmentation failed")
+            sys.exit(1)
+            
     except Exception as e:
-        click.echo(f"\n❌ Error during augmentation: {e}", err=True)
-        if verbose:
+        click.echo(f"❌ Error: {e}", err=True)
+        if ctx.obj['debug']:
             import traceback
             traceback.print_exc()
         sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()
+@cli.command()
+@click.option('--input', '-i', required=True, type=click.Path(exists=True), help='Input directory with YOLO detection dataset')
+@click.option('--output', '-o', required=True, type=click.Path(), help='Output directory for augmented dataset')
+@click.option('--preset', '-p', default='medium', help='Augmentation preset (light/medium/heavy)')
+@click.option('--force', '-f', is_flag=True, help='Overwrite output directory without prompting')
+@click.pass_context
+def detection(ctx, input, output, preset, force):
+    """Augment YOLO detection dataset (bounding boxes)."""
+    click.echo("⚠️ YOLO detection augmentation not yet implemented")
+    click.echo("This will be implemented in the next phase")
+    sys.exit(1)
+
+
+@cli.command()
+@click.option('--input', '-i', required=True, type=click.Path(exists=True), help='Input directory with YOLO segmentation dataset')
+@click.option('--output', '-o', required=True, type=click.Path(), help='Output directory for augmented dataset')
+@click.option('--preset', '-p', default='medium', help='Augmentation preset (light/medium/heavy)')
+@click.option('--force', '-f', is_flag=True, help='Overwrite output directory without prompting')
+@click.pass_context
+def segmentation(ctx, input, output, preset, force):
+    """Augment YOLO segmentation dataset (masks)."""
+    click.echo("⚠️ YOLO segmentation augmentation not yet implemented")
+    click.echo("This will be implemented in the next phase")
+    sys.exit(1)
+
+
+@cli.command()
+@click.option('--preset', '-p', help='Show info for specific preset')
+@click.pass_context
+def info(ctx, preset):
+    """Show information about available presets and configurations."""
+    config = AugmentationConfig(ctx.obj['config'])
+    
+    if preset:
+        # Show specific preset info
+        pipeline_factory = AugmentationPipelineFactory(config)
+        info = pipeline_factory.get_pipeline_info(preset)
+        if info:
+            click.echo(f"🔧 Preset: {info['preset_name']}")
+            click.echo(f"📊 Total augmentations: {info['total_augmentations']}")
+            click.echo(f"⚙️ Parameters:")
+            for param_name, param_info in info['parameters'].items():
+                steps = param_info['steps']
+                custom = "custom" if param_info['custom'] else "default"
+                click.echo(f"   {param_name}: {steps} steps ({custom})")
+        else:
+            click.echo(f"❌ Preset '{preset}' not found")
+    else:
+        # List all presets
+        presets = config.list_presets()
+        click.echo("📋 Available presets:")
+        for preset_name in presets:
+            pipeline_factory = AugmentationPipelineFactory(config)
+            info = pipeline_factory.get_pipeline_info(preset_name)
+            click.echo(f"   {preset_name}: {info['total_augmentations']} augmentations")
+
+
+@cli.command()
+def check_deps():
+    """Check if required dependencies are installed."""
+    if check_dependencies():
+        click.echo("✅ All dependencies are available!")
+    else:
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    cli()
