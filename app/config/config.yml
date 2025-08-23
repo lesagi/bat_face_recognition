@@ -27,8 +27,9 @@ mlflow:
 # =============================================================================
 models:
   # Trained YOLO Segmentation Model
+  # rousettus: /Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt
   segmentation:
-    model_path: "/Users/MAC/Documents/bat_face_rec/unified_segmentation/data/runs/weights/best.pt"
+    model_path: "/Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
     model_type: "yolo_segmentation"
     confidence_threshold: 0.5
   
