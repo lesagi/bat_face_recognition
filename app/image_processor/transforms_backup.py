@@ -33,7 +33,6 @@ class ImageTransforms:
         try:
             from config.loader import load_config
             from models.yolo_factory import create_yolo_model
-            from models.exceptions import ModelConfigurationError, ModelCreationError
             
             config = load_config()
             
@@ -52,17 +51,8 @@ class ImageTransforms:
             model = create_yolo_model(model_config)
             return model
             
-        except ModelConfigurationError as e:
-            print(f"⚠️  Model configuration error: {e}")
-            return None
-        except ModelCreationError as e:
-            print(f"⚠️  Model creation failed: {e}")
-            return None
-        except ImportError as e:
-            print(f"⚠️  Missing dependencies for {model_type} model: {e}")
-            return None
         except Exception as e:
-            print(f"⚠️  Unexpected error creating {model_type} model: {e}")
+            print(f"⚠️  Error creating model: {e}")
             return None
 
     @staticmethod
@@ -1461,7 +1451,10 @@ class ImageTransforms:
 
             return face_crop
 
-
+        except ImportError:
+            if debug:
+                print("YOLO (ultralytics) not available for face centering")
+            return None
         except Exception as e:
             if debug:
                 print(f"YOLO pose face centering failed: {e}")
@@ -1647,7 +1640,7 @@ class ImageTransforms:
                 print(f"Crop region: [{crop_x1}, {crop_y1}, {crop_x2}, {crop_y2}]")
                 print(f"Crop size: {crop.shape}")
  
-            # Get pose keypoints to determine centering using factory pattern
+            # Get pose keypoints to determine centering
             try:
                 from config.loader import load_config
                 cfg = load_config()
@@ -1796,10 +1789,11 @@ class ImageTransforms:
                     print(f"⚠️  Config loading failed: {e}")
                 return annotated_image
             
-            # Step 1: Run segmentation model using factory pattern
-            seg_model = ImageTransforms._get_model_from_config("segmentation")
+            # Step 1: Run segmentation model
             seg_confidence = cfg.models.segmentation.confidence_threshold
             
+            # Get segmentation model using factory pattern
+            seg_model = ImageTransforms._get_model_from_config("segmentation")
             if seg_model is not None:
                 try:
                     seg_results = seg_model.predict(
@@ -1880,10 +1874,11 @@ class ImageTransforms:
                 if debug:
                     print("⚠️  Segmentation model not available or path invalid")
             
-            # Step 2: Run pose model using factory pattern
-            pose_model = ImageTransforms._get_model_from_config("pose")
+            # Step 2: Run pose model
             pose_confidence = cfg.models.pose.confidence_threshold
             
+            # Get pose model using factory pattern
+            pose_model = ImageTransforms._get_model_from_config("pose")
             if pose_model is not None:
                 try:
                     pose_results = pose_model.predict(

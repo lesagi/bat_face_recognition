@@ -6,7 +6,6 @@ import numpy as np
 import cv2
 from utils.image_utils import strip_filename_from_path
 import os
-import tensorflow as tf
 import time
 from requests.exceptions import RequestException, Timeout, ConnectionError
 
