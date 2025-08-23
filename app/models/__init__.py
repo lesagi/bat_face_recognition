@@ -20,7 +20,6 @@ Usage:
 """
 
 from typing import Protocol, Any
-from config.model_config import ImageModelConfig
 
 
 class ModelFactory(Protocol):
@@ -30,11 +29,11 @@ class ModelFactory(Protocol):
     It ensures type safety and consistency across different model creation functions.
     """
     
-    def create_model(self, config: ImageModelConfig) -> Any:
+    def create_model(self, config: Any) -> Any:
         """Create a model instance from configuration.
         
         Args:
-            config: ImageModelConfig instance containing model configuration data
+            config: Model configuration instance containing model configuration data
             
         Returns:
             Model instance ready for inference or training
@@ -49,5 +48,23 @@ class ModelFactory(Protocol):
 # Import exception classes
 from .exceptions import ModelConfigurationError, ModelCreationError
 
-# Export the protocol and exceptions for external use
-__all__ = ["ModelFactory", "ModelConfigurationError", "ModelCreationError"]
+# Import factory functions
+from .yolo_factory import (
+    create_yolo_model,
+    create_segmentation_model,
+    create_pose_model,
+    validate_model_config,
+    get_model_info
+)
+
+# Export the protocol, exceptions, and factory functions for external use
+__all__ = [
+    "ModelFactory", 
+    "ModelConfigurationError", 
+    "ModelCreationError",
+    "create_yolo_model",
+    "create_segmentation_model", 
+    "create_pose_model",
+    "validate_model_config",
+    "get_model_info"
+]
