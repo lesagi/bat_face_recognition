@@ -9,7 +9,7 @@ Convert the configuration system from mixed data/model holders to pure data repr
   - Update type hints to use strings instead of model instances
   - _Requirements: 1.1, 5.2_
 
-- [ ] 2. Update ModelsConfig to create ImageModelConfig instances
+- [x] 2. Update ModelsConfig to create ImageModelConfig instances
   - Modify ModelsConfig._create_model_config to instantiate ImageModelConfig with data from config.yml
   - Update property methods (segmentation, pose, siamese) to return ImageModelConfig instances instead of raw dictionaries
   - Ensure no heavy imports are triggered during ModelsConfig initialization
