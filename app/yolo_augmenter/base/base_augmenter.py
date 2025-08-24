@@ -29,6 +29,9 @@ class BaseAugmenter(ABC):
         self.config = AugmentationConfig(config_path)
         self.pipeline_factory = AugmentationPipelineFactory(self.config)
         
+        # Track current preset for pipeline factory
+        self.config.current_preset = preset
+        
         # Create target directory structure
         self.setup_directories()
         

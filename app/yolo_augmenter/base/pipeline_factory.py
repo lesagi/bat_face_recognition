@@ -49,6 +49,10 @@ class AugmentationPipelineFactory:
             if param_name == 'default_steps_per_attribute':
                 continue
             
+            # Check if this transform is disabled
+            if isinstance(param_config, dict) and param_config.get('enabled') == False:
+                continue  # Skip disabled transforms entirely
+            
             # Extract parameter value and steps
             if isinstance(param_config, dict):
                 # Dictionary parameter - extract value and check for custom steps
@@ -89,57 +93,120 @@ class AugmentationPipelineFactory:
     
     def _create_transforms_from_combinations(self, param_combinations: List[Dict[str, Any]]) -> A.Compose:
         """Create albumentations transforms from parameter combinations."""
-        # For now, we'll create a single transform that can handle all combinations
-        # In the future, we might want to create separate transforms for each combination
+        # Get the preset configuration to determine which transforms to enable
+        preset_name = getattr(self.config, 'current_preset', 'medium')
+        preset_config = self.config.get_preset(preset_name)
         
-        # Create a flexible transform that can be parameterized
-        transform = A.Compose([
-            A.OneOf([
-                A.Rotate(limit=(-30, 30), p=0.7),
-                A.Affine(
-                    scale=(0.7, 1.3),
-                    translate_percent=(-0.1, 0.1),
-                    rotate=(-30, 30),
-                    shear=(-8, 8),
-                    p=0.5,
-                ),
-                A.Perspective(scale=(0.02, 0.08), p=0.3),
-            ], p=0.8),
-            
-            A.OneOf([
-                A.ColorJitter(
-                    brightness=0.4, contrast=0.4, saturation=0.4, hue=0.2, p=0.8
-                ),
-                A.RandomBrightnessContrast(
-                    brightness_limit=0.4, contrast_limit=0.4, p=0.7
-                ),
-                A.HueSaturationValue(
-                    hue_shift_limit=20,
-                    sat_shift_limit=30,
-                    val_shift_limit=20,
-                    p=0.6,
-                ),
-                A.RGBShift(
-                    r_shift_limit=20, g_shift_limit=20, b_shift_limit=20, p=0.5
-                ),
-            ], p=0.9),
-            
-            A.OneOf([
-                A.GaussNoise(var_limit=(5, 50), p=0.6),
-                A.ISONoise(
-                    color_shift=(0.01, 0.05), intensity=(0.1, 0.5), p=0.4
-                ),
-                A.MultiplicativeNoise(multiplier=(0.9, 1.1), p=0.4),
-            ], p=0.4),
-            
-            A.OneOf([
-                A.Blur(blur_limit=5, p=0.3),
-                A.MotionBlur(blur_limit=5, p=0.3),
-                A.Sharpen(alpha=(0.1, 0.5), lightness=(0.7, 1.0), p=0.2),
-            ], p=0.2),
-        ])
+        transforms = []
         
-        return transform
+        # Create transforms based on actual configuration values
+        if preset_config:
+            # Brightness and Contrast
+            if self._is_transform_enabled(preset_config, 'brightness') or self._is_transform_enabled(preset_config, 'contrast'):
+                brightness_limit = preset_config.get('brightness', {}).get('limit', 0.2)
+                contrast_limit = preset_config.get('contrast', {}).get('limit', 0.2)
+                transforms.append(A.RandomBrightnessContrast(
+                    brightness_limit=(-brightness_limit, brightness_limit),
+                    contrast_limit=(-contrast_limit, contrast_limit),
+                    p=1.0
+                ))
+            
+            # Saturation and Hue
+            if self._is_transform_enabled(preset_config, 'saturation') or self._is_transform_enabled(preset_config, 'hue_shift'):
+                saturation_limit = preset_config.get('saturation', {}).get('limit', 0.2)
+                hue_limit = preset_config.get('hue_shift', {}).get('limit', 20)
+                transforms.append(A.HueSaturationValue(
+                    hue_shift_limit=(-hue_limit, hue_limit),
+                    sat_shift_limit=(-saturation_limit, saturation_limit),
+                    val_shift_limit=(-saturation_limit, saturation_limit),
+                    p=1.0
+                ))
+            
+            # Multiplicative Noise
+            if self._is_transform_enabled(preset_config, 'noise'):
+                noise_limit = preset_config.get('noise', {}).get('limit', 0.2)
+                transforms.append(A.MultiplicativeNoise(
+                    multiplier=(1.0 - noise_limit, 1.0 + noise_limit),
+                    p=1.0
+                ))
+            
+            # Gaussian Noise
+            if self._is_transform_enabled(preset_config, 'gaussian_noise'):
+                gauss_limit = preset_config.get('gaussian_noise', {}).get('limit', 0.2)
+                # For gaussian noise, use var_limit to control noise intensity
+                # Higher values = more noise
+                transforms.append(A.GaussNoise(
+                    var_limit=(0, gauss_limit),
+                    p=1.0
+                ))
+            
+            # ISO Noise
+            if self._is_transform_enabled(preset_config, 'iso_noise'):
+                iso_config = preset_config.get('iso_noise', {})
+                intensity = iso_config.get('intensity', [0.1, 0.5])
+                color_shift = iso_config.get('color_shift', [0.01, 0.05])
+                transforms.append(A.ISONoise(
+                    color_shift=color_shift,
+                    intensity=intensity,
+                    p=1.0
+                ))
+            
+            # RGB Shift
+            if self._is_transform_enabled(preset_config, 'rgb_shift'):
+                rgb_limit = preset_config.get('rgb_shift', {}).get('limit', 15)
+                transforms.append(A.RGBShift(
+                    r_shift_limit=(-rgb_limit, rgb_limit),
+                    g_shift_limit=(-rgb_limit, rgb_limit),
+                    b_shift_limit=(-rgb_limit, rgb_limit),
+                    p=1.0
+                ))
+            
+            # Geometric transformations (only if enabled)
+            if self._is_transform_enabled(preset_config, 'rotation'):
+                rotation_limit = preset_config.get('rotation', {}).get('limit', 30)
+                transforms.append(A.Rotate(limit=(-rotation_limit, rotation_limit), p=1.0))
+            
+            if self._is_transform_enabled(preset_config, 'scale'):
+                scale_config = preset_config.get('scale', {})
+                if 'range' in scale_config:
+                    scale_range = scale_config['range']
+                else:
+                    scale_limit = scale_config.get('limit', 0.2)
+                    scale_range = (1.0 - scale_limit, 1.0 + scale_limit)
+                transforms.append(A.Affine(scale=scale_range, p=1.0))
+            
+            if self._is_transform_enabled(preset_config, 'perspective'):
+                perspective_scale = preset_config.get('perspective', {}).get('scale', [0.02, 0.08])
+                transforms.append(A.Perspective(scale=perspective_scale, p=1.0))
+            
+            # Blur transformations
+            if self._is_transform_enabled(preset_config, 'blur'):
+                blur_limit = preset_config.get('blur', {}).get('limit', 5)
+                transforms.append(A.Blur(blur_limit=blur_limit, p=1.0))
+            
+            if self._is_transform_enabled(preset_config, 'motion_blur'):
+                motion_limit = preset_config.get('motion_blur', {}).get('limit', 5)
+                transforms.append(A.MotionBlur(blur_limit=motion_limit, p=1.0))
+        
+        # If no transforms are enabled, return identity transform
+        if not transforms:
+            return A.Compose([A.NoOp()])
+        
+        return A.Compose(transforms)
+    
+    def _is_transform_enabled(self, preset_config: Dict[str, Any], transform_name: str) -> bool:
+        """Check if a specific transform is enabled in the preset configuration."""
+        if transform_name not in preset_config:
+            return False
+        
+        transform_config = preset_config[transform_name]
+        
+        # If it's a dictionary with 'enabled' field, check that
+        if isinstance(transform_config, dict):
+            return transform_config.get('enabled', True)
+        
+        # If it's a simple value, assume it's enabled
+        return True
     
     def get_pipeline_info(self, preset_name: str) -> Dict[str, Any]:
         """Get information about a pipeline including parameter combinations."""
@@ -157,24 +224,30 @@ class AugmentationPipelineFactory:
             'combinations': param_combinations[:5]  # Show first 5 combinations
         }
         
-        # Extract parameter information
+        # Extract parameter information - only for enabled transforms
         for param_name, param_config in preset_config.items():
-            if param_name != 'default_steps_per_attribute':
-                if isinstance(param_config, dict):
-                    if 'steps' in param_config:
-                        info['parameters'][param_name] = {
-                            'steps': param_config['steps'],
-                            'custom': True
-                        }
-                    else:
-                        info['parameters'][param_name] = {
-                            'steps': preset_config.get('default_steps_per_attribute', 4),
-                            'custom': False
-                        }
+            if param_name == 'default_steps_per_attribute':
+                continue
+                
+            # Check if this transform is disabled
+            if isinstance(param_config, dict) and param_config.get('enabled') == False:
+                continue  # Skip disabled transforms
+            
+            if isinstance(param_config, dict):
+                if 'steps' in param_config:
+                    info['parameters'][param_name] = {
+                        'steps': param_config['steps'],
+                        'custom': True
+                    }
                 else:
                     info['parameters'][param_name] = {
                         'steps': preset_config.get('default_steps_per_attribute', 4),
                         'custom': False
                     }
+            else:
+                info['parameters'][param_name] = {
+                    'steps': preset_config.get('default_steps_per_attribute', 4),
+                    'custom': False
+                }
         
         return info

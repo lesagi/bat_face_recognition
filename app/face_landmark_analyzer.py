@@ -37,8 +37,8 @@ class FaceLandmarkAnalyzer:
         
         # Pose model config
         pose_config = config.models.pose
-        self.pose_model_path = pose_config.get("model_path")
-        self.confidence_threshold = pose_config.get("confidence_threshold", 0.5)
+        self.pose_model_path = pose_config.model_path
+        self.confidence_threshold = pose_config.confidence_threshold
         
         # Siamese network preprocessing config
         siamese_config = config.siamese_network.training.get('data_preprocessing', {})

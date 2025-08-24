@@ -10,14 +10,20 @@ Usage:
     python generate_predictions.py -m model_path -i data_path --verbose
 """
 
-import argparse
 import os
 import sys
+
+# Fix TensorFlow mutex lock issues on macOS
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['TF_NUM_INTEROP_THREADS'] = '1'
+os.environ['TF_NUM_INTRAOP_THREADS'] = '1'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+import argparse
 import csv
 import numpy as np
-import tensorflow as tf
 from datetime import datetime
-from tensorflow.keras.metrics import Precision, Recall
 
 # Add visualization libraries
 import matplotlib
@@ -29,8 +35,6 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 # Add the app directory to Python path to import modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from siamese_network.network import L1Dist
-from siamese_network.data_splitter import SiameseNetworkTrainingDataSplitter
 from utils.image_utils import is_img_file
 
 
@@ -45,6 +49,9 @@ def preprocess_siamese_input_flexible(file_path, target_size=224):
     Returns:
         tf.Tensor: Preprocessed image tensor
     """
+    # Import TensorFlow only when needed
+    import tensorflow as tf
+    
     try:
         # Read in image from file path
         byte_img = tf.io.read_file(file_path)
@@ -84,6 +91,10 @@ def load_siamese_model(model_path):
     Returns:
         tf.keras.Model: Loaded Siamese model
     """
+    # Import TensorFlow and L1Dist only when needed
+    import tensorflow as tf
+    from siamese_network.network import L1Dist
+    
     try:
         model = tf.keras.models.load_model(
             model_path,
@@ -440,6 +451,10 @@ def generate_predictions(
     # Shuffle the pairs
     random.shuffle(raw_data_pairs)
 
+    # Import TensorFlow metrics only when needed
+    import tensorflow as tf
+    from tensorflow.keras.metrics import Precision, Recall
+    
     # Initialize metrics
     r = Recall()
     p = Precision()
