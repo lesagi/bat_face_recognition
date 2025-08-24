@@ -32,3 +32,7 @@ class YOLOSegmentationConfig:
     @property
     def augmentation(self) -> Dict[str, Any]:
         return self._config.get("augmentation", {})
+    
+    @property
+    def square_crop(self) -> Dict[str, Any]:
+        return self._config.get("square_crop", {})

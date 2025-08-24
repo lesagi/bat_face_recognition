@@ -30,7 +30,7 @@ models:
   # unified: /Users/MAC/Documents/bat_face_rec/unified_segmentation/data/runs/weights/best.pt
   # rousettus: /Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt
   segmentation:
-    model_path: "/Users/MAC/Documents/bat_face_rec/unified_segmentation/data/runs/weights/best.pt"
+    model_path: "/Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
     model_type: "yolo_segmentation"
     confidence_threshold: 0.5
   
@@ -210,6 +210,14 @@ yolo_segmentation:
       loose_crop_scale: [0.4, 0.7]  # Simulate looser margins
       resize_variations: [480, 640, 800]  # Different input sizes
       crop_ratio_range: [0.9, 1.1]  # Keep roughly square
+  
+  # Square crop configuration
+  square_crop:
+    default_buffer_multiplier: 1.1
+    default_output_format: "jpg"
+    default_quality: 95
+    default_padding_strategy: "random_colors"
+    auto_discover_datasets: true
 
 # =============================================================================
 # VIDEO PROCESSING CONFIGURATION
