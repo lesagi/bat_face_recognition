@@ -11,7 +11,7 @@ import cv2
 from typing import Optional, Tuple, List, Union, Any
 from dataclasses import dataclass
 
-from .prediction_structures import (
+from prediction_structures import (
     SegmentationPrediction, 
     PosePrediction, 
     PredictionBundle

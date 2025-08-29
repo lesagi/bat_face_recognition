@@ -64,7 +64,7 @@ class BackgroundGenerator:
         height: int,
         width: int,
         max_retries: int = 3,
-        timeout: float = 10,
+        timeout: float = 30,
         fallback_to_generated: bool = True,
     ) -> np.ndarray:
         """Create a background from Picsum Photos with retry mechanism.

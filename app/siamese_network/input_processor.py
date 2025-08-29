@@ -47,6 +47,10 @@ import click
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
+# Add current directory to path for local imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
 from image_processor import ImageTransforms
 from background_generation.background_generator import BackgroundGenerator
 from utils.image_utils import is_img_file
@@ -54,15 +58,21 @@ from config.loader import load_config
 
 # Import prediction structures and caching
 try:
-    from .prediction_structures import (
+    print("🔍 Attempting to import prediction modules...")
+    from prediction_structures import (
         SegmentationPrediction, 
         PosePrediction, 
         PredictionBundle
     )
-    from .prediction_cache import CacheManager, CacheConfig
-    from .prediction_transforms import PredictionTransformer, CoordinateMapper
+    print("✅ Successfully imported prediction_structures")
+    from prediction_cache import CacheManager, CacheConfig
+    print("✅ Successfully imported prediction_cache")
+    from prediction_transforms import PredictionTransformer, CoordinateMapper
+    print("✅ Successfully imported prediction_transforms")
     PREDICTION_IMPORTS_AVAILABLE = True
-except ImportError:
+    print("✅ All prediction imports successful")
+except ImportError as e:
+    print(f"❌ Import error: {e}")
     # Fallback for when prediction modules are not available
     SegmentationPrediction = None
     PosePrediction = None
@@ -72,6 +82,7 @@ except ImportError:
     PredictionTransformer = None
     CoordinateMapper = None
     PREDICTION_IMPORTS_AVAILABLE = False
+    print("⚠️ Prediction imports not available, skipping cache")
 
 
 class SiamesePreprocessingPipeline:
@@ -123,7 +134,7 @@ class SiamesePreprocessingPipeline:
         self.augmentation_enabled = augmentation_config.get('enabled', False)
         self.augmentation_preset = augmentation_config.get('preset', 'noise_color_only')
         self.augmentation_count = augmentation_config.get('count', 5)
-        self.augmentation_config_file = augmentation_config.get('config_file', 'config/augmentation_noise_color.yml')
+        self.augmentation_config_file = augmentation_config.get('config_file', os.path.join(parent_dir, 'config', 'augmentation_noise_color.yml'))
         
         # Prediction transformation settings
         self.transform_predictions = augmentation_config.get('transform_predictions', True)
@@ -277,12 +288,15 @@ class SiamesePreprocessingPipeline:
                 print(f"⚠️ Failed to get cached predictions: {e}")
             return None
     
-    def _cache_predictions(self, image_path: str, predictions: PredictionBundle) -> bool:
+    def _cache_predictions(self, image_path: str, predictions: PredictionBundle, force: bool = False) -> bool:
         """Cache predictions for an image."""
         if not PREDICTION_IMPORTS_AVAILABLE or self.cache_manager is None:
             return False
         
         try:
+            if force and not self.cache_manager.is_cached(image_path, "both"):
+                return False
+            
             return self.cache_manager.cache_predictions(image_path, "both", predictions)
         except Exception as e:
             if hasattr(self, 'debug') and self.debug:
@@ -293,9 +307,13 @@ class SiamesePreprocessingPipeline:
                                  pose_prediction: Optional[PosePrediction] = None) -> Optional[PredictionBundle]:
         """Create a prediction bundle from individual predictions."""
         if not PREDICTION_IMPORTS_AVAILABLE:
+            print(f"⚠️ Prediction imports not available, skipping cache")
             return None
         
         try:
+            print(f"🔍 Creating prediction bundle: {image_path}")
+            print(f"🔍 Segmentation prediction: {segmentation_prediction}")
+            print(f"🔍 Pose prediction: {pose_prediction}")
             bundle = PredictionBundle(
                 segmentation=segmentation_prediction,
                 pose=pose_prediction,
@@ -363,7 +381,8 @@ class SiamesePreprocessingPipeline:
         try:
             # Import augmentation system
             try:
-                from yolo_augmenter.augmenters.plain_image_augmenter import PlainImageAugmenter
+                from yolo_augmenter.base.config import AugmentationConfig
+                from yolo_augmenter.base.pipeline_factory import AugmentationPipelineFactory
                 AUGMENTATION_AVAILABLE = True
             except ImportError:
                 AUGMENTATION_AVAILABLE = False
@@ -373,37 +392,39 @@ class SiamesePreprocessingPipeline:
             if not AUGMENTATION_AVAILABLE:
                 return []
             
-            # Create temporary augmenter instance
-            augmenter = PlainImageAugmenter(
-                source_dir=None,
-                target_dir=None,
-                preset=preset,
-                config_path=self.augmentation_config_file
-            )
+            # Create configuration and pipeline factory
+            config = AugmentationConfig(self.augmentation_config_file)
+            pipeline_factory = AugmentationPipelineFactory(config)
+            
+            # Create augmentation pipeline for the specified preset
+            transform, total_augmentations = pipeline_factory.create_pipeline_from_preset(preset)
+            
+            if transform is None:
+                print(f"⚠️ Failed to create augmentation pipeline for preset: {preset}")
+                return []
             
             # Apply augmentation
             augmented_images = []
+            print(f"🔍 Applying augmentation preset: {preset}")
+            print(f"🔍 Transform object: {transform}")
+            print(f"🔍 Image shape: {image.shape}")
+            
             for i in range(count):
                 try:
-                    augmented = augmenter.augment_single_image(image, i)
+                    # Apply the transform to the image
+                    print(f"🔍 Applying transform {i+1}/{count}...")
+                    augmented = transform(image=image)['image']
                     if augmented is not None:
                         augmented_images.append(augmented)
-                        
-                        # TODO: Extract transformation matrix from augmenter
-                        # The YOLO Augmenter should provide transformation information
-                        # that we can use to transform predictions
-                        
-                        # For now, we'll pass a placeholder transformation matrix
-                        # In a full implementation, this would be the actual transformation
-                        # applied to create the augmented image
-                        transformation_matrix = f"augmentation_{i}"  # Placeholder
+                        print(f"✅ Created augmented image {i+1}/{count} with shape: {augmented.shape}")
                         
                         if hasattr(self, 'debug') and self.debug:
-                            print(f"🔍 Created augmented image {i} with transformation: {transformation_matrix}")
+                            print(f"🔍 Created augmented image {i+1}/{count}")
                             
                 except Exception as e:
-                    if hasattr(self, 'debug') and self.debug:
-                        print(f"⚠️ Augmentation {i} failed: {e}")
+                    print(f"⚠️ Augmentation {i+1} failed: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
             
             return augmented_images
@@ -412,29 +433,36 @@ class SiamesePreprocessingPipeline:
             print(f"⚠️ Augmentation failed: {e}")
             return []
 
-    def preprocess_single_image(self, image_path: str, debug: bool = False, output_dir: str = None) -> Optional[np.ndarray]:
-        try:
-            # Load image
-            image_array = cv2.imread(image_path)
-            if image_array is None:
-                print(f"❌ Failed to load image: {image_path}")
-                return None
+    def preprocess_single_image_from_path(self, image_path: str, debug: bool = False, output_dir: str = None) -> Optional[np.ndarray]:
+        image_array = cv2.imread(image_path)
+        base_filename = os.path.splitext(os.path.basename(image_path))[0]
+        if image_array is None:
+            print(f"❌ Failed to load image: {image_path}")
+            return None
+        
+        return self.preprocess_single_image(image_array, base_filename, image_path, debug, output_dir)
             
-            current_image = image_array
+
+    def preprocess_single_image(self, img: np.ndarray, base_filename: str, cached_predictions_key: str = None, debug: bool = False, output_dir: str = None) -> Optional[np.ndarray]:
+        try:
+            current_image = img
             
             # Setup debug output and base filename
-            base_filename = os.path.splitext(os.path.basename(image_path))[0]
-            
             if debug:
                 if not output_dir:
                     raise Exception("Debug flag is True but no debug directory provided. Please specify --debug-dir.")
                 
                 os.makedirs(output_dir, exist_ok=True)
             
+            # Load cached predictions if available
+            cached_predictions = self._get_cached_predictions(cached_predictions_key)
+            
             # Step 1: Face alignment using YOLO pose landmarks
-            # Align face using YOLO pose landmarks (model loaded from config automatically)
+            # Use cached pose prediction if available, otherwise run model inference
+            pose_prediction = cached_predictions.pose if cached_predictions else None
             alignment_result = ImageTransforms.align_face_landmarks(
                 current_image,
+                pose_prediction=pose_prediction,
                 face_detector_type="yolo_pose",
                 debug=debug,
                 debug_dir=output_dir,
@@ -443,19 +471,38 @@ class SiamesePreprocessingPipeline:
             
             if alignment_result is not None and alignment_result[0] is not None:
                 current_image = alignment_result[0]  # Extract the aligned image from the tuple
+                # Update pose prediction if we got a new one
+                if alignment_result[1] is not None:
+                    pose_prediction = alignment_result[1]
             
             # Step 2: Get segmentation mask from aligned/original image
-            # Get segmentation mask from aligned/original image
-            mask = ImageTransforms.segment_image(
-                current_image,
-                debug=debug,
-                debug_dir=output_dir,
-                base_filename=base_filename
-            )
+            # Use cached segmentation prediction if available, otherwise run model inference
+            if cached_predictions and cached_predictions.segmentation:
+                mask = cached_predictions.segmentation
+                if debug:
+                    print("🔍 Using cached segmentation prediction")
+            else:
+                mask = ImageTransforms.segment_image(
+                    current_image,
+                    debug=debug,
+                    debug_dir=output_dir,
+                    base_filename=base_filename
+                )
             
             if mask is None:
-                print(f"⚠️  Segmentation failed for: {image_path} - no bat face detected")
+                print(f"⚠️  Segmentation failed for: {base_filename} - no bat face detected")
                 return None
+            
+            # Only cache if not already cached
+            if pose_prediction or mask:
+                self._cache_predictions(cached_predictions_key, self._create_prediction_bundle(
+                        cached_predictions_key, 
+                        segmentation_prediction=mask, 
+                        pose_prediction=pose_prediction
+                    ))
+                if debug:
+                        print("🔍 Cached predictions for future use")
+                    
             
             # Step 3: Crop square around segmented region using the mask
             cropping_result = ImageTransforms.crop_square_around_segmentation_mask(
@@ -468,7 +515,7 @@ class SiamesePreprocessingPipeline:
             )
             
             if cropping_result is None or cropping_result[0] is None:
-                print(f"⚠️  Cropping failed for: {image_path}")
+                print(f"⚠️  Cropping failed for: {base_filename}")
                 return None
             
             current_image = cropping_result[0]  # Extract the cropped image from the tuple
@@ -482,7 +529,6 @@ class SiamesePreprocessingPipeline:
                 if debug:
                     print(f"🔍 Using transformed mask from cropping: {cropped_mask.shape}")
                     print(f"🔍 Mask type: {type(cropped_mask)}")
-                    print(f"🔍 Mask attributes: {dir(cropped_mask)}")
             else:
                 print("⚠️ No transformed mask available from cropping")
 
@@ -535,7 +581,7 @@ class SiamesePreprocessingPipeline:
             )
             
             if resized_image is None:
-                print(f"⚠️  Resizing failed for: {image_path}")
+                print(f"⚠️  Resizing failed for: {base_filename}")
                 return None
             
             current_image = resized_image
@@ -550,13 +596,13 @@ class SiamesePreprocessingPipeline:
             )
             
             if normalized_image is None:
-                print(f"⚠️  Normalization failed for: {image_path}")
+                print(f"⚠️  Normalization failed for: {base_filename}")
                 return None
             
             return normalized_image
 
         except Exception as e:
-            print(f"❌ Error processing {image_path}: {e}")
+            print(f"❌ Error processing {base_filename}: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -569,18 +615,9 @@ class SiamesePreprocessingPipeline:
         using the cached predictions to avoid redundant model inference.
         """
         try:
-            # First, check if we have cached predictions
-            cached_predictions = self._get_cached_predictions(image_path)
-            
-            if cached_predictions is not None:
-                # Use cached predictions for processing
-                result = self._process_with_cached_predictions(image_path, cached_predictions, debug, output_dir)
-            else:
-                # Process normally and cache predictions
-                result = self.preprocess_single_image(image_path, debug, output_dir)
-                
-                # Cache predictions if available (this would require updating the pipeline to return predictions)
-                # For now, we'll just process normally
+            image_array = cv2.imread(image_path)
+            base_filename = os.path.splitext(os.path.basename(image_path))[0]
+            result = self.preprocess_single_image(image_array, base_filename, image_path, debug, output_dir)
             
             if result is None:
                 return []
@@ -590,33 +627,20 @@ class SiamesePreprocessingPipeline:
             # Apply augmentation if enabled
             if self.augmentation_enabled:
                 augmented_images = self.apply_augmentation(
-                    result,
+                    image_array,
                     self.augmentation_preset,
                     self.augmentation_count
                 )
-                result_images.extend(augmented_images)
-                
-                # Transform cached predictions for augmented images if available
-                if cached_predictions is not None and self.transform_predictions:
+                for augmented_image in augmented_images:
                     try:
-                        # For each augmented image, we should transform the predictions
-                        # to match the augmentation transformations
-                        # This ensures that masks, keypoints, and bounding boxes
-                        # are correctly aligned with the augmented images
-                        
-                        if debug:
-                            print(f"🔍 Transforming predictions for {len(augmented_images)} augmented images")
-                        
-                        # TODO: In a full implementation, each augmented image would have
-                        # its own transformation matrix, and we would transform the predictions
-                        # accordingly. For now, we're setting up the infrastructure.
-                        
+                        result = self.preprocess_single_image(augmented_image, base_filename, None, debug, output_dir)
+                        if result is not None:
+                            result_images.append(result)
+                        else:
+                            print(f"⚠️ Augmented image {len(result_images)+1} failed preprocessing (no bat face detected)")
                     except Exception as e:
-                        if debug:
-                            print(f"⚠️ Prediction transformation failed: {e}")
-                
-                if debug:
-                    print(f"🔍 Created {len(augmented_images)} augmented versions")
+                        print(f"⚠️ Augmented image {len(result_images)+1} failed preprocessing: {e}")
+                        continue
             
             return result_images
             
@@ -626,105 +650,6 @@ class SiamesePreprocessingPipeline:
             traceback.print_exc()
             return []
     
-    def _process_with_cached_predictions(self, image_path: str, cached_predictions: PredictionBundle, 
-                                       debug: bool = False, output_dir: str = None) -> Optional[np.ndarray]:
-        """Process image using cached predictions to avoid model inference."""
-        try:
-            # Load image
-            image_array = cv2.imread(image_path)
-            if image_array is None:
-                print(f"❌ Failed to load image: {image_path}")
-                return None
-            
-            current_image = image_array
-            
-            # Setup debug output and base filename
-            base_filename = os.path.splitext(os.path.basename(image_path))[0]
-            
-            if debug:
-                if not output_dir:
-                    raise Exception("Debug flag is True but no debug directory provided. Please specify --debug-dir.")
-                
-                os.makedirs(output_dir, exist_ok=True)
-            
-            # Use cached pose prediction for face alignment
-            pose_prediction = cached_predictions.pose if cached_predictions else None
-            aligned_result = ImageTransforms.align_face_landmarks(
-                current_image,
-                pose_prediction=pose_prediction,
-                face_detector_type="yolo_pose",
-                debug=debug,
-                debug_dir=output_dir,
-                base_filename=base_filename
-            )
-            
-            if aligned_result is not None:
-                current_image, pose_prediction = aligned_result if isinstance(aligned_result, tuple) else (aligned_result, None)
-            
-            # Use cached segmentation prediction
-            segmentation_prediction = cached_predictions.segmentation if cached_predictions else None
-            
-            # Crop using cached mask
-            cropped_result = ImageTransforms.crop_square_around_segmentation_mask(
-                current_image,
-                segmentation_prediction=segmentation_prediction,
-                margin_ratio=self.face_outer_margin_ratio,
-                debug=debug,
-                debug_dir=output_dir,
-                base_filename=base_filename
-            )
-            
-            if cropped_result is not None:
-                current_image, segmentation_prediction = cropped_result if isinstance(cropped_result, tuple) else (cropped_result, None)
-            
-            # Apply background replacement using cached mask
-            if segmentation_prediction is not None:
-                background_result = ImageTransforms.apply_background_replacement(
-                    current_image,
-                    background_source=self.background_generator,
-                    segmentation_prediction=segmentation_prediction
-                )
-                
-                if background_result is not None:
-                    current_image, segmentation_prediction = background_result if isinstance(background_result, tuple) else (background_result, None)
-            
-            # Resize to target size
-            resized_image = ImageTransforms.resize_square_image(
-                current_image, 
-                self.target_size, 
-                interpolation="bilinear",
-                debug=debug,
-                debug_dir=output_dir,
-                base_filename=base_filename
-            )
-            
-            if resized_image is None:
-                print(f"❌  Resizing failed for: {image_path}")
-                return None
-            
-            current_image = resized_image
-
-            # Normalize to [0,1] range
-            normalized_image = ImageTransforms.normalize_image(
-                current_image, 
-                scale=self.normalize_scale,
-                debug=debug,
-                debug_dir=output_dir,
-                base_filename=base_filename
-            )
-            
-            if normalized_image is None:
-                print(f"❌  Normalization failed for: {image_path}")
-                return None
-            
-            return normalized_image
-
-        except Exception as e:
-            print(f"❌ Error processing with cached predictions {image_path}: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-
     def preprocess_batch(self, input_dir: str, output_dir: str, debug: bool = False, debug_dir: str = None):
         if not os.path.exists(input_dir):
             raise ValueError(f"Input directory does not exist: {input_dir}")
@@ -778,7 +703,7 @@ class SiamesePreprocessingPipeline:
                     else:
                         image_debug_dir = None
                     
-                    # Process image with or without augmentation based on config
+                    # Process image (will automatically use cached predictions if available)
                     if self.augmentation_enabled:
                         # Use augmentation-enabled processing
                         augmentation_results = self.preprocess_single_image_with_augmentation(

@@ -9,12 +9,12 @@ augmentation:
       perspective: {'enabled': false}
       
       # Enable only noise and color transformations
-      # brightness: {'limit': 0.7, 'steps': 3}
+      brightness: {'limit': 0.3, 'steps': 3}
       # contrast: {'limit': 0.8, 'steps': 3}
       # saturation: {'limit': 0.8, 'steps': 3}
       # hue_shift: {'limit': 300, 'steps': 3}
       noise: {'limit': 0.3, 'steps': 3}
-      gaussian_noise: {'limit': 255, 'steps': 3}
+      gaussian_noise: {'limit': 100, 'steps': 3}
       # iso_noise: {'enabled': true, 'intensity': [0.8, 1.0], 'color_shift': [0.5, 1.0], 'steps': 3}
       
       # Additional color variations

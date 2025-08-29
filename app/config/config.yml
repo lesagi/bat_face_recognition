@@ -111,7 +111,7 @@ siamese_network:
         enabled: true  # Re-enabled to work on fixing augmentation
         preset: "noise_color_only"
         count: 5
-        config_file: "config/augmentation_noise_color.yml"
+        config_file: "/Users/MAC/Documents/bat_face_rec/app/config/augmentation_noise_color.yml"
         
         # Prediction transformation settings
         transform_predictions: true

@@ -530,7 +530,7 @@ class ImageTransforms:
             print_debug(f"🔍 Using provided segmentation prediction: {segmentation_prediction}")
             return segmentation_prediction
         
-        # Get model instance using factory (heavy work happens here, not during import)
+        # Get model instance using factory pattern (heavy work happens here, not during import)
         print_debug("🔍 segment_image: Getting model from config...")
         model = ImageTransforms._get_model_from_config("segmentation")
         if model is None:
@@ -832,57 +832,81 @@ class ImageTransforms:
                 )
                 return result, None
             elif face_detector_type == "yolo_pose":
-                # Get model instance using factory pattern
-                model = ImageTransforms._get_model_from_config("pose")
-                if model is None:
-                    raise ValueError(
-                        "Pose model not found in config for yolo_pose face detection"
+                # Check if we have cached pose predictions to avoid model inference
+                if pose_prediction is not None:
+                    if debug:
+                        print("🔍 Using cached pose prediction for face alignment")
+                    
+                    # Use cached pose prediction for alignment
+                    result = ImageTransforms._align_face_yolo_pose_with_prediction(
+                        original_image,
+                        pose_prediction,
+                        target_eye_distance,
+                        debug,
                     )
-                try:
-                    from config.loader import load_config
-                    cfg = load_config()
-                    confidence_threshold = cfg.models.pose.confidence_threshold
-                except Exception:
-                    confidence_threshold = 0.3
-                
-                result = ImageTransforms._align_face_yolo_pose(
-                    original_image,
-                    model,
-                    target_eye_distance,
-                    confidence_threshold,
-                    debug,
-                )
-                
-                # Debug output if enabled
-                if debug and debug_dir and base_filename:
+                    
+                    # Return the aligned image and the cached prediction (no transformation needed)
+                    return result, pose_prediction
+                else:
+                    # Get model instance using factory pattern
+                    model = ImageTransforms._get_model_from_config("pose")
+                    if model is None:
+                        raise ValueError(
+                            "Pose model not found in config for yolo_pose face detection"
+                        )
                     try:
-                        import cv2
-                        os.makedirs(debug_dir, exist_ok=True)
-                        
-                        # Save original image (step 0)
-                        debug_path = os.path.join(debug_dir, f"{base_filename}_step0_original.jpg")
-                        cv2.imwrite(debug_path, original_image)
-                        print(f"🔍 Saved debug image: {debug_path}")
-                        print(f"🔍 Original image shape: {original_image.shape}")
-                        
-                        if result is not None:
-                            print("🔍 Face alignment successful!")
+                        from config.loader import load_config
+                        cfg = load_config()
+                        confidence_threshold = cfg.models.pose.confidence_threshold
+                    except Exception:
+                        confidence_threshold = 0.3
+                    
+                    result = ImageTransforms._align_face_yolo_pose(
+                        original_image,
+                        model,
+                        target_eye_distance,
+                        confidence_threshold,
+                        debug,
+                    )
+                    
+                    # Create a pose prediction object from the result for future caching
+                    pose_pred = None
+                    if result is not None:
+                        # TODO: Create PosePrediction object from the alignment result
+                        # For now, we'll return None as the prediction
+                        pass
+                    
+                    # Debug output if enabled
+                    if debug and debug_dir and base_filename:
+                        try:
+                            import cv2
+                            os.makedirs(debug_dir, exist_ok=True)
                             
-                            # Save aligned image
-                            debug_path = os.path.join(debug_dir, f"{base_filename}_step1_aligned.jpg")
-                            cv2.imwrite(debug_path, result)
-                            print(f"🔍 Saved debug aligned image: {debug_path}")
-                        else:
-                            print("⚠️ Face alignment failed, continuing with original image...")
-                            
-                            # Save original image as step1 result since alignment failed
-                            debug_path = os.path.join(debug_dir, f"{base_filename}_step1_alignment_failed_using_original.jpg")
+                            # Save original image (step 0)
+                            debug_path = os.path.join(debug_dir, f"{base_filename}_step0_original.jpg")
                             cv2.imwrite(debug_path, original_image)
-                            print(f"🔍 Saved debug original image (alignment failed): {debug_path}")
-                    except Exception as e:
-                        print(f"⚠️ Debug output failed: {e}")
-                
-                return result, None
+                            print(f"🔍 Saved debug image: {debug_path}")
+                            print(f"🔍 Original image shape: {original_image.shape}")
+                            
+                            if result is not None:
+                                print("🔍 Face alignment successful!")
+                                
+                                # Save aligned image
+                                debug_path = os.path.join(debug_dir, f"{base_filename}_step1_aligned.jpg")
+                                cv2.imwrite(debug_path, result)
+                                print(f"🔍 Saved debug aligned image: {debug_path}")
+                            else:
+                                print("⚠️ Face alignment failed, continuing with original image...")
+                                
+                                # Save original image as step1 result since alignment failed
+                                debug_path = os.path.join(debug_dir, f"{base_filename}_step1_alignment_failed_using_original.jpg")
+                                cv2.imwrite(debug_path, original_image)
+                                print(f"🔍 Saved debug original image (alignment failed): {debug_path}")
+                        except Exception as e:
+                            if debug:
+                                print(f"⚠️ Debug image saving failed: {e}")
+                    
+                    return result, pose_pred
             else:
                 raise ValueError(f"Unknown face_detector_type: {face_detector_type}")
 
@@ -2585,3 +2609,82 @@ class ImageTransforms:
                 print(f"⚠️ Debug output failed: {e}")
         
         return resized_image
+
+    @staticmethod
+    def _align_face_yolo_pose_with_prediction(
+        original_image: np.ndarray,
+        pose_prediction: 'PosePrediction',
+        target_eye_distance: Optional[float] = None,
+        debug: bool = False,
+    ) -> Optional[np.ndarray]:
+        """Align face using cached YOLO pose prediction for bat face landmarks."""
+        try:
+            if pose_prediction is None or not hasattr(pose_prediction, 'keypoints'):
+                if debug:
+                    print("No valid pose prediction provided for alignment")
+                return None
+            
+            # Extract keypoints from the cached prediction
+            keypoints = pose_prediction.keypoints
+            if keypoints is None or len(keypoints) == 0:
+                if debug:
+                    print("No keypoints in cached pose prediction")
+                return None
+            
+            # Get the first set of keypoints (assuming single detection)
+            kpts = keypoints[0] if isinstance(keypoints, list) else keypoints
+            
+            # Find valid eye keypoints (leftmost and rightmost points)
+            if len(kpts) < 2:
+                if debug:
+                    print("Not enough keypoints for alignment")
+                return None
+            
+            # Choose leftmost and rightmost points as eye proxies
+            left_idx = int(np.argmin(kpts[:, 0]))
+            right_idx = int(np.argmax(kpts[:, 0]))
+            left_eye = kpts[left_idx][:2]
+            right_eye = kpts[right_idx][:2]
+            
+            # Check if keypoints are valid (not zeros or NaN)
+            if (
+                np.any(np.isnan(left_eye))
+                or np.any(np.isnan(right_eye))
+                or np.allclose(left_eye, 0)
+                or np.allclose(right_eye, 0)
+            ):
+                if debug:
+                    print("Invalid eye keypoints in cached prediction")
+                return None
+            
+            # Convert to integer coordinates
+            left_eye_center = (int(left_eye[0]), int(left_eye[1]))
+            right_eye_center = (int(right_eye[0]), int(right_eye[1]))
+            
+            # Calculate rotation angle
+            dy = right_eye_center[1] - left_eye_center[1]
+            dx = right_eye_center[0] - left_eye_center[0]
+            angle = np.degrees(np.arctan2(dy, dx))
+            
+            if debug:
+                print(f"YOLO Pose (cached) - Eye centers: {left_eye_center}, {right_eye_center}")
+                print(f"YOLO Pose (cached) - Rotation angle: {angle:.2f} degrees")
+            
+            # Calculate rotation center (midpoint between eyes)
+            center_x = (left_eye_center[0] + right_eye_center[0]) // 2
+            center_y = (left_eye_center[1] + right_eye_center[1]) // 2
+            center = (center_x, center_y)
+            
+            # Create rotation matrix
+            rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+            
+            # Apply rotation
+            aligned_image = cv2.warpAffine(original_image, rotation_matrix, 
+                                         (original_image.shape[1], original_image.shape[0]))
+            
+            return aligned_image
+            
+        except Exception as e:
+            if debug:
+                print(f"Error in cached pose alignment: {e}")
+            return None

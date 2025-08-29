@@ -63,7 +63,7 @@ def process_frame_of_masks_prediction(frame, mask):
 
 
 def get_random_cropped_image(
-    height, width, max_retries=3, timeout=10, fallback_to_generated=True
+    height, width, max_retries=3, timeout=30, fallback_to_generated=True
 ):
     """
     Fetches a random image from Picsum Photos and crops it to the given height and width.

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import threading
 import time
 
-from .prediction_structures import (
+from prediction_structures import (
     SegmentationPrediction, 
     PosePrediction, 
     PredictionBundle,

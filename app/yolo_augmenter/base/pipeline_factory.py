@@ -22,6 +22,9 @@ class AugmentationPipelineFactory:
         if not preset_config:
             raise ValueError(f"Preset '{preset_name}' not found")
         
+        # Store the current preset name for use in transform creation
+        self.current_preset_name = preset_name
+        
         # Generate all parameter combinations
         param_combinations = self._generate_parameter_combinations(preset_config)
         
@@ -94,8 +97,11 @@ class AugmentationPipelineFactory:
     def _create_transforms_from_combinations(self, param_combinations: List[Dict[str, Any]]) -> A.Compose:
         """Create albumentations transforms from parameter combinations."""
         # Get the preset configuration to determine which transforms to enable
-        preset_name = getattr(self.config, 'current_preset', 'medium')
-        preset_config = self.config.get_preset(preset_name)
+        # Get the preset configuration using the stored preset name
+        if hasattr(self, 'current_preset_name'):
+            preset_config = self.config.get_preset(self.current_preset_name)
+        else:
+            preset_config = None
         
         transforms = []
         
