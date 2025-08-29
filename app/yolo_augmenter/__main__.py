@@ -3,10 +3,10 @@
 Main entry point for the yolo_augmenter module.
 
 This allows running the module with:
-    python -m app.yolo_augmenter.square_crop_pipeline
+    python -m yolo_augmenter
 """
 
-from .square_crop_pipeline import main
+from .cli import cli
 
 if __name__ == "__main__":
-    main()
+    cli()

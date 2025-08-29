@@ -26,30 +26,7 @@ class AugmentationConfig:
             'augmentation': {
                 'output_naming': '_a-{index:03d}',
                 'presets': {
-                    'light': {
-                        'default_steps_per_attribute': 3,
-                        'rotation': {'limit': 15},
-                        'brightness': {'limit': 0.2},
-                        'contrast': {'limit': 0.2},
-                        'noise': {'limit': 0.1}
-                    },
-                    'medium': {
-                        'default_steps_per_attribute': 5,
-                        'rotation': {'limit': 25, 'steps': 6},
-                        'brightness': {'limit': 0.3},
-                        'contrast': {'limit': 0.3},
-                        'scale': {'range': [0.8, 1.2]},
-                        'noise': {'limit': 0.2}
-                    },
-                    'heavy': {
-                        'default_steps_per_attribute': 8,
-                        'rotation': {'limit': 30, 'steps': 10},
-                        'scale': {'range': [0.7, 1.3]},
-                        'brightness': {'limit': 0.4, 'steps': 5},
-                        'contrast': {'limit': 0.4},
-                        'noise': {'limit': 0.3},
-                        'blur': {'limit': 0.2}
-                    }
+                    # Default presets removed - only custom presets from config files
                 },
                 'custom_pipelines': {},
                 'yolo_detection': {

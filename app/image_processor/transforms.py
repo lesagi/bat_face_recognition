@@ -11,6 +11,18 @@ import cv2
 import numpy as np
 from typing import Optional, Tuple, Union, Any
 import os
+from datetime import datetime
+import sys
+
+# Import prediction structures for enhanced functionality
+try:
+    from siamese_network.prediction_structures import PosePrediction, SegmentationPrediction
+    PREDICTION_IMPORTS_AVAILABLE = True
+except ImportError:
+    # Fallback for when siamese_network package is not available
+    PosePrediction = None
+    SegmentationPrediction = None
+    PREDICTION_IMPORTS_AVAILABLE = False
 
 
 class ImageTransforms:
@@ -68,21 +80,57 @@ class ImageTransforms:
     @staticmethod
     def apply_background_replacement(
         original_image: np.ndarray,
-        mask: np.ndarray,
         background_source: callable,
+        segmentation_prediction: Optional[Union[np.ndarray, 'SegmentationPrediction']] = None,
         **generator_kwargs,
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, Optional['SegmentationPrediction']]:
         """Replace background using segmentation mask with generated background.
+
+        This method can either use a provided segmentation prediction or work with
+        a raw mask array. When a segmentation prediction is provided, it avoids
+        redundant model inference and can return updated predictions.
 
         Args:
             original_image: Original image array
-            mask: Binary segmentation mask (foreground = 1, background = 0)
-            background_source: Generator function that takes (height, width, **kwargs)
+            background_source: Required generator function that takes (height, width, **kwargs)
+            segmentation_prediction: Optional segmentation prediction object or raw mask array.
+                                  If None, background replacement is skipped
             **generator_kwargs: Additional arguments for generator function
 
         Returns:
-            Image with replaced background
+            Tuple of (processed_image, updated_segmentation_prediction) where:
+            - processed_image: Image with replaced background, or original image if no mask
+            - updated_segmentation_prediction: Updated segmentation prediction if provided,
+                                            or None if no prediction was provided
         """
+        # Handle case where no segmentation prediction is provided
+        if segmentation_prediction is None:
+            # No mask available, return original image
+            return original_image, None
+        
+        # Background source is required - no default fallback
+        if background_source is None:
+            raise ValueError("background_source is required for background replacement")
+        
+        # Extract mask from segmentation prediction or use raw mask
+        if (hasattr(segmentation_prediction, 'mask') and 
+            hasattr(segmentation_prediction, 'confidence') and 
+            hasattr(segmentation_prediction, 'bounding_box')):
+            # This looks like a SegmentationPrediction object
+            mask = segmentation_prediction.mask
+            has_prediction = True
+        else:
+            # This is a raw mask array
+            mask = segmentation_prediction
+            has_prediction = False
+        
+
+        
+        # Ensure mask is valid
+        if mask is None:
+            # No mask available, return original image
+            return original_image, None
+        
         # Ensure mask matches image size and is binary 0/1
         if mask.dtype != np.uint8:
             mask = mask.astype(np.uint8)
@@ -92,6 +140,7 @@ class ImageTransforms:
             import cv2
             mask = cv2.resize(mask, (original_image.shape[1], original_image.shape[0]), interpolation=cv2.INTER_NEAREST)
             mask = (mask > 0).astype(np.uint8)
+        
         # Broadcast to 3 channels
         if mask.ndim == 2:
             mask_3d = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
@@ -113,7 +162,30 @@ class ImageTransforms:
         foreground = mask_3d > 0
         result[foreground] = original_image[foreground]
 
-        return result
+        # Update segmentation prediction if provided
+        updated_prediction = None
+        if has_prediction and SegmentationPrediction is not None:
+            # Create updated prediction with the processed mask
+            updated_prediction = SegmentationPrediction(
+                mask=mask,
+                confidence=segmentation_prediction.confidence,
+                bounding_box=segmentation_prediction.bounding_box,
+                class_id=segmentation_prediction.class_id,
+                class_name=segmentation_prediction.class_name,
+                original_image_shape=original_image.shape[:2],
+                model_resolution=segmentation_prediction.model_resolution,
+                timestamp=segmentation_prediction.timestamp
+            )
+            # Add processing step
+            if hasattr(segmentation_prediction, 'processing_steps'):
+                updated_prediction.processing_steps = segmentation_prediction.processing_steps.copy()
+                updated_prediction.processing_steps.append(f"Background replacement: {datetime.now().isoformat()}")
+        elif has_prediction:
+            # SegmentationPrediction class not available, but we have a prediction-like object
+            # Return the original object as-is
+            updated_prediction = segmentation_prediction
+
+        return result, updated_prediction
 
     @staticmethod
     def create_blurred_background(
@@ -422,69 +494,172 @@ class ImageTransforms:
     @staticmethod
     def segment_image(
         original_image: np.ndarray,
+        segmentation_prediction: Optional['SegmentationPrediction'] = None,
         debug: bool = False,
         debug_dir: Optional[str] = None,
         base_filename: Optional[str] = None
-    ) -> Optional[np.ndarray]:
-        """Segment image using YOLO model created via factory pattern."""
+    ) -> Optional['SegmentationPrediction']:
+        """Segment image using YOLO model or return provided predictions.
+        
+        Args:
+            original_image: Input image array
+            segmentation_prediction: Optional pre-computed segmentation prediction
+            debug: Enable debug output
+            debug_dir: Directory for debug output
+            base_filename: Base filename for debug files
+            
+        Returns:
+            SegmentationPrediction object if successful, None otherwise
+        """
+        # Set debug mode for this function call
+        import sys
+        import os
+        # Add the project root to the path to find project_management_utils
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
+        from project_management_utils.debug_utils import set_debug, print_debug
+        set_debug(debug)
+        
+        print_debug("🔍 segment_image: Starting segmentation...")
+        print_debug(f"🔍 segment_image: Input image shape: {original_image.shape}")
+        
+        # If predictions are provided, return them
+        if segmentation_prediction is not None:
+            print_debug(f"🔍 Using provided segmentation prediction: {segmentation_prediction}")
+            return segmentation_prediction
+        
         # Get model instance using factory (heavy work happens here, not during import)
+        print_debug("🔍 segment_image: Getting model from config...")
         model = ImageTransforms._get_model_from_config("segmentation")
         if model is None:
+            print_debug("❌ segment_image: Failed to get model from config")
             return None
+        
+        print_debug(f"🔍 segment_image: Model loaded successfully: {type(model)}")
         
         # Get confidence threshold from config
         try:
             from config.loader import load_config
             config = load_config()
             confidence_threshold = config.models.segmentation.confidence_threshold
-        except Exception:
+            print_debug(f"🔍 segment_image: Confidence threshold: {confidence_threshold}")
+        except Exception as e:
             confidence_threshold = 0.3
+            print_debug(f"⚠️ segment_image: Using default confidence threshold: {confidence_threshold} (error: {e})")
 
         try:
+            print_debug("🔍 segment_image: Running model inference...")
             results = model(original_image, conf=confidence_threshold)
+            print_debug(f"🔍 segment_image: Model results type: {type(results)}")
+            print_debug(f"🔍 segment_image: Model results length: {len(results) if results else 'None'}")
+            
             if not results or len(results) == 0:
+                print_debug("❌ segment_image: No results from model")
                 return None
+            
             result = results[0]
+            print_debug(f"🔍 segment_image: First result type: {type(result)}")
+            print_debug(f"🔍 segment_image: First result has masks: {hasattr(result, 'masks')}")
+            
             if result.masks is None or len(result.masks) == 0:
+                print_debug("❌ segment_image: No masks in result")
                 return None
+            
+            print_debug(f"🔍 segment_image: Masks shape: {result.masks.shape}")
             masks = result.masks.data.cpu().numpy()  # shape [N, h, w] at model scale
+            print_debug(f"🔍 segment_image: Converted masks shape: {masks.shape}")
+            
             areas = [np.sum(m) for m in masks]
+            print_debug(f"🔍 segment_image: Mask areas: {areas}")
             mask = masks[int(np.argmax(areas))].astype(np.uint8)  # 0/1
+            print_debug(f"🔍 segment_image: Selected mask shape: {mask.shape}")
+            
             # Resize mask to original image size
             orig_h, orig_w = original_image.shape[:2]
             if mask.shape[0] != orig_h or mask.shape[1] != orig_w:
+                print_debug(f"🔍 segment_image: Resizing mask from {mask.shape} to ({orig_h}, {orig_w})")
                 import cv2
                 mask = cv2.resize(mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
                 mask = (mask > 0).astype(np.uint8)
             
-            # Debug output if enabled
-            if debug and debug_dir and base_filename:
-                try:
-                    import cv2
-                    os.makedirs(debug_dir, exist_ok=True)
-                    
-                    # Save mask visualization
-                    mask_overlay = original_image.copy()
-                    mask_colored = np.zeros_like(original_image)
-                    mask_colored[:, :, 1] = mask * 255  # Green channel
-                    mask_overlay = cv2.addWeighted(mask_overlay, 0.7, mask_colored, 0.3, 0)
-                    
-                    debug_path = os.path.join(debug_dir, f"{base_filename}_step2_mask_overlay.jpg")
-                    cv2.imwrite(debug_path, mask_overlay)
-                    print(f"🔍 Saved debug mask overlay: {debug_path}")
-                    
-                    # Save pure mask
-                    debug_path = os.path.join(debug_dir, f"{base_filename}_step2_mask.jpg")
-                    cv2.imwrite(debug_path, mask * 255)
-                    print(f"🔍 Saved debug mask: {debug_path}")
-                    
-                    print(f"🔍 Segmentation mask shape: {mask.shape}")
-                except Exception as e:
-                    print(f"⚠️ Debug output failed: {e}")
+            # Calculate bounding box from mask
+            mask_points = np.where(mask > 0)
+            if len(mask_points[0]) == 0:
+                print_debug("❌ segment_image: No mask points found")
+                return None
             
-            return mask
+            min_y, max_y = mask_points[0].min(), mask_points[0].max()
+            min_x, max_x = mask_points[1].min(), mask_points[1].max()
+            print_debug(f"🔍 segment_image: Bounding box: ({min_x}, {min_y}) to ({max_x}, {max_y})")
             
-        except Exception:
+            # Normalize bounding box coordinates
+            bbox_x1 = min_x / orig_w
+            bbox_y1 = min_y / orig_h
+            bbox_x2 = max_x / orig_w
+            bbox_y2 = max_y / orig_h
+            
+            # Create SegmentationPrediction object
+            try:
+                print_debug("🔍 segment_image: Creating SegmentationPrediction object...")
+                from siamese_network.prediction_structures import SegmentationPrediction
+                
+                prediction = SegmentationPrediction(
+                    mask=mask,
+                    confidence=confidence_threshold,
+                    bounding_box=(bbox_x1, bbox_y1, bbox_x2, bbox_y2),
+                    class_id=0,  # Default class ID
+                    class_name="bat_face",  # Default class name
+                    original_image_shape=(orig_h, orig_w),
+                    model_resolution=(mask.shape[0], mask.shape[1])
+                )
+                
+                print_debug("🔍 segment_image: SegmentationPrediction created successfully")
+                
+                # Debug output if enabled
+                if debug and debug_dir and base_filename:
+                    try:
+                        import cv2
+                        os.makedirs(debug_dir, exist_ok=True)
+                        
+                        # Save mask visualization
+                        mask_overlay = original_image.copy()
+                        mask_colored = np.zeros_like(original_image)
+                        mask_colored[:, :, 1] = mask * 255  # Green channel
+                        mask_overlay = cv2.addWeighted(mask_overlay, 0.7, mask_colored, 0.3, 0)
+                        
+                        debug_path = os.path.join(debug_dir, f"{base_filename}_step2_mask_overlay.jpg")
+                        cv2.imwrite(debug_path, mask_overlay)
+                        print_debug(f"🔍 Saved debug mask overlay: {debug_path}")
+                        
+                        # Save pure mask
+                        debug_path = os.path.join(debug_dir, f"{base_filename}_step2_mask.jpg")
+                        cv2.imwrite(debug_path, mask * 255)
+                        print_debug(f"🔍 Saved debug mask: {debug_path}")
+                        
+                        print_debug(f"🔍 Segmentation prediction created:")
+                        print_debug(f"   Mask shape: {prediction.mask.shape}")
+                        print_debug(f"   Confidence: {prediction.confidence:.3f}")
+                        print_debug(f"   Bounding box: {prediction.bounding_box}")
+                        
+                    except Exception as e:
+                        print_debug(f"⚠️ Debug output failed: {e}")
+                
+                return prediction
+                
+            except ImportError as e:
+                # Fallback to returning just the mask if prediction structures not available
+                print_debug(f"⚠️ segment_image: Prediction structures not available, returning mask only (error: {e})")
+                return mask
+            except Exception as e:
+                print_debug(f"❌ segment_image: Error creating SegmentationPrediction: {e}")
+                return None
+            
+        except Exception as e:
+            print_debug(f"❌ segment_image: Error during segmentation: {e}")
+            import traceback
+            print_debug(f"❌ segment_image: Traceback: {traceback.format_exc()}")
             return None
 
     @staticmethod
@@ -493,14 +668,18 @@ class ImageTransforms:
         margin_ratio: float = 0.5,
         debug: bool = False,
     ) -> Optional[np.ndarray]:
-        mask = ImageTransforms.segment_image(original_image)
-        if mask is None:
-            if debug:
-                print("Segmentation failed for crop_square_around_segmentation")
-            return None
-        return ImageTransforms.crop_square_around_segmentation_mask(
-            original_image, mask, margin_ratio, debug
+        """Legacy method for backward compatibility.
+        
+        This method now returns only the cropped image, not the transformed predictions.
+        For full prediction support, use crop_square_around_segmentation_mask directly.
+        """
+        result = ImageTransforms.crop_square_around_segmentation_mask(
+            original_image, None, margin_ratio, debug
         )
+        if result is None:
+            return None
+        cropped_image, _ = result  # Ignore predictions for backward compatibility
+        return cropped_image
 
     @staticmethod
     def apply_background_replacement_auto(
@@ -602,6 +781,7 @@ class ImageTransforms:
     @staticmethod
     def align_face_landmarks(
         original_image: np.ndarray,
+        pose_prediction: Optional['PosePrediction'] = None,
         target_eye_distance: Optional[float] = None,
         face_detector_type: str = "yolo_pose",
         scale_factor: float = 1.1,
@@ -609,11 +789,35 @@ class ImageTransforms:
         debug: bool = False,
         debug_dir: Optional[str] = None,
         base_filename: Optional[str] = None
-    ) -> Optional[np.ndarray]:
+    ) -> Tuple[Optional[np.ndarray], Optional['PosePrediction']]:
+        """Align face using facial landmarks with optional pose prediction reuse.
+        
+        This method can either use a provided pose prediction or run model inference
+        to detect facial landmarks and align the face. When a pose prediction is
+        provided, it avoids redundant model inference.
+        
+        Args:
+            original_image: Input image array
+            pose_prediction: Optional pose prediction object. If provided, uses this
+                           instead of running model inference
+            target_eye_distance: Target distance between eyes for scaling
+            face_detector_type: Type of face detector ('opencv', 'mediapipe', 'yolo_pose')
+            scale_factor: Scale factor for OpenCV face detection
+            min_neighbors: Minimum neighbors for OpenCV face detection
+            debug: Enable debug output
+            debug_dir: Directory for debug image output
+            base_filename: Base filename for debug images
+            
+        Returns:
+            Tuple of (aligned_image, transformed_pose_prediction) where:
+            - aligned_image: Rotated and optionally scaled image, or None if alignment fails
+            - transformed_pose_prediction: Pose prediction transformed to match aligned image,
+                                        or None if no prediction was provided or transformation fails
+        """
         try:
             if face_detector_type == "opencv":
                 gray = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
-                return ImageTransforms._align_face_opencv(
+                result = ImageTransforms._align_face_opencv(
                     original_image,
                     gray,
                     target_eye_distance,
@@ -621,10 +825,12 @@ class ImageTransforms:
                     min_neighbors,
                     debug,
                 )
+                return result, None
             elif face_detector_type == "mediapipe":
-                return ImageTransforms._align_face_mediapipe(
+                result = ImageTransforms._align_face_mediapipe(
                     original_image, target_eye_distance, debug
                 )
+                return result, None
             elif face_detector_type == "yolo_pose":
                 # Get model instance using factory pattern
                 model = ImageTransforms._get_model_from_config("pose")
@@ -676,14 +882,14 @@ class ImageTransforms:
                     except Exception as e:
                         print(f"⚠️ Debug output failed: {e}")
                 
-                return result
+                return result, None
             else:
                 raise ValueError(f"Unknown face_detector_type: {face_detector_type}")
 
         except Exception as e:
             if debug:
                 print(f"Face alignment failed: {e}")
-            return None
+            return None, None
 
     @staticmethod
     def _align_face_opencv(
@@ -1027,6 +1233,158 @@ class ImageTransforms:
             if debug:
                 print(f"YOLO pose face alignment failed: {e}")
             return None
+
+    @staticmethod
+    def _align_face_with_prediction(
+        original_image: np.ndarray,
+        pose_prediction: 'PosePrediction',
+        target_eye_distance: Optional[float] = None,
+        debug: bool = False
+    ) -> Optional[np.ndarray]:
+        """Align face using provided pose prediction instead of running model inference."""
+        try:
+            if pose_prediction is None or pose_prediction.keypoints is None:
+                if debug:
+                    print("No valid pose prediction provided")
+                return None
+            
+            # Extract keypoints from prediction
+            keypoints = pose_prediction.keypoints
+            if len(keypoints) < 2:
+                if debug:
+                    print("Not enough keypoints for alignment")
+                return None
+            
+            # Find leftmost and rightmost keypoints as eye proxies
+            valid_keypoints = keypoints[keypoints[:, 2] > 0.0]  # Filter by confidence
+            if len(valid_keypoints) < 2:
+                if debug:
+                    print("Not enough confident keypoints for alignment")
+                return None
+            
+            # Choose leftmost and rightmost points as eye proxies
+            left_idx = int(np.argmin(valid_keypoints[:, 0]))
+            right_idx = int(np.argmax(valid_keypoints[:, 0]))
+            left_eye = valid_keypoints[left_idx][:2]
+            right_eye = valid_keypoints[right_idx][:2]
+            
+            # Check if keypoints are valid
+            if (np.any(np.isnan(left_eye)) or np.any(np.isnan(right_eye)) or 
+                np.allclose(left_eye, 0) or np.allclose(right_eye, 0)):
+                if debug:
+                    print("Invalid eye keypoints in prediction")
+                return None
+            
+            # Convert to integer coordinates
+            left_eye_center = (int(left_eye[0]), int(left_eye[1]))
+            right_eye_center = (int(right_eye[0]), int(right_eye[1]))
+            
+            # Calculate rotation angle
+            dy = right_eye_center[1] - left_eye_center[1]
+            dx = right_eye_center[0] - left_eye_center[0]
+            angle = np.degrees(np.arctan2(dy, dx))
+            
+            if debug:
+                print(f"Prediction-based - Eye centers: {left_eye_center}, {right_eye_center}")
+                print(f"Prediction-based - Rotation angle: {angle:.2f} degrees")
+            
+            # Calculate rotation center (midpoint between eyes)
+            center_x = (left_eye_center[0] + right_eye_center[0]) // 2
+            center_y = (left_eye_center[1] + right_eye_center[1]) // 2
+            center = (center_x, center_y)
+            
+            # Create rotation matrix
+            rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+            
+            # Apply rotation
+            aligned_image = cv2.warpAffine(
+                original_image,
+                rotation_matrix,
+                (original_image.shape[1], original_image.shape[0]),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT,
+            )
+            
+            # Optional: Scale to target eye distance
+            if target_eye_distance is not None:
+                current_distance = np.linalg.norm(
+                    np.array(right_eye_center) - np.array(left_eye_center)
+                )
+                if current_distance > 0:  # Avoid division by zero
+                    scale = target_eye_distance / current_distance
+                    
+                    if scale != 1.0:
+                        new_width = int(aligned_image.shape[1] * scale)
+                        new_height = int(aligned_image.shape[0] * scale)
+                        aligned_image = cv2.resize(
+                            aligned_image, (new_width, new_height)
+                        )
+            
+            return aligned_image
+            
+        except Exception as e:
+            if debug:
+                print(f"Prediction-based face alignment failed: {e}")
+            return None
+
+    @staticmethod
+    def _transform_pose_prediction_for_alignment(
+        pose_prediction: 'PosePrediction',
+        aligned_image: np.ndarray,
+        debug: bool = False
+    ) -> Optional['PosePrediction']:
+        """Transform pose prediction to match the aligned image."""
+        try:
+            if pose_prediction is None or aligned_image is None:
+                return None
+            
+            # For now, return the original prediction
+            # In a more sophisticated implementation, we would transform the keypoints
+            # to match the rotation and scaling applied to the image
+            if debug:
+                print("🔍 Pose prediction transformation not yet implemented - returning original")
+            
+            return pose_prediction
+            
+        except Exception as e:
+            if debug:
+                print(f"Pose prediction transformation failed: {e}")
+            return None
+
+    @staticmethod
+    def _debug_face_alignment(
+        original_image: np.ndarray,
+        aligned_image: Optional[np.ndarray],
+        debug_dir: str,
+        base_filename: str
+    ):
+        """Helper method for debug output during face alignment."""
+        try:
+            import cv2
+            os.makedirs(debug_dir, exist_ok=True)
+            
+            # Save original image (step 0)
+            debug_path = os.path.join(debug_dir, f"{base_filename}_step0_original.jpg")
+            cv2.imwrite(debug_path, original_image)
+            print(f"🔍 Saved debug image: {debug_path}")
+            print(f"🔍 Original image shape: {original_image.shape}")
+            
+            if aligned_image is not None:
+                print("🔍 Face alignment successful!")
+                
+                # Save aligned image
+                debug_path = os.path.join(debug_dir, f"{base_filename}_step1_aligned.jpg")
+                cv2.imwrite(debug_path, aligned_image)
+                print(f"🔍 Saved debug aligned image: {debug_path}")
+            else:
+                print("⚠️ Face alignment failed, continuing with original image...")
+                
+                # Save original image as step1 result since alignment failed
+                debug_path = os.path.join(debug_dir, f"{base_filename}_step1_alignment_failed_using_original.jpg")
+                cv2.imwrite(debug_path, original_image)
+                print(f"🔍 Saved debug original image (alignment failed): {debug_path}")
+        except Exception as e:
+            print(f"⚠️ Debug output failed: {e}")
 
     @staticmethod
     def center_face_landmarks(
@@ -1570,12 +1928,12 @@ class ImageTransforms:
     @staticmethod
     def crop_square_around_segmentation_mask(
         original_image: np.ndarray,
-        segmentation_mask: np.ndarray,
+        segmentation_prediction: Optional[Union[np.ndarray, 'SegmentationPrediction']] = None,
         margin_ratio: float = 0.2,
         debug: bool = False,
         debug_dir: Optional[str] = None,
         base_filename: Optional[str] = None
-    ) -> Optional[np.ndarray]:
+    ) -> Tuple[Optional[np.ndarray], Optional['SegmentationPrediction']]:
         """Crop and center image using segmentation mask and pose keypoints.
 
         Creates a dummy image of target size, extracts max possible crop from input,
@@ -1583,14 +1941,30 @@ class ImageTransforms:
 
         Args:
             original_image: Input image array
-            segmentation_mask: Binary segmentation mask (0s and 1s or 0s and 255s)
+            segmentation_prediction: Binary segmentation mask or SegmentationPrediction object
             margin_ratio: Ratio of margin to add around the mask bounding box
             debug: If True, print debug information
+            debug_dir: Directory for debug output
+            base_filename: Base filename for debug files
 
         Returns:
-            Centered square image of target size, or None if processing fails
+            Tuple of (cropped_image, transformed_predictions) or (None, None) if processing fails
         """
         try:
+            # Handle input parameter - can be either mask array or SegmentationPrediction object
+            if isinstance(segmentation_prediction, np.ndarray):
+                # Legacy support: direct mask array
+                segmentation_mask = segmentation_prediction
+                prediction_object = None
+            elif hasattr(segmentation_prediction, 'mask'):
+                # SegmentationPrediction object
+                segmentation_mask = segmentation_prediction.mask
+                prediction_object = segmentation_prediction
+            else:
+                if debug:
+                    print("No valid segmentation prediction provided")
+                return None, None
+            
             # Ensure mask is binary
             if segmentation_mask.max() > 1:
                 binary_mask = (segmentation_mask > 127).astype(np.uint8)
@@ -1699,6 +2073,57 @@ class ImageTransforms:
                                 dummy_image[final_offset_y:final_offset_y+crop_height, 
                                           final_offset_x:final_offset_x+crop_width] = crop
                                 
+                                # Transform predictions if available
+                                transformed_predictions = None
+                                if prediction_object is not None:
+                                    try:
+                                        from siamese_network.prediction_transforms import (
+                                            MaskTransformer, 
+                                            BoundingBoxTransformer,
+                                            CoordinateMapper
+                                        )
+                                        
+                                        # Create crop transformation
+                                        crop_transform = CoordinateMapper.create_crop_mapping(
+                                            (crop_x1, crop_y1, crop_x2, crop_y2)
+                                        )
+                                        
+                                        # Transform mask for the cropped region
+                                        transformed_mask = MaskTransformer.transform_mask_for_crop(
+                                            prediction_object.mask,
+                                            (crop_x1, crop_y1, crop_x2, crop_y2),
+                                            (target_size, target_size)
+                                        )
+                                        
+                                        # Transform bounding box
+                                        transformed_bbox = BoundingBoxTransformer.transform_bbox_for_crop(
+                                            prediction_object.bounding_box,
+                                            (crop_x1, crop_y1, crop_x2, crop_y2)
+                                        )
+                                        
+                                        # Create new prediction object
+                                        from siamese_network.prediction_structures import SegmentationPrediction
+                                        transformed_predictions = SegmentationPrediction(
+                                            mask=transformed_mask,
+                                            confidence=prediction_object.confidence,
+                                            bounding_box=transformed_bbox,
+                                            class_id=prediction_object.class_id,
+                                            class_name=prediction_object.class_name,
+                                            original_image_shape=(target_size, target_size),
+                                            model_resolution=prediction_object.model_resolution,
+                                            timestamp=prediction_object.timestamp
+                                        )
+                                        
+                                        if debug:
+                                            print(f"🔍 Transformed predictions created:")
+                                            print(f"   New mask shape: {transformed_predictions.mask.shape}")
+                                            print(f"   New bounding box: {transformed_predictions.bounding_box}")
+                                        
+                                    except ImportError:
+                                        if debug:
+                                            print("⚠️ Prediction transformation utilities not available")
+                                        transformed_predictions = None
+                                
                                 # Debug output if enabled
                                 if debug and debug_dir and base_filename:
                                     try:
@@ -1712,7 +2137,7 @@ class ImageTransforms:
                                     except Exception as e:
                                         print(f"⚠️ Debug output failed: {e}")
                                 
-                                return dummy_image
+                                return dummy_image, transformed_predictions
                             else:
                                 if debug:
                                     print("Insufficient keypoints for triangle center")
@@ -1739,6 +2164,51 @@ class ImageTransforms:
              
             dummy_image[offset_y:offset_y+crop_height, offset_x:offset_x+crop_width] = crop
             
+            # Transform predictions if available (fallback case)
+            transformed_predictions = None
+            if prediction_object is not None:
+                try:
+                    from siamese_network.prediction_transforms import (
+                        MaskTransformer, 
+                        BoundingBoxTransformer
+                    )
+                    
+                    # Transform mask for the cropped region
+                    transformed_mask = MaskTransformer.transform_mask_for_crop(
+                        prediction_object.mask,
+                        (crop_x1, crop_y1, crop_x2, crop_y2),
+                        (target_size, target_size)
+                    )
+                    
+                    # Transform bounding box
+                    transformed_bbox = BoundingBoxTransformer.transform_bbox_for_crop(
+                        prediction_object.bounding_box,
+                        (crop_x1, crop_y1, crop_x2, crop_y2)
+                    )
+                    
+                    # Create new prediction object
+                    from siamese_network.prediction_structures import SegmentationPrediction
+                    transformed_predictions = SegmentationPrediction(
+                        mask=transformed_mask,
+                        confidence=prediction_object.confidence,
+                        bounding_box=transformed_bbox,
+                        class_id=prediction_object.class_id,
+                        class_name=prediction_object.class_name,
+                        original_image_shape=(target_size, target_size),
+                        model_resolution=prediction_object.model_resolution,
+                        timestamp=prediction_object.timestamp
+                    )
+                    
+                    if debug:
+                        print(f"🔍 Transformed predictions created (fallback):")
+                        print(f"   New mask shape: {transformed_predictions.mask.shape}")
+                        print(f"   New bounding box: {transformed_predictions.bounding_box}")
+                    
+                except ImportError:
+                    if debug:
+                        print("⚠️ Prediction transformation utilities not available")
+                    transformed_predictions = None
+            
             # Debug output if enabled
             if debug and debug_dir and base_filename:
                 try:
@@ -1752,12 +2222,12 @@ class ImageTransforms:
                 except Exception as e:
                     print(f"⚠️ Debug output failed: {e}")
             
-            return dummy_image
+            return dummy_image, transformed_predictions
  
         except Exception as e:
             if debug:
                 print(f"Segmentation mask cropping failed: {e}")
-            return None
+            return None, None
 
     @staticmethod
     def draw_all_predictions(

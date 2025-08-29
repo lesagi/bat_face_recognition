@@ -111,7 +111,7 @@ def cli(ctx, config, debug):
 @cli.command()
 @click.option('--input', '-i', required=True, type=click.Path(exists=True), help='Input directory')
 @click.option('--output', '-o', required=True, type=click.Path(), help='Output directory')
-@click.option('--preset', '-p', default='medium', help='Augmentation preset (light/medium/heavy)')
+@click.option('--preset', '-p', required=True, help='Augmentation preset name (must be defined in config file)')
 @click.option('--force', '-f', is_flag=True, help='Overwrite output directory without prompting')
 @click.pass_context
 def auto(ctx, input, output, preset, force):
@@ -140,7 +140,7 @@ def auto(ctx, input, output, preset, force):
 @cli.command()
 @click.option('--input', '-i', required=True, type=click.Path(exists=True), help='Input directory with images')
 @click.option('--output', '-o', required=True, type=click.Path(), help='Output directory for augmented images')
-@click.option('--preset', '-p', default='medium', help='Augmentation preset (light/medium/heavy)')
+@click.option('--preset', '-p', required=True, help='Augmentation preset name (must be defined in config file)')
 @click.option('--force', '-f', is_flag=True, help='Overwrite output directory without prompting')
 @click.pass_context
 def plain(ctx, input, output, preset, force):
@@ -185,7 +185,7 @@ def plain(ctx, input, output, preset, force):
 @cli.command()
 @click.option('--input', '-i', required=True, type=click.Path(exists=True), help='Input directory with YOLO detection dataset')
 @click.option('--output', '-o', required=True, type=click.Path(), help='Output directory for augmented dataset')
-@click.option('--preset', '-p', default='medium', help='Augmentation preset (light/medium/heavy)')
+@click.option('--preset', '-p', required=True, help='Augmentation preset name (must be defined in config file)')
 @click.option('--force', '-f', is_flag=True, help='Overwrite output directory without prompting')
 @click.pass_context
 def detection(ctx, input, output, preset, force):
@@ -198,7 +198,7 @@ def detection(ctx, input, output, preset, force):
 @cli.command()
 @click.option('--input', '-i', required=True, type=click.Path(exists=True), help='Input directory with YOLO segmentation dataset')
 @click.option('--output', '-o', required=True, type=click.Path(), help='Output directory for augmented dataset')
-@click.option('--preset', '-p', default='medium', help='Augmentation preset (light/medium/heavy)')
+@click.option('--preset', '-p', required=True, help='Augmentation preset name (must be defined in config file)')
 @click.option('--force', '-f', is_flag=True, help='Overwrite output directory without prompting')
 @click.pass_context
 def segmentation(ctx, input, output, preset, force):

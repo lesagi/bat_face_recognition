@@ -96,6 +96,26 @@ siamese_network:
       background:
         type: "picsum"
         # color: [0, 255, 0]  # options: blur, noise, gradient, picsum, solid_color
+      
+      # Prediction caching settings
+      prediction_caching:
+        enabled: true
+        cache_size: 1000
+        max_memory_mb: 512
+        cache_ttl_hours: 24
+        persistence: "memory"  # "memory" or "disk"
+        cache_dir: "cache/predictions"
+      
+      # Augmentation settings
+      augmentation:
+        enabled: true  # Re-enabled to work on fixing augmentation
+        preset: "noise_color_only"
+        count: 5
+        config_file: "config/augmentation_noise_color.yml"
+        
+        # Prediction transformation settings
+        transform_predictions: true
+        validate_transformations: true
   
   # Evaluation
   evaluation:
