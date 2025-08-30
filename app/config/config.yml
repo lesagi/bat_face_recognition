@@ -30,12 +30,18 @@ models:
   # unified: /Users/MAC/Documents/bat_face_rec/unified_segmentation/data/runs/weights/best.pt
   # rousettus: /Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt
   segmentation:
+    # batwoman - rousettus
+    # model_path: "/home/sagilevi1/bat_face_rec_project/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
+    # Local - rousettus
     model_path: "/Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
     model_type: "yolo_segmentation"
     confidence_threshold: 0.5
   
   # Trained YOLO Pose Model
   pose:
+    # batwoman
+    # model_path: "/home/sagilevi1/bat_face_rec_project/face_annotation_eyes_nose/runs/pose/augmented_train/weights/best.pt"
+    # Local - rousettus
     model_path: "/Users/MAC/Documents/bat_face_rec/face_annotation_eyes_nose/best.pt"
     model_type: "yolo_pose"
     confidence_threshold: 0.5
@@ -111,6 +117,9 @@ siamese_network:
         enabled: true  # Re-enabled to work on fixing augmentation
         preset: "noise_color_only"
         count: 5
+        # batwoman
+        # config_file: "/home/sagilevi1/bat_face_rec_project/app/config/augmentation_noise_color.yml"
+        # Local 
         config_file: "/Users/MAC/Documents/bat_face_rec/app/config/augmentation_noise_color.yml"
         
         # Prediction transformation settings

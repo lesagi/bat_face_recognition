@@ -8,7 +8,17 @@ that can be used for image processing and background replacement.
 import numpy as np
 from typing import Tuple
 
-from image_processor.image_utils import create_blur_image, get_random_cropped_image
+# Try absolute imports first (when run as module), fall back to relative imports (when run directly)
+try:
+    from app.image_processor.image_utils import create_blur_image, get_random_cropped_image
+except ImportError:
+    # Fallback to relative imports when running script directly
+    # Add parent directory to path for relative imports
+    import sys
+    import os
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, parent_dir)
+    from image_processor.image_utils import create_blur_image, get_random_cropped_image
 
 
 class BackgroundGenerator:
