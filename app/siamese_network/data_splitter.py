@@ -4,8 +4,10 @@ Data splitter for Siamese network training.
 
 import os
 import random
+import re
 import tensorflow as tf
 from itertools import combinations, permutations
+from collections import defaultdict
 
 from config.loader import load_config
 
@@ -17,6 +19,59 @@ def get_files_from_dir(directory):
         for f in os.listdir(directory)
         if os.path.isfile(os.path.join(directory, f)) and not f.startswith(".DS_Store")
     ]
+
+
+def parse_filename_class(filename):
+    """
+    Parse filename to extract class information.
+    
+    Expected pattern: (?<type>\w)--(?<class>\w+)--(?<id>\w+)(?<aug_suffix>--aug(?<aug_id>\d{3}))?
+    
+    Args:
+        filename: The filename to parse
+        
+    Returns:
+        tuple: (type, class_name, id, aug_suffix) or None if parsing fails
+    """
+    # Remove file extension
+    name_without_ext = os.path.splitext(filename)[0]
+    
+    # capturing groups: (?<type>\w)--(?<class>\w+)--(?<id>\w+)(?<aug_suffix>--aug(?<aug_id>\d{3}))?
+    # Pattern: type--class--id[--aug###]
+    pattern = r'^(\w+)--(\w+)--(\w+)(?:--aug(\d{3}))?$'
+    match = re.match(pattern, name_without_ext)
+    
+    if match:
+        file_type, class_name, file_id, aug_suffix = match.groups()
+        return file_type, class_name, file_id, aug_suffix
+    else:
+        return None
+
+
+def group_files_by_class(file_paths):
+    """
+    Group files by their class based on filename parsing.
+    
+    Args:
+        file_paths: List of file paths
+        
+    Returns:
+        dict: Dictionary mapping class names to lists of file paths
+    """
+    class_files = defaultdict(list)
+    
+    for file_path in file_paths:
+        filename = os.path.basename(file_path)
+        parsed = parse_filename_class(filename)
+        
+        if parsed:
+            _, class_name, _, _ = parsed
+            class_files[class_name].append(file_path)
+        else:
+            # Skip files that don't match the expected pattern
+            print(f"Warning: Skipping file with unexpected naming pattern: {filename}")
+    
+    return dict(class_files)
 
 
 def preprocess_siamese_input(file_path):
@@ -67,11 +122,13 @@ def preprocess_twin_input_function(input_img_path, validation_img_path, label):
 class SiameseNetworkTrainingDataSplitter:
     """
     Split the data into training and validation sets
-    Each images directory inside {images_directories_collection} will be considered as a class
+    Each image filename follows the pattern: type--class--id[--aug###]
+    Class information is extracted from the filename instead of directory structure
     Siamese network requires pairs of images with a label
-    So we will create pairs of images from the same class (directory) with a label of 1
-    And pairs of images from different classes (different directories) with a label of 0
-    :parameter classes_images_dir: str
+    So we will create pairs of images from the same class with a label of 1
+    And pairs of images from different classes with a label of 0
+    :parameter images_dirs_paths_list: List of directories containing images
+    :parameter training_portion: float, portion of data to use for training
     :parameter mode: combination | permutation
     :return: Dataset iterator
     """
@@ -83,41 +140,52 @@ class SiameseNetworkTrainingDataSplitter:
         self.training_portion = training_portion
         self.mode = mode
         self.labelled_data = None
-        self.per_dir_pairs = {}
-        self.class_dirs = []
+        self.class_files = {}
+        self.class_names = []
 
-        # "Class" in this context refer to a folder of a specific bat,
-        # so we consider each bat as a class
-        for class_dirs in images_dirs_paths_list:
-            dirs = [
-                os.path.join(class_dirs, class_dir_name)
-                for class_dir_name in os.listdir(class_dirs)
-                if os.path.isdir(os.path.join(class_dirs, class_dir_name))
-            ]
-            self.class_dirs.extend(dirs)
+        # Collect all files from all directories
+        all_files = []
+        for directory in images_dirs_paths_list:
+            if os.path.isdir(directory):
+                files = get_files_from_dir(directory)
+                all_files.extend(files)
+            else:
+                print(f"Warning: Directory does not exist: {directory}")
 
-        for images_dir in self.class_dirs:
-            anchors = self.__create_anchor_pairs(get_files_from_dir(images_dir))
-            # Apply preprocessing to convert file paths to image tensors
-            anchors = anchors.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
-            self.__add_to_self_labelled_data(anchors)
+        # Group files by class based on filename parsing
+        self.class_files = group_files_by_class(all_files)
+        self.class_names = list(self.class_files.keys())
+        
+        print(f"Found {len(self.class_names)} classes: {self.class_names}")
+        for class_name, files in self.class_files.items():
+            print(f"Class '{class_name}': {len(files)} files")
 
-        dir_pairs = combinations(self.class_dirs, 2)
-        for dir_a, dir_b in dir_pairs:
-            files_dir_a = get_files_from_dir(dir_a)
-            files_dir_b = get_files_from_dir(dir_b)
-            negatives = self.__create_negative_pairs(files_dir_a, files_dir_b, False)
-            if self.mode == "permutation":
-                negatives = negatives.concatenate(
-                    self.__create_negative_pairs(files_dir_b, files_dir_a, False)
-                )
-            # Apply preprocessing to convert file paths to image tensors
-            negatives = negatives.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
-            self.__add_to_self_labelled_data(negatives)
+        # Create positive pairs (same class)
+        for class_name, files in self.class_files.items():
+            if len(files) > 1:  # Need at least 2 files to create pairs
+                anchors = self.__create_anchor_pairs(files, class_name)
+                # Apply preprocessing to convert file paths to image tensors
+                anchors = anchors.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
+                self.__add_to_self_labelled_data(anchors)
+
+        # Create negative pairs (different classes)
+        class_names_list = list(self.class_files.keys())
+        for i, class_a in enumerate(class_names_list):
+            for class_b in class_names_list[i+1:]:
+                files_a = self.class_files[class_a]
+                files_b = self.class_files[class_b]
+                negatives = self.__create_negative_pairs(files_a, files_b, class_a, class_b, False)
+                if self.mode == "permutation":
+                    negatives = negatives.concatenate(
+                        self.__create_negative_pairs(files_b, files_a, class_b, class_a, False)
+                    )
+                # Apply preprocessing to convert file paths to image tensors
+                negatives = negatives.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
+                self.__add_to_self_labelled_data(negatives)
 
         self.__build_train_test_data()
 
-    def __create_anchor_pairs(self, anchor_images_list):
+    def __create_anchor_pairs(self, anchor_images_list, class_name):
         pairs = (
             list(combinations(anchor_images_list, 2))
             if self.mode == "combination"
@@ -133,10 +201,10 @@ class SiameseNetworkTrainingDataSplitter:
         max_limit = cfg.siamese_network.training.get("max_data_size_limit")
         if max_limit is not None:
             dataset = dataset.take(max_limit)
-        print(f"anchors pairs count: {dataset.cardinality().numpy()}")
+        print(f"anchor pairs count: {dataset.cardinality().numpy()} for class '{class_name}'")
         return dataset
 
-    def __create_negative_pairs(self, list_a, list_b, should_shuffle=True):
+    def __create_negative_pairs(self, list_a, list_b, class_a, class_b, should_shuffle=True):
         list_a_size = len(list_a)
         data_set_a = tf.data.Dataset.from_tensor_slices(list_a)
 
@@ -159,7 +227,7 @@ class SiameseNetworkTrainingDataSplitter:
         data_set_b = data_set_b.take(min_size)
 
         dataset = tf.data.Dataset.zip((data_set_a, data_set_b, tf.data.Dataset.from_tensor_slices(tf.zeros(min_size))))
-        print(f"negative pairs count: {dataset.cardinality().numpy()}, min size: {min_size}")
+        print(f"negative pairs count: {dataset.cardinality().numpy()}, min size: {min_size} for classes '{class_a}' vs '{class_b}'")
         return dataset
 
     def __build_train_test_data(self):
