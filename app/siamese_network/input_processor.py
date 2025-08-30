@@ -51,10 +51,20 @@ sys.path.insert(0, parent_dir)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-from image_processor import ImageTransforms
-from background_generation.background_generator import BackgroundGenerator
-from utils.image_utils import is_img_file
-from config.loader import load_config
+# Try absolute imports first (when run as module), fall back to relative imports (when run directly)
+try:
+    from app.image_processor import ImageTransforms
+    from app.background_generation.background_generator import BackgroundGenerator
+    from app.utils.image_utils import is_img_file
+    from app.config.loader import load_config
+except ImportError:
+    # Fallback to relative imports when running script directly
+    # Make sure the parent directory is in the path for relative imports
+    sys.path.insert(0, parent_dir)
+    from image_processor import ImageTransforms
+    from background_generation.background_generator import BackgroundGenerator
+    from app.utils.image_utils import is_img_file
+    from app.config.loader import load_config
 
 # Import prediction structures and caching
 try:
@@ -633,7 +643,7 @@ class SiamesePreprocessingPipeline:
                 )
                 for augmented_image in augmented_images:
                     try:
-                        result = self.preprocess_single_image(augmented_image, base_filename, None, debug, output_dir)
+                        result = self.preprocess_single_image(augmented_image, base_filename, image_path, debug, output_dir)
                         if result is not None:
                             result_images.append(result)
                         else:

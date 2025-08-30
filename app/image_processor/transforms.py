@@ -14,9 +14,16 @@ import os
 from datetime import datetime
 import sys
 
+# Set up paths for imports - this ensures all imports work whether run as module or script
+current_file = os.path.abspath(__file__)
+# From app/image_processor/transforms.py, go up 3 levels to reach project root
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 # Import prediction structures for enhanced functionality
 try:
-    from siamese_network.prediction_structures import PosePrediction, SegmentationPrediction
+    from app.siamese_network.prediction_structures import PosePrediction, SegmentationPrediction
     PREDICTION_IMPORTS_AVAILABLE = True
 except ImportError:
     # Fallback for when siamese_network package is not available
@@ -43,9 +50,10 @@ class ImageTransforms:
             Model instance created by factory, or None if creation fails
         """
         try:
-            from config.loader import load_config
-            from models.yolo_factory import create_yolo_model
-            from models.exceptions import ModelConfigurationError, ModelCreationError
+            # Import with path already set up at module level
+            from app.config.loader import load_config
+            from app.models.yolo_factory import create_yolo_model
+            from app.models.exceptions import ModelConfigurationError, ModelCreationError
             
             config = load_config()
             
@@ -64,17 +72,8 @@ class ImageTransforms:
             model = create_yolo_model(model_config)
             return model
             
-        except ModelConfigurationError as e:
-            print(f"⚠️  Model configuration error: {e}")
-            return None
-        except ModelCreationError as e:
-            print(f"⚠️  Model creation failed: {e}")
-            return None
-        except ImportError as e:
-            print(f"⚠️  Missing dependencies for {model_type} model: {e}")
-            return None
         except Exception as e:
-            print(f"⚠️  Unexpected error creating {model_type} model: {e}")
+            print(f"⚠️  Error creating {model_type} model: {e}")
             return None
 
     @staticmethod
@@ -512,13 +511,7 @@ class ImageTransforms:
             SegmentationPrediction object if successful, None otherwise
         """
         # Set debug mode for this function call
-        import sys
-        import os
-        # Add the project root to the path to find project_management_utils
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        if project_root not in sys.path:
-            sys.path.insert(0, project_root)
-        
+        # Import with path already set up at module level
         from project_management_utils.debug_utils import set_debug, print_debug
         set_debug(debug)
         
@@ -541,7 +534,8 @@ class ImageTransforms:
         
         # Get confidence threshold from config
         try:
-            from config.loader import load_config
+            # Import with path already set up at module level
+            from app.config.loader import load_config
             config = load_config()
             confidence_threshold = config.models.segmentation.confidence_threshold
             print_debug(f"🔍 segment_image: Confidence threshold: {confidence_threshold}")
@@ -603,7 +597,8 @@ class ImageTransforms:
             # Create SegmentationPrediction object
             try:
                 print_debug("🔍 segment_image: Creating SegmentationPrediction object...")
-                from siamese_network.prediction_structures import SegmentationPrediction
+                # Import with path already set up at module level
+                from app.siamese_network.prediction_structures import SegmentationPrediction
                 
                 prediction = SegmentationPrediction(
                     mask=mask,
@@ -855,7 +850,7 @@ class ImageTransforms:
                             "Pose model not found in config for yolo_pose face detection"
                         )
                     try:
-                        from config.loader import load_config
+                        from app.config.loader import load_config
                         cfg = load_config()
                         confidence_threshold = cfg.models.pose.confidence_threshold
                     except Exception:
@@ -1468,7 +1463,7 @@ class ImageTransforms:
                         "Pose model not found in config for yolo_pose face detection"
                     )
                 try:
-                    from config.loader import load_config
+                    from app.config.loader import load_config
                     cfg = load_config()
                     confidence_threshold = cfg.models.pose.confidence_threshold
                 except Exception:
@@ -1880,7 +1875,7 @@ class ImageTransforms:
                     "Pose model not found in config for face detection"
                 )
             try:
-                from config.loader import load_config
+                from app.config.loader import load_config
                 cfg = load_config()
                 confidence_threshold = cfg.models.pose.confidence_threshold
             except Exception:
@@ -2047,7 +2042,7 @@ class ImageTransforms:
  
             # Get pose keypoints to determine centering using factory pattern
             try:
-                from config.loader import load_config
+                from app.config.loader import load_config
                 cfg = load_config()
                 confidence_threshold = cfg.models.pose.confidence_threshold
                  
@@ -2101,7 +2096,7 @@ class ImageTransforms:
                                 transformed_predictions = None
                                 if prediction_object is not None:
                                     try:
-                                        from siamese_network.prediction_transforms import (
+                                        from app.siamese_network.prediction_transforms import (
                                             MaskTransformer, 
                                             BoundingBoxTransformer,
                                             CoordinateMapper
@@ -2126,7 +2121,7 @@ class ImageTransforms:
                                         )
                                         
                                         # Create new prediction object
-                                        from siamese_network.prediction_structures import SegmentationPrediction
+                                        from app.siamese_network.prediction_structures import SegmentationPrediction
                                         transformed_predictions = SegmentationPrediction(
                                             mask=transformed_mask,
                                             confidence=prediction_object.confidence,
@@ -2192,7 +2187,7 @@ class ImageTransforms:
             transformed_predictions = None
             if prediction_object is not None:
                 try:
-                    from siamese_network.prediction_transforms import (
+                    from app.siamese_network.prediction_transforms import (
                         MaskTransformer, 
                         BoundingBoxTransformer
                     )
@@ -2211,7 +2206,7 @@ class ImageTransforms:
                     )
                     
                     # Create new prediction object
-                    from siamese_network.prediction_structures import SegmentationPrediction
+                    from app.siamese_network.prediction_structures import SegmentationPrediction
                     transformed_predictions = SegmentationPrediction(
                         mask=transformed_mask,
                         confidence=prediction_object.confidence,
@@ -2283,7 +2278,7 @@ class ImageTransforms:
             
             # Load config
             try:
-                from config.loader import load_config
+                from app.config.loader import load_config
                 cfg = load_config()
             except Exception as e:
                 if debug:

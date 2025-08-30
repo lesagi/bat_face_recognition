@@ -4,7 +4,17 @@ from io import BytesIO
 from PIL import Image
 import numpy as np
 import cv2
-from utils.image_utils import strip_filename_from_path
+# Try absolute imports first (when run as module), fall back to relative imports (when run directly)
+try:
+    from app.utils.image_utils import strip_filename_from_path
+except ImportError:
+    # Fallback to relative imports when running script directly
+    # Add parent directory to path for relative imports
+    import sys
+    import os
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, parent_dir)
+    from utils.image_utils import strip_filename_from_path
 import os
 import time
 from requests.exceptions import RequestException, Timeout, ConnectionError
