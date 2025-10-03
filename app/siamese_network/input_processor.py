@@ -749,7 +749,7 @@ class SiamesePreprocessingPipeline:
                             print(f"❌ Failed to process: {relative_image_path}")
                     else:
                         # Standard processing without augmentation
-                        result = self.preprocess_single_image(image_path, debug=debug, output_dir=image_debug_dir)
+                        result = self.preprocess_single_image_from_path(image_path, debug=debug, output_dir=image_debug_dir)
 
                         if result is not None:
                             results.append((relative_image_path, result))

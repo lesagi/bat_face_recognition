@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow.keras.metrics import Precision, Recall
 from .network import SiameseNetwork, L1Dist
 from .data_splitter import SiameseNetworkTrainingDataSplitter
-from config.loader import load_config
+from app.config.loader import load_config
 
 
 class SiameseNetworkTrainer:

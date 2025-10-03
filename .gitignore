@@ -30,3 +30,4 @@ example_*.py
 !README.md
 !*/README.md
 *.md
+models/

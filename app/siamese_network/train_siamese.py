@@ -3,20 +3,45 @@
 Simple script to train the Siamese Network
 """
 
-from trainer import SiameseNetworkTrainer
+import os
+import sys
+
+# Add parent directories to path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+app_dir = os.path.dirname(parent_dir)
+sys.path.insert(0, app_dir)
+
+from app.siamese_network.trainer import SiameseNetworkTrainer
+from app.config.loader import load_config
 
 
 def main():
-    # Input directory with processed images
-    input_dir = "/Users/MAC/Documents/bat_face_rec/face_rec_rousettus_#1/background_replacement/processed_siamese_picsum"
-
+    # Load configuration
+    config = load_config()
+    input_dir = config.siamese_network.training.get("input_dir")
+    
+    if not input_dir:
+        print("❌ Error: No input_dir specified in config file")
+        return
+    
     print("🚀 Starting Siamese Network Training")
     print(f"📁 Input directory: {input_dir}")
     print()
 
     try:
         # Create and run the trainer
+        print("🔧 Initializing trainer...")
         trainer = SiameseNetworkTrainer(input_dir)
+        
+        print("✅ Trainer initialized successfully!")
+        print(f"📊 Training pairs: {trainer.train_batches.cardinality().numpy()}")
+        print(f"📊 Testing pairs: {trainer.test_batches.cardinality().numpy()}")
+        print(f"🔧 Batch size: {trainer.batch_size}")
+        print(f"🔄 Epochs: {trainer.num_epochs}")
+        print()
+        
+        print("🎯 Starting training...")
         trainer.fit()
 
         print()

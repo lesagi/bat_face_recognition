@@ -8,8 +8,8 @@ project_root = os.path.join(app_dir, '..')
 sys.path.insert(0, app_dir)
 sys.path.insert(0, project_root)
 
-from config.loader import load_config
-from config.yolo_segmentation import YOLOSegmentationConfig
+from app.config.loader import load_config
+from app.config.yolo_segmentation import YOLOSegmentationConfig
 
 # Load configuration
 config = load_config()

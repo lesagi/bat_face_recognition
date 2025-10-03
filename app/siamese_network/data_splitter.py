@@ -9,7 +9,7 @@ import tensorflow as tf
 from itertools import combinations, permutations
 from collections import defaultdict
 
-from config.loader import load_config
+from app.config.loader import load_config
 
 
 def get_files_from_dir(directory):
@@ -25,7 +25,7 @@ def parse_filename_class(filename):
     """
     Parse filename to extract class information.
     
-    Expected pattern: (?<type>\w)--(?<class>\w+)--(?<id>\w+)(?<aug_suffix>--aug(?<aug_id>\d{3}))?
+    Expected pattern: (?<type>\w)--(?<class>\w+)--(?<id>\w+(\.\d+)?)(?<aug_suffix>--aug(?<aug_id>\d{3}))?
     
     Args:
         filename: The filename to parse
@@ -36,14 +36,15 @@ def parse_filename_class(filename):
     # Remove file extension
     name_without_ext = os.path.splitext(filename)[0]
     
-    # capturing groups: (?<type>\w)--(?<class>\w+)--(?<id>\w+)(?<aug_suffix>--aug(?<aug_id>\d{3}))?
-    # Pattern: type--class--id[--aug###]
-    pattern = r'^(\w+)--(\w+)--(\w+)(?:--aug(\d{3}))?$'
+    # New pattern with named groups and optional decimal in id
+    # (?P<type>\w+)--(?P<class>\w+)--(?P<id>\w+(?:\.\d+)?)(?P<aug_suffix>--aug(?P<aug_id>\d{3}))?
+    pattern = r'^(?P<type>\w+)--(?P<class>\w+)--(?P<id>\w+(?:\.\d+)?)(?P<aug_suffix>--aug(?P<aug_id>\d{3}))?$'
     match = re.match(pattern, name_without_ext)
-    
+
     if match:
-        file_type, class_name, file_id, aug_suffix = match.groups()
-        return file_type, class_name, file_id, aug_suffix
+        groups = match.groupdict()
+        # Maintain backward-compatible return order
+        return groups.get('type'), groups.get('class'), groups.get('id'), groups.get('aug_suffix')
     else:
         return None
 
@@ -139,9 +140,14 @@ class SiameseNetworkTrainingDataSplitter:
         self.images_directories_collection = images_dirs_paths_list
         self.training_portion = training_portion
         self.mode = mode
-        self.labelled_data = None
+        self.train_data = None
+        self.test_data = None
         self.class_files = {}
         self.class_names = []
+        
+        # Split individual images into train/test sets per class
+        self.train_class_files = {}
+        self.test_class_files = {}
 
         # Collect all files from all directories
         all_files = []
@@ -160,30 +166,17 @@ class SiameseNetworkTrainingDataSplitter:
         for class_name, files in self.class_files.items():
             print(f"Class '{class_name}': {len(files)} files")
 
-        # Create positive pairs (same class)
-        for class_name, files in self.class_files.items():
-            if len(files) > 1:  # Need at least 2 files to create pairs
-                anchors = self.__create_anchor_pairs(files, class_name)
-                # Apply preprocessing to convert file paths to image tensors
-                anchors = anchors.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
-                self.__add_to_self_labelled_data(anchors)
-
-        # Create negative pairs (different classes)
-        class_names_list = list(self.class_files.keys())
-        for i, class_a in enumerate(class_names_list):
-            for class_b in class_names_list[i+1:]:
-                files_a = self.class_files[class_a]
-                files_b = self.class_files[class_b]
-                negatives = self.__create_negative_pairs(files_a, files_b, class_a, class_b, False)
-                if self.mode == "permutation":
-                    negatives = negatives.concatenate(
-                        self.__create_negative_pairs(files_b, files_a, class_b, class_a, False)
-                    )
-                # Apply preprocessing to convert file paths to image tensors
-                negatives = negatives.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
-                self.__add_to_self_labelled_data(negatives)
-
-        self.__build_train_test_data()
+        # Split individual images into train/test sets per class
+        self.__split_individual_images()
+        
+        # Create training pairs (only from training images)
+        self.__create_training_pairs()
+        
+        # Create testing pairs (only from testing images)
+        self.__create_testing_pairs()
+        
+        # Shuffle the final datasets
+        self.__shuffle_final_datasets()
 
     def __create_anchor_pairs(self, anchor_images_list, class_name):
         pairs = (
@@ -230,25 +223,110 @@ class SiameseNetworkTrainingDataSplitter:
         print(f"negative pairs count: {dataset.cardinality().numpy()}, min size: {min_size} for classes '{class_a}' vs '{class_b}'")
         return dataset
 
-    def __build_train_test_data(self):
-        if self.labelled_data is not None:
-            labelled_data_size = self.labelled_data.cardinality().numpy()
-            self.labelled_data = self.labelled_data.shuffle(
-                buffer_size=labelled_data_size, seed=random.randint(20, 80)
+    def __split_individual_images(self):
+        """Split individual images into train/test sets per class to prevent data leakage."""
+        print("\n🔍 Splitting individual images into train/test sets...")
+        
+        for class_name, files in self.class_files.items():
+            # Shuffle files for random split
+            shuffled_files = list(files)
+            random.shuffle(shuffled_files)
+            
+            # Calculate split sizes
+            total_files = len(shuffled_files)
+            train_size = round(total_files * self.training_portion)
+            
+            # Split files
+            train_files = shuffled_files[:train_size]
+            test_files = shuffled_files[train_size:]
+            
+            self.train_class_files[class_name] = train_files
+            self.test_class_files[class_name] = test_files
+            
+            print(f"  Class '{class_name}': {len(train_files)} train, {len(test_files)} test")
+
+    def __create_training_pairs(self):
+        """Create training pairs only from training images."""
+        print("\n🔍 Creating training pairs...")
+        
+        # Create positive pairs (same class) from training images only
+        for class_name, train_files in self.train_class_files.items():
+            if len(train_files) > 1:  # Need at least 2 files to create pairs
+                anchors = self.__create_anchor_pairs(train_files, class_name)
+                # Apply preprocessing to convert file paths to image tensors
+                anchors = anchors.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
+                self.__add_to_training_data(anchors)
+
+        # Create negative pairs (different classes) from training images only
+        class_names_list = list(self.train_class_files.keys())
+        for i, class_a in enumerate(class_names_list):
+            for class_b in class_names_list[i+1:]:
+                files_a = self.train_class_files[class_a]
+                files_b = self.train_class_files[class_b]
+                negatives = self.__create_negative_pairs(files_a, files_b, class_a, class_b, False)
+                if self.mode == "permutation":
+                    negatives = negatives.concatenate(
+                        self.__create_negative_pairs(files_b, files_a, class_b, class_a, False)
+                    )
+                # Apply preprocessing to convert file paths to image tensors
+                negatives = negatives.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
+                self.__add_to_training_data(negatives)
+
+    def __create_testing_pairs(self):
+        """Create testing pairs only from testing images."""
+        print("\n🔍 Creating testing pairs...")
+        
+        # Create positive pairs (same class) from testing images only
+        for class_name, test_files in self.test_class_files.items():
+            if len(test_files) > 1:  # Need at least 2 files to create pairs
+                anchors = self.__create_anchor_pairs(test_files, class_name)
+                # Apply preprocessing to convert file paths to image tensors
+                anchors = anchors.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
+                self.__add_to_testing_data(anchors)
+
+        # Create negative pairs (different classes) from testing images only
+        class_names_list = list(self.test_class_files.keys())
+        for i, class_a in enumerate(class_names_list):
+            for class_b in class_names_list[i+1:]:
+                files_a = self.test_class_files[class_a]
+                files_b = self.test_class_files[class_b]
+                negatives = self.__create_negative_pairs(files_a, files_b, class_a, class_b, False)
+                if self.mode == "permutation":
+                    negatives = negatives.concatenate(
+                        self.__create_negative_pairs(files_b, files_a, class_b, class_a, False)
+                    )
+                # Apply preprocessing to convert file paths to image tensors
+                negatives = negatives.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
+                self.__add_to_testing_data(negatives)
+
+    def __add_to_training_data(self, data):
+        """Add data to training dataset."""
+        if not self.train_data:
+            self.train_data = data
+        else:
+            self.train_data = self.train_data.concatenate(data)
+
+    def __add_to_testing_data(self, data):
+        """Add data to testing dataset."""
+        if not self.test_data:
+            self.test_data = data
+        else:
+            self.test_data = self.test_data.concatenate(data)
+
+    def __shuffle_final_datasets(self):
+        """Shuffle the final training and testing datasets."""
+        print("\n🔍 Shuffling final datasets...")
+        
+        if self.train_data is not None:
+            train_size = self.train_data.cardinality().numpy()
+            self.train_data = self.train_data.shuffle(
+                buffer_size=train_size, seed=random.randint(20, 80)
             )
-            # Build dataloader pipeline
-            data_size = self.labelled_data.cardinality().numpy()
-            train_size = round(data_size * self.training_portion)
-
-            # Split the data into training and testing sets
-            self.train_data = self.labelled_data.take(train_size)
-            self.test_data = self.labelled_data.skip(train_size)
-        else:
-            self.train_data = None
-            self.test_data = None
-
-    def __add_to_self_labelled_data(self, data):
-        if not self.labelled_data:
-            self.labelled_data = data
-        else:
-            self.labelled_data = self.labelled_data.concatenate(data)
+            print(f"  Training dataset: {train_size} pairs")
+        
+        if self.test_data is not None:
+            test_size = self.test_data.cardinality().numpy()
+            self.test_data = self.test_data.shuffle(
+                buffer_size=test_size, seed=random.randint(20, 80)
+            )
+            print(f"  Testing dataset: {test_size} pairs")

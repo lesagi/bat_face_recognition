@@ -301,23 +301,18 @@ def generate_predictions(
     """
     Generate predictions for all image pairs in the input directory.
 
-    Expected directory structure:
+    Expected filename structure:
         input_dir/
-        ├── bat1/
-        │   ├── image1.jpg
-        │   ├── image2.jpg
-        │   └── ...
-        ├── bat2/
-        │   ├── image1.jpg
-        │   ├── image2.jpg
-        │   └── ...
+        ├── r--W--IMG_20250518_145705--aug001.jpg
+        ├── r--H--IMG_20250518_144900.jpg
+        ├── r--rasmi--IMG_20250518_151950--aug003.jpg
         └── ...
 
     Args:
         model: Trained Siamese model
-        input_dir (str): Path to input directory containing bat directories
+        input_dir (str): Path to input directory containing images with filename-based classes
         output_dir (str, optional): Output directory (defaults to input_dir)
-        include_subdirs (list, optional): Specific bat directories to include
+        include_subdirs (list, optional): Specific bat classes to include (e.g., ['W', 'H', 'rasmi'])
         verbose (bool): Enable verbose output
         max_pairs (int, optional): Maximum number of pairs to process (for testing)
 
@@ -337,52 +332,44 @@ def generate_predictions(
 
     print(f"📁 Processing data from: {input_dir}")
 
-    # Check for bat directories (single level nesting: base/bat1, base/bat2, etc.)
-    bat_dirs = [
-        d
-        for d in os.listdir(input_dir)
-        if os.path.isdir(os.path.join(input_dir, d)) and not d.startswith(".")
-    ]
+    # Import the filename parsing function from data_splitter
+    from siamese_network.data_splitter import parse_filename_class, group_files_by_class
 
-    if not bat_dirs:
-        raise ValueError(f"No bat directories found in: {input_dir}")
+    # Get all image files from the directory
+    all_files = []
+    for root, dirs, files in os.walk(input_dir):
+        for file in files:
+            if os.path.isfile(os.path.join(root, file)) and is_img_file(file):
+                all_files.append(os.path.join(root, file))
 
-    # Validate that bat directories contain images
-    valid_bat_dirs = []
-    for bat_dir in bat_dirs:
-        bat_path = os.path.join(input_dir, bat_dir)
-        image_files = [
-            f
-            for f in os.listdir(bat_path)
-            if os.path.isfile(os.path.join(bat_path, f)) and is_img_file(f)
-        ]
-        if image_files:
-            valid_bat_dirs.append(bat_dir)
-        else:
-            print(f"⚠️  Warning: No images found in directory: {bat_dir}")
+    if not all_files:
+        raise ValueError(f"No image files found in: {input_dir}")
 
-    if not valid_bat_dirs:
-        raise ValueError(f"No valid bat directories with images found in: {input_dir}")
+    print(f"📂 Found {len(all_files)} image files")
 
-    # Filter to specific subdirectories if requested
+    # Group files by class based on filename parsing
+    class_files = group_files_by_class(all_files)
+    
+    if not class_files:
+        raise ValueError(f"No valid class files found with expected naming convention in: {input_dir}")
+
+    # Get list of classes
+    valid_bat_dirs = list(class_files.keys())
+    
+    # Filter to specific classes if requested
     if include_subdirs:
         valid_bat_dirs = [d for d in valid_bat_dirs if d in include_subdirs]
         if not valid_bat_dirs:
             raise ValueError(
-                f"None of the specified bat directories found: {include_subdirs}"
+                f"None of the specified bat classes found: {include_subdirs}"
             )
 
     print(
-        f"📂 Found {len(valid_bat_dirs)} bat directories: {valid_bat_dirs[:5]}{'...' if len(valid_bat_dirs) > 5 else ''}"
+        f"📂 Found {len(valid_bat_dirs)} bat classes: {valid_bat_dirs[:5]}{'...' if len(valid_bat_dirs) > 5 else ''}"
     )
 
     # Create data pairs directly from file paths
     print("🔄 Creating data pairs from file paths...")
-
-    # Get all class directories (bat directories) as full paths
-    class_dirs = [os.path.join(input_dir, bat_dir) for bat_dir in valid_bat_dirs]
-
-    print(f"📂 Found {len(class_dirs)} class directories")
 
     # Create positive and negative pairs
     raw_data_pairs = []
@@ -390,15 +377,11 @@ def generate_predictions(
     # Positive pairs (same class) - limit pairs per class to avoid explosion
     from itertools import combinations
 
-    for class_dir in class_dirs:
-        files = [
-            os.path.join(class_dir, f)
-            for f in os.listdir(class_dir)
-            if os.path.isfile(os.path.join(class_dir, f)) and is_img_file(f)
-        ]
+    for class_name in valid_bat_dirs:
+        files = class_files[class_name]
 
         # Create combinations of files from same class (limit to avoid too many pairs)
-        max_positive_pairs = 10  # Limit positive pairs per class
+        max_positive_pairs = 30  # Limit positive pairs per class
         file_combinations = list(combinations(files, 2))
 
         # Take a random sample if too many combinations
@@ -413,21 +396,13 @@ def generate_predictions(
     # Negative pairs (different classes)
     import random
 
-    for class_dir1, class_dir2 in combinations(class_dirs, 2):
-        files1 = [
-            os.path.join(class_dir1, f)
-            for f in os.listdir(class_dir1)
-            if os.path.isfile(os.path.join(class_dir1, f)) and is_img_file(f)
-        ]
-        files2 = [
-            os.path.join(class_dir2, f)
-            for f in os.listdir(class_dir2)
-            if os.path.isfile(os.path.join(class_dir2, f)) and is_img_file(f)
-        ]
+    for class_name1, class_name2 in combinations(valid_bat_dirs, 2):
+        files1 = class_files[class_name1]
+        files2 = class_files[class_name2]
 
         # Create some pairs between different classes (limit to avoid explosion)
         min_size = min(len(files1), len(files2))
-        num_pairs = min(min_size, 5)  # Reduced from 20 to 5 for faster processing
+        num_pairs = min(min_size, 20)  # Reduced from 20 to 5 for faster processing
 
         for i in range(num_pairs):
             file1 = random.choice(files1)
@@ -561,20 +536,24 @@ def generate_predictions(
             for i in range(len(y_hat)):
                 file1, file2 = batch_paths[i]
 
-                # Extract bat names from directory structure
-                bat_name1 = os.path.basename(os.path.dirname(file1))
-                bat_name2 = os.path.basename(os.path.dirname(file2))
-
-                # Extract image filenames for frame info
-                input1_filename = os.path.basename(file1)
-                input2_filename = os.path.basename(file2)
-
-                # Parse filename format for frame numbers: name.frame.extension
-                try:
-                    name1, frame1, extension1 = input1_filename.split(".")
-                    name2, frame2, extension2 = input2_filename.split(".")
-                except ValueError:
-                    # Handle different filename formats
+                # Extract bat names from filename parsing
+                filename1 = os.path.basename(file1)
+                filename2 = os.path.basename(file2)
+                
+                parsed1 = parse_filename_class(filename1)
+                parsed2 = parse_filename_class(filename2)
+                
+                if parsed1 and parsed2:
+                    _, bat_name1, file_id1, aug_suffix1 = parsed1
+                    _, bat_name2, file_id2, aug_suffix2 = parsed2
+                    
+                    # Use file_id as frame info
+                    frame1 = file_id1
+                    frame2 = file_id2
+                else:
+                    # Fallback to filename parsing
+                    bat_name1 = os.path.splitext(filename1)[0]
+                    bat_name2 = os.path.splitext(filename2)[0]
                     frame1 = "0"
                     frame2 = "0"
 
@@ -608,9 +587,9 @@ def generate_predictions(
                 # Write row to CSV
                 writer.writerow(
                     [
-                        bat_name1,  # Use bat class name instead of filename
+                        bat_name1,  # Use bat class name from filename
                         frame1,
-                        bat_name2,  # Use bat class name instead of filename
+                        bat_name2,  # Use bat class name from filename
                         frame2,
                         float(batch_labels[i]),  # Convert tensor to float
                         float(y_hat[i][0]),  # Raw confidence score
@@ -678,14 +657,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Basic usage - process all bat directories in data folder
+    # Basic usage - process all bat classes in data folder
     python generate_predictions.py --model /path/to/model --input /path/to/data
     
     # With custom output directory  
     python generate_predictions.py --model /path/to/model --input /path/to/data --output /path/to/output
     
-    # Process specific bat directories only
-    python generate_predictions.py --model /path/to/model --input /path/to/data --subdirs charlie fidu babyis
+    # Process specific bat classes only
+    python generate_predictions.py --model /path/to/model --input /path/to/data --subdirs W H rasmi charlie
     
     # With verbose output
     python generate_predictions.py -m /path/to/model -i /path/to/data --verbose
@@ -718,7 +697,7 @@ Examples:
     parser.add_argument(
         "--subdirs",
         nargs="*",
-        help="Specific bat directories to process (e.g., bat1 bat2 charlie)",
+        help="Specific bat classes to process (e.g., W H rasmi charlie)",
     )
 
     parser.add_argument(

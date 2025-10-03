@@ -25,7 +25,7 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from image_processor.transforms import ImageTransforms
-from config.loader import load_config
+from app.config.loader import load_config
 
 
 class FaceLandmarkAnalyzer:
