@@ -149,7 +149,7 @@ def test_permutation_mode(data_path):
 
 def main():
     """Main test function."""
-    data_path = "/Users/MAC/Documents/bat_face_rec/data/processed/rous_siamese_input/augmented_cropped_picsum"
+    data_path = "/Users/MAC/Documents/bat_face_rec/data/processed/rous_siamese_input/videos_cropped_picsum_no_augementation"
     
     print("🧪 Testing SiameseNetworkTrainingDataSplitter")
     print("=" * 60)

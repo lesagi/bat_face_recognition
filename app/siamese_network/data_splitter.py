@@ -6,7 +6,7 @@ import os
 import random
 import re
 import tensorflow as tf
-from itertools import combinations, permutations
+from itertools import combinations, permutations, product
 from collections import defaultdict
 
 from app.config.loader import load_config
@@ -144,6 +144,7 @@ class SiameseNetworkTrainingDataSplitter:
         self.images_directories_collection = images_dirs_paths_list
         self.training_portion = training_portion
         self.mode = mode
+        print(f"Mode: {mode}")
         self.train_data = None
         self.test_data = None
         self.class_files = {}
@@ -183,22 +184,28 @@ class SiameseNetworkTrainingDataSplitter:
         self.__shuffle_final_datasets()
 
     def __create_anchor_pairs(self, anchor_images_list, class_name):
-        pairs = (
-            list(combinations(anchor_images_list, 2))
-            if self.mode == "combination"
-            else list(permutations(anchor_images_list, 2))
-        )
-        pairs_a = tf.data.Dataset.from_tensor_slices([a for a, b in pairs])
-        pairs_b = tf.data.Dataset.from_tensor_slices([b for a, b in pairs])
-        samples_count = len(pairs)
-        dataset = tf.data.Dataset.zip((pairs_a, pairs_b, tf.data.Dataset.from_tensor_slices(tf.ones(samples_count))))
-
+        anchor_class_size = len(anchor_images_list)
         # Local config for size limit
         cfg = load_config()
-        max_limit = cfg.siamese_network.training.get("max_data_size_limit")
-        if max_limit is not None:
-            dataset = dataset.take(max_limit)
-        print(f"anchor pairs count: {dataset.cardinality().numpy()} for class '{class_name}'")
+        max_limit = cfg.siamese_network.training.get("max_samples_per_class")
+
+        min_samples_count = min(anchor_class_size, max_limit) if max_limit is not None else anchor_class_size
+        data = tf.data.Dataset.from_tensor_slices(anchor_images_list)
+        data = data.shuffle(data.cardinality(), seed=random.randint(20, 80)).take(min_samples_count)
+        
+        pairs = (
+            list(combinations(list(data), 2))
+            if self.mode == "combination"
+            else list(permutations(list(data), 2))
+        )
+    
+        # combinations([1, 3, 4, 5], 2) -> [(1, 3), (1, 4), (1, 5), (3, 4), (3, 5), (4, 5)]
+        pairs_lefties = tf.data.Dataset.from_tensor_slices([a for a, b in pairs]) # [1, 1, 1, 3, 3, 4]
+        pairs_righties = tf.data.Dataset.from_tensor_slices([b for a, b in pairs]) # [3, 4, 5, 4, 5, 5]
+        labels = tf.data.Dataset.from_tensor_slices(tf.ones(len(pairs))) # [1, 1, 1, 1, 1, 1]
+        dataset = tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels)) # [(1, 3, 1), (1, 4, 1), ...]
+        
+        print(f"{class_name:<10}| {'Anchor size: ':<10}{anchor_class_size:<5}| {'Final count: ':<10}{dataset.cardinality().numpy():<10}")
         return dataset
 
     def __create_negative_pairs(self, list_a, list_b, class_a, class_b, should_shuffle=True):
@@ -208,24 +215,38 @@ class SiameseNetworkTrainingDataSplitter:
         list_b_size = len(list_b)
         data_set_b = tf.data.Dataset.from_tensor_slices(list_b)
 
-        if should_shuffle:
-            data_set_a = data_set_a.shuffle(data_set_a.cardinality(), seed=random.randint(20, 80))
-            data_set_b = data_set_b.shuffle(data_set_b.cardinality(), seed=random.randint(20, 80))
+        min_size_class = min(list_a_size, list_b_size)
+        min_samples_per_class = min_size_class
 
         # Local config for size limit
         cfg = load_config()
-        max_limit = cfg.siamese_network.training.get("max_data_size_limit")
+        max_samples_per_class = cfg.siamese_network.training.get("max_samples_per_class")
+        if max_samples_per_class is not None:
+            min_samples_per_class = min(min_size_class, max_samples_per_class)
 
-        min_size = min(list_a_size, list_b_size)
-        if max_limit is not None:
-            min_size = min(min_size, max_limit)
+        shuffle_seed = random.randint(20, 80) if should_shuffle else None
+      
+        data_set_a = data_set_a.shuffle(data_set_a.cardinality(), seed=shuffle_seed).take(min_samples_per_class)
+        data_set_b = data_set_b.shuffle(data_set_b.cardinality(), seed=shuffle_seed).take(min_samples_per_class)
+        dataset = self.__create_product_dataset(data_set_a, data_set_b)
+        
+        if self.mode == "permutation":
+            dataset = self.__create_product_dataset(data_set_b, data_set_a)
 
-        data_set_a = data_set_a.take(min_size)
-        data_set_b = data_set_b.take(min_size)
-
-        dataset = tf.data.Dataset.zip((data_set_a, data_set_b, tf.data.Dataset.from_tensor_slices(tf.zeros(min_size))))
-        print(f"negative pairs count: {dataset.cardinality().numpy()}, min size: {min_size} for classes '{class_a}' vs '{class_b}'")
+        final_data_set_size = dataset.cardinality().numpy()
+        print(f"('{class_a}', '{class_b}'): {final_data_set_size} negative pairs count. Samples per class: {min_samples_per_class}")
         return dataset
+
+    def __create_product_dataset(self, tensor1, tensor2):
+        list1 = list(tensor1)
+        list2 = list(tensor2)
+        lists_product = list(product(list1, list2))
+
+        pairs_lefties = tf.data.Dataset.from_tensor_slices([a for a, b in lists_product]) 
+        pairs_righties = tf.data.Dataset.from_tensor_slices([b for a, b in lists_product])
+        labels = tf.data.Dataset.from_tensor_slices(tf.zeros(len(list(lists_product))))
+        return tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels))
+
 
     def __split_individual_images(self):
         """Split individual images into train/test sets per class to prevent data leakage.
