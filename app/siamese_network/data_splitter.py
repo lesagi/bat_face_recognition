@@ -66,8 +66,12 @@ def group_files_by_class(file_paths):
         parsed = parse_filename_class(filename)
         
         if parsed:
-            _, class_name, _, _ = parsed
-            class_files[class_name].append(file_path)
+            _, class_name, id, _ = parsed
+            if class_name not in class_files:
+                class_files[class_name] = defaultdict(list)
+            if id not in class_files[class_name]:
+                class_files[class_name][id] = []
+            class_files[class_name][id].append(file_path)
         else:
             # Skip files that don't match the expected pattern
             print(f"Warning: Skipping file with unexpected naming pattern: {filename}")
@@ -224,22 +228,30 @@ class SiameseNetworkTrainingDataSplitter:
         return dataset
 
     def __split_individual_images(self):
-        """Split individual images into train/test sets per class to prevent data leakage."""
+        """Split individual images into train/test sets per class to prevent data leakage.
+        We are considering all augemented images of specific image as a single image, not individual images."""
         print("\n🔍 Splitting individual images into train/test sets...")
         
-        for class_name, files in self.class_files.items():
+        for class_name, ids in self.class_files.items():
             # Shuffle files for random split
-            shuffled_files = list(files)
-            random.shuffle(shuffled_files)
+            shuffled_ids = list(ids)
+            random.shuffle(shuffled_ids)
             
             # Calculate split sizes
-            total_files = len(shuffled_files)
-            train_size = round(total_files * self.training_portion)
+            total_samples = len(shuffled_ids)
+            train_size = round(total_samples * self.training_portion)
             
             # Split files
-            train_files = shuffled_files[:train_size]
-            test_files = shuffled_files[train_size:]
-            
+            train_ids = shuffled_ids[:train_size]
+            test_ids = shuffled_ids[train_size:]
+
+            train_files = []
+            test_files = []
+            for id in train_ids:
+                train_files.extend(ids[id])
+            for id in test_ids:
+                test_files.extend(ids[id])
+
             self.train_class_files[class_name] = train_files
             self.test_class_files[class_name] = test_files
             

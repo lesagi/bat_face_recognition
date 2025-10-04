@@ -61,10 +61,11 @@ def test_file_grouping(data_path):
         # Test grouping
         class_files = group_files_by_class(all_files)
         print(f"\nGrouped into {len(class_files)} classes:")
-        for class_name, files in class_files.items():
-            print(f"  Class '{class_name}': {len(files)} files")
-            if files:
-                sample_filename = os.path.basename(files[0])
+        for class_name, ids in class_files.items():
+            print(f"  Class '{class_name}': {len(ids)} files")
+            if ids:
+                id_key = list(ids.keys())[0]
+                sample_filename = os.path.basename(ids[id_key][0])
                 print(f"    Sample: {sample_filename}")
 
 def test_data_splitter(data_path):
