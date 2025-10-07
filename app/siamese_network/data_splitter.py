@@ -31,7 +31,7 @@ def parse_filename_class(filename):
         filename: The filename to parse
         
     Returns:
-        tuple: (type, class_name, id, aug_suffix) or None if parsing fails
+        tuple: (type, class_name, id, aug_id) or None if parsing fails
     """
     # Remove file extension
     name_without_ext = os.path.splitext(filename)[0]
@@ -44,7 +44,7 @@ def parse_filename_class(filename):
     if match:
         groups = match.groupdict()
         # Maintain backward-compatible return order
-        return groups.get('type'), groups.get('class'), groups.get('id'), groups.get('aug_suffix')
+        return groups.get('type'), groups.get('class'), groups.get('id'), groups.get('aug_id')
     else:
         return None
 
