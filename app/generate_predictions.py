@@ -348,8 +348,13 @@ def generate_predictions(
     print(f"📂 Found {len(all_files)} image files")
 
     # Group files by class based on filename parsing
-    class_files = group_files_by_class(all_files)
-    
+    class_files_raw = group_files_by_class(all_files)
+    class_files = {}
+    for class_name, class_ids_to_files_dict in class_files_raw.items():
+        if class_name not in class_files:
+            class_files[class_name] = []
+        for file_id, file_paths_list in class_ids_to_files_dict.items():
+            class_files[class_name].extend(file_paths_list)
     if not class_files:
         raise ValueError(f"No valid class files found with expected naming convention in: {input_dir}")
 
