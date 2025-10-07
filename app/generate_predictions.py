@@ -332,99 +332,47 @@ def generate_predictions(
 
     print(f"📁 Processing data from: {input_dir}")
 
-    # Import the filename parsing function from data_splitter
-    from siamese_network.data_splitter import parse_filename_class, group_files_by_class
+    # Import the filename parsing function and splitter
+    from siamese_network.data_splitter import parse_filename_class, SiameseNetworkTrainingDataSplitter
 
-    # Get all image files from the directory
-    all_files = []
-    for root, dirs, files in os.walk(input_dir):
-        for file in files:
-            if os.path.isfile(os.path.join(root, file)) and is_img_file(file):
-                all_files.append(os.path.join(root, file))
-
-    if not all_files:
-        raise ValueError(f"No image files found in: {input_dir}")
-
-    print(f"📂 Found {len(all_files)} image files")
-
-    # Group files by class based on filename parsing
-    class_files_raw = group_files_by_class(all_files)
-    class_files = {}
-    for class_name, class_ids_to_files_dict in class_files_raw.items():
-        if class_name not in class_files:
-            class_files[class_name] = []
-        for file_id, file_paths_list in class_ids_to_files_dict.items():
-            class_files[class_name].extend(file_paths_list)
-    if not class_files:
-        raise ValueError(f"No valid class files found with expected naming convention in: {input_dir}")
-
-    # Get list of classes
-    valid_bat_dirs = list(class_files.keys())
-    
-    # Filter to specific classes if requested
-    if include_subdirs:
-        valid_bat_dirs = [d for d in valid_bat_dirs if d in include_subdirs]
-        if not valid_bat_dirs:
-            raise ValueError(
-                f"None of the specified bat classes found: {include_subdirs}"
-            )
-
-    print(
-        f"📂 Found {len(valid_bat_dirs)} bat classes: {valid_bat_dirs[:5]}{'...' if len(valid_bat_dirs) > 5 else ''}"
+    # Use the training splitter to create pairs with filenames; use all data in training
+    print("🔄 Creating data pairs using SiameseNetworkTrainingDataSplitter...")
+    splitter = SiameseNetworkTrainingDataSplitter(
+        images_dirs_paths_list=[input_dir],
+        training_portion=1.0,
+        mode="combination",
+        skip_preprocessing=True,
     )
 
-    # Create data pairs directly from file paths
-    print("🔄 Creating data pairs from file paths...")
-
-    # Create positive and negative pairs
+    # Convert dataset elements to python types
     raw_data_pairs = []
+    for f1_b, f2_b, lbl in splitter.train_data.as_numpy_iterator():
+        f1 = f1_b.decode("utf-8") if isinstance(f1_b, (bytes, bytearray)) else str(f1_b)
+        f2 = f2_b.decode("utf-8") if isinstance(f2_b, (bytes, bytearray)) else str(f2_b)
+        raw_data_pairs.append((f1, f2, float(lbl)))
 
-    # Positive pairs (same class) - limit pairs per class to avoid explosion
-    from itertools import combinations
-
-    for class_name in valid_bat_dirs:
-        files = class_files[class_name]
-
-        # Create combinations of files from same class (limit to avoid too many pairs)
-        max_positive_pairs = 30  # Limit positive pairs per class
-        file_combinations = list(combinations(files, 2))
-
-        # Take a random sample if too many combinations
-        if len(file_combinations) > max_positive_pairs:
-            import random
-
-            file_combinations = random.sample(file_combinations, max_positive_pairs)
-
-        for file1, file2 in file_combinations:
-            raw_data_pairs.append((file1, file2, 1.0))
-
-    # Negative pairs (different classes)
-    import random
-
-    for class_name1, class_name2 in combinations(valid_bat_dirs, 2):
-        files1 = class_files[class_name1]
-        files2 = class_files[class_name2]
-
-        # Create some pairs between different classes (limit to avoid explosion)
-        min_size = min(len(files1), len(files2))
-        num_pairs = min(min_size, 20)  # Reduced from 20 to 5 for faster processing
-
-        for i in range(num_pairs):
-            file1 = random.choice(files1)
-            file2 = random.choice(files2)
-            raw_data_pairs.append((file1, file2, 0.0))
+    # Optional class filtering at pair level
+    if include_subdirs:
+        def _cls_from_path(p):
+            fname = os.path.basename(p)
+            parsed = parse_filename_class(fname)
+            return parsed[1] if parsed else None
+        filtered = []
+        for f1, f2, lbl in raw_data_pairs:
+            c1 = _cls_from_path(f1)
+            c2 = _cls_from_path(f2)
+            if c1 in include_subdirs and c2 in include_subdirs:
+                filtered.append((f1, f2, lbl))
+        raw_data_pairs = filtered
 
     if not raw_data_pairs:
-        raise ValueError(
-            "No data pairs were created. Check if the input directories contain valid images."
-        )
+        raise ValueError("No data pairs were created by the splitter (after optional filtering).")
 
     print(f"📊 Created {len(raw_data_pairs)} data pairs")
 
     # Apply max_pairs limit if specified
+    import random
     if max_pairs and len(raw_data_pairs) > max_pairs:
-        import random
-
         raw_data_pairs = random.sample(raw_data_pairs, max_pairs)
         print(f"⚡ Limited to {max_pairs} pairs for faster processing")
 
@@ -443,15 +391,26 @@ def generate_predictions(
     binary_true_labels = []  # "Same" or "Different"
     binary_pred_labels = []  # "Same" or "Different"
 
-    # Initialize per-class verification tracking
-    class_verification = {}
-    for bat_dir in valid_bat_dirs:
-        class_verification[bat_dir] = {
+    # Initialize per-class verification tracking from observed classes in pairs
+    observed_classes = set()
+    for f1, f2, _ in raw_data_pairs:
+        fn1 = os.path.basename(f1)
+        fn2 = os.path.basename(f2)
+        p1 = parse_filename_class(fn1)
+        p2 = parse_filename_class(fn2)
+        if p1:
+            observed_classes.add(p1[1])
+        if p2:
+            observed_classes.add(p2[1])
+    class_verification = {
+        cls: {
             "same_correct": 0,
             "same_total": 0,
             "different_correct": 0,
             "different_total": 0,
         }
+        for cls in observed_classes
+    }
 
     # Generate output filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

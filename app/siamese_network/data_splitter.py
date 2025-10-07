@@ -139,11 +139,13 @@ class SiameseNetworkTrainingDataSplitter:
     """
 
     def __init__(
-        self, images_dirs_paths_list, training_portion=0.7, mode="combination"
+        self, images_dirs_paths_list, training_portion=0.7, mode="combination", skip_preprocessing=False, preprocess_fn=preprocess_twin_input_function
     ):
         self.images_directories_collection = images_dirs_paths_list
         self.training_portion = training_portion
         self.mode = mode
+        self.skip_preprocessing = skip_preprocessing
+        self.preprocess_fn = preprocess_fn
         print(f"Mode: {mode}")
         self.train_data = None
         self.test_data = None
@@ -175,23 +177,57 @@ class SiameseNetworkTrainingDataSplitter:
         self.__split_individual_images()
         
         # Create training pairs (only from training images)
-        self.__create_training_pairs()
-        
+        train_anchors, train_negatives = self.__create_training_pairs()
+
         # Create testing pairs (only from testing images)
-        self.__create_testing_pairs()
+        test_anchors, test_negatives = self.__create_testing_pairs()
+
+        # Apply preprocessing at constructor if not skipped
+        if not self.skip_preprocessing:
+            if train_anchors is not None:
+                train_anchors = train_anchors.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
+            if train_negatives is not None:
+                train_negatives = train_negatives.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
+            if test_anchors is not None:
+                test_anchors = test_anchors.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
+            if test_negatives is not None:
+                test_negatives = test_negatives.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
+
+        # Add to datasets
+        if train_anchors is not None:
+            self.__add_to_training_data(train_anchors)
+        if train_negatives is not None:
+            self.__add_to_training_data(train_negatives)
+        if test_anchors is not None:
+            self.__add_to_testing_data(test_anchors)
+        if test_negatives is not None:
+            self.__add_to_testing_data(test_negatives)
         
         # Shuffle the final datasets
         self.__shuffle_final_datasets()
 
     def __create_anchor_pairs(self, anchor_images_list, class_name):
         anchor_class_size = len(anchor_images_list)
+        if anchor_class_size < 2:
+            # Return empty dataset with correct structure (path, path, label)
+            empty = tf.data.Dataset.from_tensor_slices(
+                (
+                    tf.constant([], dtype=tf.string),
+                    tf.constant([], dtype=tf.string),
+                    tf.constant([], dtype=tf.float32),
+                )
+            )
+            print(f"{class_name:<10}| {'Anchor size: ':<10}{anchor_class_size:<5}| {'Final count: ':<10}{0:<10}")
+            return empty
         # Local config for size limit
         cfg = load_config()
         max_limit = cfg.siamese_network.training.get("max_samples_per_class")
 
         min_samples_count = min(anchor_class_size, max_limit) if max_limit is not None else anchor_class_size
         data = tf.data.Dataset.from_tensor_slices(anchor_images_list)
-        data = data.shuffle(data.cardinality(), seed=random.randint(20, 80)).take(min_samples_count)
+        # Use a concrete buffer size to avoid UNKNOWN_CARDINALITY issues
+        buffer_size = max(1, anchor_class_size)
+        data = data.shuffle(buffer_size, seed=random.randint(20, 80)).take(min_samples_count)
         
         pairs = (
             list(combinations(list(data), 2))
@@ -225,9 +261,24 @@ class SiameseNetworkTrainingDataSplitter:
             min_samples_per_class = min(min_size_class, max_samples_per_class)
 
         shuffle_seed = random.randint(20, 80) if should_shuffle else None
+
+        # If no samples are available, return an empty dataset with correct structure
+        if min_samples_per_class == 0:
+            empty = tf.data.Dataset.from_tensor_slices(
+                (
+                    tf.constant([], dtype=tf.string),
+                    tf.constant([], dtype=tf.string),
+                    tf.constant([], dtype=tf.float32),
+                )
+            )
+            print(f"('{class_a}', '{class_b}'): 0 negative pairs count. Samples per class: 0")
+            return empty
       
-        data_set_a = data_set_a.shuffle(data_set_a.cardinality(), seed=shuffle_seed).take(min_samples_per_class)
-        data_set_b = data_set_b.shuffle(data_set_b.cardinality(), seed=shuffle_seed).take(min_samples_per_class)
+        # Use concrete buffer sizes based on list lengths to avoid UNKNOWN_CARDINALITY
+        buffer_a = max(1, list_a_size)
+        buffer_b = max(1, list_b_size)
+        data_set_a = data_set_a.shuffle(buffer_a, seed=shuffle_seed).take(min_samples_per_class)
+        data_set_b = data_set_b.shuffle(buffer_b, seed=shuffle_seed).take(min_samples_per_class)
         dataset = self.__create_product_dataset(data_set_a, data_set_b)
         
         if self.mode == "permutation":
@@ -241,10 +292,14 @@ class SiameseNetworkTrainingDataSplitter:
         list1 = list(tensor1)
         list2 = list(tensor2)
         lists_product = list(product(list1, list2))
-
-        pairs_lefties = tf.data.Dataset.from_tensor_slices([a for a, b in lists_product]) 
-        pairs_righties = tf.data.Dataset.from_tensor_slices([b for a, b in lists_product])
-        labels = tf.data.Dataset.from_tensor_slices(tf.zeros(len(list(lists_product))))
+        if len(lists_product) == 0:
+            pairs_lefties = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.string))
+            pairs_righties = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.string))
+            labels = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.float32))
+        else:
+            pairs_lefties = tf.data.Dataset.from_tensor_slices([a for a, b in lists_product]) 
+            pairs_righties = tf.data.Dataset.from_tensor_slices([b for a, b in lists_product])
+            labels = tf.data.Dataset.from_tensor_slices(tf.zeros(len(list(lists_product)), dtype=tf.float32))
         return tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels))
 
 
@@ -279,16 +334,16 @@ class SiameseNetworkTrainingDataSplitter:
             print(f"  Class '{class_name}': {len(train_files)} train, {len(test_files)} test")
 
     def __create_training_pairs(self):
-        """Create training pairs only from training images."""
+        """Create training pairs only from training images. Returns (anchors_ds, negatives_ds) of file paths."""
         print("\n🔍 Creating training pairs...")
-        
+        anchors_ds = None
+        negatives_ds = None
+
         # Create positive pairs (same class) from training images only
         for class_name, train_files in self.train_class_files.items():
             if len(train_files) > 1:  # Need at least 2 files to create pairs
                 anchors = self.__create_anchor_pairs(train_files, class_name)
-                # Apply preprocessing to convert file paths to image tensors
-                anchors = anchors.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
-                self.__add_to_training_data(anchors)
+                anchors_ds = anchors if anchors_ds is None else anchors_ds.concatenate(anchors)
 
         # Create negative pairs (different classes) from training images only
         class_names_list = list(self.train_class_files.keys())
@@ -301,21 +356,21 @@ class SiameseNetworkTrainingDataSplitter:
                     negatives = negatives.concatenate(
                         self.__create_negative_pairs(files_b, files_a, class_b, class_a, False)
                     )
-                # Apply preprocessing to convert file paths to image tensors
-                negatives = negatives.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
-                self.__add_to_training_data(negatives)
+                negatives_ds = negatives if negatives_ds is None else negatives_ds.concatenate(negatives)
+
+        return anchors_ds, negatives_ds
 
     def __create_testing_pairs(self):
-        """Create testing pairs only from testing images."""
+        """Create testing pairs only from testing images. Returns (anchors_ds, negatives_ds) of file paths."""
         print("\n🔍 Creating testing pairs...")
-        
+        anchors_ds = None
+        negatives_ds = None
+
         # Create positive pairs (same class) from testing images only
         for class_name, test_files in self.test_class_files.items():
             if len(test_files) > 1:  # Need at least 2 files to create pairs
                 anchors = self.__create_anchor_pairs(test_files, class_name)
-                # Apply preprocessing to convert file paths to image tensors
-                anchors = anchors.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
-                self.__add_to_testing_data(anchors)
+                anchors_ds = anchors if anchors_ds is None else anchors_ds.concatenate(anchors)
 
         # Create negative pairs (different classes) from testing images only
         class_names_list = list(self.test_class_files.keys())
@@ -328,9 +383,9 @@ class SiameseNetworkTrainingDataSplitter:
                     negatives = negatives.concatenate(
                         self.__create_negative_pairs(files_b, files_a, class_b, class_a, False)
                     )
-                # Apply preprocessing to convert file paths to image tensors
-                negatives = negatives.map(preprocess_twin_input_function, num_parallel_calls=tf.data.AUTOTUNE)
-                self.__add_to_testing_data(negatives)
+                negatives_ds = negatives if negatives_ds is None else negatives_ds.concatenate(negatives)
+
+        return anchors_ds, negatives_ds
 
     def __add_to_training_data(self, data):
         """Add data to training dataset."""
@@ -352,14 +407,16 @@ class SiameseNetworkTrainingDataSplitter:
         
         if self.train_data is not None:
             train_size = self.train_data.cardinality().numpy()
-            self.train_data = self.train_data.shuffle(
-                buffer_size=train_size, seed=random.randint(20, 80)
-            )
+            if train_size > 0:
+                self.train_data = self.train_data.shuffle(
+                    buffer_size=train_size, seed=random.randint(20, 80)
+                )
             print(f"  Training dataset: {train_size} pairs")
         
         if self.test_data is not None:
             test_size = self.test_data.cardinality().numpy()
-            self.test_data = self.test_data.shuffle(
-                buffer_size=test_size, seed=random.randint(20, 80)
-            )
+            if test_size > 0:
+                self.test_data = self.test_data.shuffle(
+                    buffer_size=test_size, seed=random.randint(20, 80)
+                )
             print(f"  Testing dataset: {test_size} pairs")
