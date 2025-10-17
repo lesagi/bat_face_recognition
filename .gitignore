@@ -26,8 +26,9 @@ example_*.py
 *.jsonl.gz
 *.jsonl.bz2
 *.jsonl.zip
-!requirements*.txt
+requirements*.txt
 !README.md
 !*/README.md
 *.md
 models/
+mlruns/

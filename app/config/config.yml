@@ -16,11 +16,11 @@ general:
 # =============================================================================
 mlflow:
   enabled: true
-  experiment_name: "bat_face_recognition"
   tracking:
     host: "localhost"
     port: 8080
-    uri: "file:./mlruns"
+    # uri: "file:///home/sagilevi1/bat_face_rec_project/mlruns"
+    uri: "file:///Users/MAC/Documents/bat_face_rec/mlruns"
 
 # =============================================================================
 # MODELS CONFIGURATION
@@ -31,18 +31,18 @@ models:
   # rousettus: /Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt
   segmentation:
     # batwoman - rousettus
-    # model_path: "/home/sagilevi1/bat_face_rec_project/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
+    model_path: "/home/sagilevi1/bat_face_rec_project/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
     # Local - rousettus
-    model_path: "/Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
+    # model_path: "/Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
     model_type: "yolo_segmentation"
     confidence_threshold: 0.5
   
   # Trained YOLO Pose Model
   pose:
     # batwoman
-    # model_path: "/home/sagilevi1/bat_face_rec_project/face_annotation_eyes_nose/runs/pose/augmented_train/weights/best.pt"
+    model_path: "/home/sagilevi1/bat_face_rec_project/face_annotation_eyes_nose/runs/pose/augmented_train/weights/best.pt"
     # Local - rousettus
-    model_path: "/Users/MAC/Documents/bat_face_rec/face_annotation_eyes_nose/best.pt"
+    # model_path: "/Users/MAC/Documents/bat_face_rec/face_annotation_eyes_nose/best.pt"
     model_type: "yolo_pose"
     confidence_threshold: 0.5
   
@@ -67,8 +67,12 @@ siamese_network:
   
   # Training configuration
   training:
-    input_dir: "face_rec_rousettus_#1/background_replacement/processed_siamese_picsum"
-    output_dir: "face_rec_rousettus_#1/runs/model"
+    # Local
+    input_dir: "/Users/MAC/Documents/bat_face_rec/data/processed/rous_siamese_input/videos_cropped_picsum_no_augementation"
+    output_dir: "/Users/MAC/Documents/bat_face_rec/models/siamese/rousettus/04-10-25_vid_cropped_no_aug_data_split_refactor"
+    # Batwoman
+    # input_dir: "/home/sagilevi1/bat_face_rec_project/data/processed/rous_siamese_input/videos_cropped_picsum_no_augementation"
+    # output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/rousettus/04-10-25_vid_cropped_no_aug_data_split_refactor"
     epochs: 80
     batch_size: 16
     learning_rate: 0.0001
@@ -81,8 +85,8 @@ siamese_network:
       type: "BinaryCrossentropy"
       from_logits: false
     train_val_split: 0.7
-    pair_mode: "permutation" # "permutation" or "combination"
-    max_data_size_limit: 10000
+    pair_mode: "combination" # "permutation" or "combination"
+    max_samples_per_class: 40
     early_stopping:
       enabled: true
       patience: 10
@@ -114,13 +118,13 @@ siamese_network:
       
       # Augmentation settings
       augmentation:
-        enabled: true  # Re-enabled to work on fixing augmentation
+        enabled: false  # Re-enabled to work on fixing augmentation
         preset: "noise_color_only"
         count: 5
         # batwoman
-        # config_file: "/home/sagilevi1/bat_face_rec_project/app/config/augmentation_noise_color.yml"
+        config_file: "/home/sagilevi1/bat_face_rec_project/app/config/augmentation_noise_color.yml"
         # Local 
-        config_file: "/Users/MAC/Documents/bat_face_rec/app/config/augmentation_noise_color.yml"
+        # config_file: "/Users/MAC/Documents/bat_face_rec/app/config/augmentation_noise_color.yml"
         
         # Prediction transformation settings
         transform_predictions: true
