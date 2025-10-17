@@ -27,8 +27,10 @@ example_*.py
 *.jsonl.bz2
 *.jsonl.zip
 requirements*.txt
+*.md
 !README.md
 !*/README.md
-*.md
 models/
 mlruns/
+predicions*.csv
+batwoman*
