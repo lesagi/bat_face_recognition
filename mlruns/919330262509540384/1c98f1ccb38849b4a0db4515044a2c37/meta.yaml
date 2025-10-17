@@ -1,0 +1,14 @@
+artifact_uri: file:///home/sagilevi1/bat_face_rec_project/mlruns/919330262509540384/1c98f1ccb38849b4a0db4515044a2c37/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '919330262509540384'
+lifecycle_stage: active
+run_id: 1c98f1ccb38849b4a0db4515044a2c37
+run_name: training
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760221363306
+status: 1
+tags: []
+user_id: sagilevi1

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/sagilevi1/bat_face_rec_project/mlruns/919330262509540384/2492cb28a02945dca1de7fa7b6b1b4ef/artifacts
+end_time: 1760580349665
+entry_point_name: ''
+experiment_id: '919330262509540384'
+lifecycle_stage: active
+run_id: 2492cb28a02945dca1de7fa7b6b1b4ef
+run_name: epoch_49
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760580349649
+status: 3
+tags: []
+user_id: sagilevi1
