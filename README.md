@@ -262,12 +262,143 @@ yolo segment train data=data/augmented/mauritius_augmented/dataset.yaml \
 3. **"No label files found"**: Ensure labels are in the `labels/` subdirectory with `.txt` extension
 4. **Import errors**: Install missing dependencies with `pip install -r requirements.txt`
 
+### GPU Setup Issues (Linux)
+
+If TensorFlow is not detecting your GPU(s) despite having NVIDIA drivers and CUDA installed, follow these steps:
+
+#### Problem: TensorFlow shows "GPU devices: []" despite having GPUs
+
+**Symptoms:**
+```bash
+TensorFlow version: 2.15.0
+Built with CUDA: True
+GPU devices: []
+```
+
+**Root Cause:** Missing or misconfigured cuDNN library in the system's linker cache.
+
+#### Solution: Install cuDNN in Conda Environment
+
+1. **Verify GPU and CUDA installation:**
+   ```bash
+   # Check GPU availability
+   nvidia-smi
+   
+   # Check CUDA version (should show 12.4 or compatible)
+   nvcc --version
+   ```
+
+2. **Create diagnostic script** to identify missing libraries:
+   ```bash
+   # Create check_cuda_setup.sh
+   cat > check_cuda_setup.sh << 'EOF'
+   #!/bin/bash
+   OUTPUT_FILE="cuda_setup_info.txt"
+   echo "=== CUDA Setup Information ===" > $OUTPUT_FILE
+   echo "Generated on: $(date)" >> $OUTPUT_FILE
+   
+   echo "[1/5] Checking CUDA compiler version..."
+   nvcc --version >> $OUTPUT_FILE 2>&1
+   
+   echo "[2/5] Checking nvidia-smi..."
+   nvidia-smi >> $OUTPUT_FILE 2>&1
+   
+   echo "[3/5] Checking system CUDA libraries..."
+   ldconfig -p | grep -E "libcudart|libcublas|libcudnn" >> $OUTPUT_FILE 2>&1
+   
+   echo "[4/5] Checking TensorFlow GPU detection..."
+   python -c "import tensorflow as tf; print('TF:', tf.__version__); print('GPUs:', tf.config.list_physical_devices('GPU'))" >> $OUTPUT_FILE 2>&1
+   
+   echo "[5/5] Checking for missing libraries..."
+   for lib in libcudart.so.12 libcublas.so.12 libcublasLt.so.12 libcudnn.so.8; do
+       echo "--- $lib ---" >> $OUTPUT_FILE
+       ldconfig -p | grep "$lib" >> $OUTPUT_FILE 2>&1
+       if [ $? -ne 0 ]; then
+           echo "MISSING: $lib not found in ldconfig cache" >> $OUTPUT_FILE
+       fi
+   done
+   
+   echo "✅ Done! Check $OUTPUT_FILE for results"
+   EOF
+   
+   chmod +x check_cuda_setup.sh
+   ./check_cuda_setup.sh
+   ```
+
+3. **Identify missing library** (typically `libcudnn.so.8`):
+   ```bash
+   cat cuda_setup_info.txt | grep "MISSING"
+   ```
+
+4. **Install cuDNN via conda** (this is the key fix):
+   ```bash
+   # Activate your conda environment
+   conda activate your_env_name
+   
+   # Install cuDNN compatible with your CUDA version
+   # For CUDA 12.4, use cuDNN 8.9
+   conda install cudnn=8.9 -c conda-forge
+
+   # Install missing cude-toolkit
+   conda install cuda-toolkit=11.7 -c nvidia
+   ```
+
+5. **Update LD_LIBRARY_PATH** to include conda libraries:
+   ```bash
+   # Add to your ~/.bashrc or activate script
+   export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+   
+   # Reload the environment
+   source ~/.bashrc
+   # Or reactivate conda environment
+   conda deactivate
+   conda activate your_env_name
+   ```
+
+6. **Verify GPU detection:**
+   ```bash
+   python -c "import tensorflow as tf; print('Built with CUDA:', tf.test.is_built_with_cuda()); print('GPU devices:', tf.config.list_physical_devices('GPU'))"
+   ```
+
+   **Expected output** (success):
+   ```
+   Built with CUDA: True
+   2025-10-12 01:21:43.509650: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1929] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 22476 MB memory:  -> device: 0, name: NVIDIA RTX A5000, pci bus id: 0000:5e:00.0, compute capability: 8.6
+   GPU devices: [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
+   ```
+
+#### TensorFlow-CUDA-cuDNN Compatibility Matrix
+
+| TensorFlow | CUDA | cuDNN | Python |
+|------------|------|-------|--------|
+| 2.15.0     | 12.4 | 8.9   | 3.9-3.11 |
+| 2.12.0     | 11.8 | 8.6   | 3.9-3.11 |
+| 2.10.0     | 11.2 | 8.1   | 3.7-3.10 |
+
+#### Additional Notes
+
+- **Warning messages** like "Unable to register cuDNN factory: Attempting to register factory..." are harmless and can be ignored.
+- **TensorRT warnings** ("Could not find TensorRT") are optional and don't affect GPU functionality.
+- **System-wide vs Conda cuDNN**: Installing cuDNN in the conda environment is easier and doesn't require sudo access.
+- **Multiple CUDA versions**: Having multiple CUDA versions (e.g., 10.1 system-wide, 12.4 for TensorFlow) is fine as long as `LD_LIBRARY_PATH` points to the correct version.
+
+#### Verification Checklist
+
+- [ ] `nvidia-smi` shows your GPU(s)
+- [ ] `nvcc --version` shows compatible CUDA version
+- [ ] `conda list | grep cudnn` shows cuDNN installed in environment
+- [ ] `echo $LD_LIBRARY_PATH` includes `$CONDA_PREFIX/lib`
+- [ ] TensorFlow imports without errors
+- [ ] `tf.config.list_physical_devices('GPU')` returns your GPU(s)
+- [ ] Training actually uses GPU (check with `nvidia-smi` during training)
+
 ### Performance Tips
 
 - Use SSD storage for faster I/O
 - Process datasets in smaller batches if memory is limited
 - Use `--dry-run` to preview operations before processing
 - Enable verbose output with `-v` for detailed logging
+- **GPU Training**: Ensure GPU is detected before training (see GPU Setup Issues above)
 
 ## 🤝 Contributing
 
