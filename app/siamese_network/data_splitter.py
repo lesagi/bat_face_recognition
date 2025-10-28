@@ -115,12 +115,13 @@ def preprocess_siamese_input(file_path):
         return tf.zeros((input_edge, input_edge, 3), dtype=tf.float32)
 
 
-def preprocess_twin_input_function(input_img_path, validation_img_path, label):
+def preprocess_twin_input_function(input_img_path, validation_img_path, label, class_info):
     """Preprocess twin input function for siamese pairs."""
     return (
         preprocess_siamese_input(input_img_path),
         preprocess_siamese_input(validation_img_path),
         label,
+        class_info,
     )
 
 
@@ -155,6 +156,10 @@ class SiameseNetworkTrainingDataSplitter:
         # Split individual images into train/test sets per class
         self.train_class_files = {}
         self.test_class_files = {}
+        
+        # Track class distribution for weighting
+        self.train_class_distribution = {}
+        self.test_class_distribution = {}
 
         # Collect all files from all directories
         all_files = []
@@ -209,12 +214,13 @@ class SiameseNetworkTrainingDataSplitter:
     def __create_anchor_pairs(self, anchor_images_list, class_name):
         anchor_class_size = len(anchor_images_list)
         if anchor_class_size < 2:
-            # Return empty dataset with correct structure (path, path, label)
+            # Return empty dataset with correct structure (path, path, label, class_info)
             empty = tf.data.Dataset.from_tensor_slices(
                 (
                     tf.constant([], dtype=tf.string),
                     tf.constant([], dtype=tf.string),
                     tf.constant([], dtype=tf.float32),
+                    tf.constant([], dtype=tf.string),
                 )
             )
             print(f"{class_name:<10}| {'Anchor size: ':<10}{anchor_class_size:<5}| {'Final count: ':<10}{0:<10}")
@@ -239,7 +245,9 @@ class SiameseNetworkTrainingDataSplitter:
         pairs_lefties = tf.data.Dataset.from_tensor_slices([a for a, b in pairs]) # [1, 1, 1, 3, 3, 4]
         pairs_righties = tf.data.Dataset.from_tensor_slices([b for a, b in pairs]) # [3, 4, 5, 4, 5, 5]
         labels = tf.data.Dataset.from_tensor_slices(tf.ones(len(pairs))) # [1, 1, 1, 1, 1, 1]
-        dataset = tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels)) # [(1, 3, 1), (1, 4, 1), ...]
+        # Add class information for each pair
+        class_info = tf.data.Dataset.from_tensor_slices([class_name] * len(pairs))
+        dataset = tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels, class_info)) # [(1, 3, 1, 'A'), ...]
         
         print(f"{class_name:<10}| {'Anchor size: ':<10}{anchor_class_size:<5}| {'Final count: ':<10}{dataset.cardinality().numpy():<10}")
         return dataset
@@ -269,6 +277,7 @@ class SiameseNetworkTrainingDataSplitter:
                     tf.constant([], dtype=tf.string),
                     tf.constant([], dtype=tf.string),
                     tf.constant([], dtype=tf.float32),
+                    tf.constant([], dtype=tf.string),
                 )
             )
             print(f"('{class_a}', '{class_b}'): 0 negative pairs count. Samples per class: 0")
@@ -279,16 +288,16 @@ class SiameseNetworkTrainingDataSplitter:
         buffer_b = max(1, list_b_size)
         data_set_a = data_set_a.shuffle(buffer_a, seed=shuffle_seed).take(min_samples_per_class)
         data_set_b = data_set_b.shuffle(buffer_b, seed=shuffle_seed).take(min_samples_per_class)
-        dataset = self.__create_product_dataset(data_set_a, data_set_b)
+        dataset = self.__create_product_dataset(data_set_a, data_set_b, class_a)
         
         if self.mode == "permutation":
-            dataset = self.__create_product_dataset(data_set_b, data_set_a)
+            dataset = self.__create_product_dataset(data_set_b, data_set_a, class_b)
 
         final_data_set_size = dataset.cardinality().numpy()
         print(f"('{class_a}', '{class_b}'): {final_data_set_size} negative pairs count. Samples per class: {min_samples_per_class}")
         return dataset
 
-    def __create_product_dataset(self, tensor1, tensor2):
+    def __create_product_dataset(self, tensor1, tensor2, class_name):
         list1 = list(tensor1)
         list2 = list(tensor2)
         lists_product = list(product(list1, list2))
@@ -296,11 +305,14 @@ class SiameseNetworkTrainingDataSplitter:
             pairs_lefties = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.string))
             pairs_righties = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.string))
             labels = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.float32))
+            class_info = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.string))
         else:
             pairs_lefties = tf.data.Dataset.from_tensor_slices([a for a, b in lists_product]) 
             pairs_righties = tf.data.Dataset.from_tensor_slices([b for a, b in lists_product])
             labels = tf.data.Dataset.from_tensor_slices(tf.zeros(len(list(lists_product)), dtype=tf.float32))
-        return tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels))
+            # Add class information for negative pairs (use one of the classes)
+            class_info = tf.data.Dataset.from_tensor_slices([class_name] * len(lists_product))
+        return tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels, class_info))
 
 
     def __split_individual_images(self):
@@ -420,3 +432,23 @@ class SiameseNetworkTrainingDataSplitter:
                     buffer_size=test_size, seed=random.randint(20, 80)
                 )
             print(f"  Testing dataset: {test_size} pairs")
+    
+    def get_class_distribution(self, dataset='train'):
+        """
+        Get class distribution statistics for the specified dataset.
+        
+        Args:
+            dataset: 'train' or 'test'
+            
+        Returns:
+            Dictionary mapping class names to number of pairs
+        """
+        if dataset == 'train':
+            class_files = self.train_class_files
+        elif dataset == 'test':
+            class_files = self.test_class_files
+        else:
+            raise ValueError("dataset must be 'train' or 'test'")
+        
+        # Count number of files per class (these will be used to generate pairs)
+        return {class_name: len(files) for class_name, files in class_files.items()}

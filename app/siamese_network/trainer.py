@@ -28,6 +28,7 @@ else:
 
 from .network import SiameseNetwork, L1Dist
 from .data_splitter import SiameseNetworkTrainingDataSplitter
+from .class_weights import ClassWeightCalculator
 from app.config.loader import load_config
 
 
@@ -82,7 +83,20 @@ class SiameseNetworkTrainer:
         # Model, optimizer, loss
         self.siamese_model = SiameseNetwork(L1Dist()).model
         self.optimizer = optimizer
-        self.loss_function = loss_function
+        # Use reduction='none' to get per-sample loss for weighted loss calculation
+        self.loss_function = tf.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+
+        # Class balancing setup
+        class_balancing_config = sn_train.get("class_balancing", {})
+        self.weight_calculator = ClassWeightCalculator(class_balancing_config)
+        
+        if self.weight_calculator.enabled:
+            print(f"🔧 Class balancing enabled:")
+            print(f"   - Anchor/Negative balance: {self.weight_calculator.anchor_negative_balance}")
+            print(f"   - Per-class balance: {self.weight_calculator.per_class_balance}")
+            print(f"   - Weighting scheme: {self.weight_calculator.weighting_scheme}")
+            if self.weight_calculator.weighting_scheme == 'ens':
+                print(f"   - ENS beta: {self.weight_calculator.ens_beta}")
 
         # Data
         print(f"🔧 Loading data from: {self.input_dir}")
@@ -91,11 +105,11 @@ class SiameseNetworkTrainer:
         print(f"🔧 TensorFlow GPU available: {tf.config.list_physical_devices('GPU')}")
         print(f"🔧 TensorFlow built with CUDA: {tf.test.is_built_with_cuda()}")
         
-        data_splitter = SiameseNetworkTrainingDataSplitter(
+        self.data_splitter = SiameseNetworkTrainingDataSplitter(
             [self.input_dir], training_portion=0.7, mode="permutation"
         )
-        train_data = data_splitter.train_data
-        test_data = data_splitter.test_data
+        train_data = self.data_splitter.train_data
+        test_data = self.data_splitter.test_data
         if train_data is None or test_data is None:
             raise ValueError("Data splitter returned no train/test data")
         
@@ -103,6 +117,13 @@ class SiameseNetworkTrainer:
         self.train_batches = train_data.batch(self.batch_size).prefetch(8)
         self.test_batches = test_data.batch(self.batch_size).prefetch(8)
         print(f"✅ Data loading completed")
+        
+        # Print class distribution if class balancing is enabled
+        if self.weight_calculator.enabled:
+            train_dist = self.data_splitter.get_class_distribution('train')
+            print(f"\n📊 Training class distribution:")
+            for cls, count in sorted(train_dist.items()):
+                print(f"   {cls}: {count} samples")
 
         # TF checkpoint
         self.checkpoint = tf.train.Checkpoint(opt=self.optimizer, siamese_model=self.siamese_model)
@@ -281,18 +302,103 @@ class SiameseNetworkTrainer:
                 error_text = f"Error processing {os.path.basename(image_path)}: {str(e)}"
                 mlflow.log_text(error_text, f"sample_images/sample_{i+1}/error.txt")
 
-    @tf.function
+    def _log_weight_statistics(self, batch):
+        """
+        Log weight statistics for monitoring class balancing.
+        
+        Args:
+            batch: Training batch to analyze
+        """
+        if not self.weight_calculator.enabled:
+            return
+        
+        try:
+            # Extract batch components
+            y = batch[2]
+            class_info = batch[3]
+            
+            # Convert class_info to list of strings
+            class_info_list = [c.decode('utf-8') if isinstance(c, bytes) else c.numpy().decode('utf-8') 
+                               for c in class_info.numpy()]
+            
+            # Compute sample weights
+            weights = self.weight_calculator.compute_sample_weights(
+                labels=y.numpy(),
+                class_info=class_info_list
+            )
+            
+            # Compute statistics
+            stats = self.weight_calculator.compute_weight_statistics(weights, y.numpy())
+            
+            # Print statistics
+            print(f"\n📊 Sample Weight Statistics:")
+            print(f"   Min weight: {stats['min']:.4f}")
+            print(f"   Max weight: {stats['max']:.4f}")
+            print(f"   Mean weight: {stats['mean']:.4f}")
+            print(f"   Std weight: {stats['std']:.4f}")
+            
+            if 'anchor_mean' in stats and 'negative_mean' in stats:
+                print(f"   Anchor mean weight: {stats['anchor_mean']:.4f}")
+                print(f"   Negative mean weight: {stats['negative_mean']:.4f}")
+            
+            if 'anchor_contribution_pct' in stats:
+                print(f"   Anchor contribution: {stats['anchor_contribution_pct']:.1f}%")
+                print(f"   Negative contribution: {stats['negative_contribution_pct']:.1f}%")
+            
+            # Log to MLflow
+            if self.mlflow_enabled:
+                for key, value in stats.items():
+                    mlflow.log_metric(f"weight_stats/{key}", value, step=0)
+                    
+        except Exception as e:
+            print(f"⚠️ Warning: Could not log weight statistics: {e}")
+    
     def train_step(self, batch):
+        """
+        Perform a single training step with optional sample weighting.
+        
+        Args:
+            batch: Tuple of (img1, img2, label, class_info)
+            
+        Returns:
+            Weighted loss value
+        """
         if self.siamese_model is None:
             raise ValueError(
                 "No siamese model available for training. Initialize trainer with a siamese_model."
             )
 
         with tf.GradientTape() as tape:
-            x = batch[:2]
+            # Extract batch components
+            x = [batch[0], batch[1]]
             y = batch[2]
+            class_info = batch[3]
+            
+            # Forward pass
             yhat = self.siamese_model(x, training=True)
-            loss = self.loss_function(y, yhat)
+            
+            # Compute per-sample loss
+            per_sample_loss = self.loss_function(y, yhat)
+            
+            # Apply sample weights if enabled
+            if self.weight_calculator.enabled:
+                # Convert class_info tensor to list of strings
+                class_info_list = [c.decode('utf-8') if isinstance(c, bytes) else c.numpy().decode('utf-8') 
+                                   for c in class_info.numpy()]
+                
+                # Compute sample weights
+                weights = self.weight_calculator.compute_sample_weights(
+                    labels=y.numpy(),
+                    class_info=class_info_list
+                )
+                
+                # Apply weights to loss
+                weights_tf = tf.constant(weights, dtype=tf.float32)
+                weighted_loss = per_sample_loss * weights_tf
+                loss = tf.reduce_mean(weighted_loss)
+            else:
+                # No weighting, just reduce mean
+                loss = tf.reduce_mean(per_sample_loss)
 
         grad = tape.gradient(loss, self.siamese_model.trainable_variables)
         self.optimizer.apply_gradients(zip(grad, self.siamese_model.trainable_variables))
@@ -320,8 +426,16 @@ class SiameseNetworkTrainer:
 
             r = Recall()
             p = Precision()
+            
+            # Log weight statistics for the first batch if class balancing is enabled
+            weight_stats_logged = False
 
             for idx, batch in enumerate(self.train_batches):
+                # Log weight statistics for first batch of first epoch
+                if idx == 0 and epoch == 1 and self.weight_calculator.enabled and not weight_stats_logged:
+                    self._log_weight_statistics(batch)
+                    weight_stats_logged = True
+                    
                 print(f"  Processing batch {idx + 1}/{len(self.train_batches)}")
                 loss = self.train_step(batch)
                 # Print loss after getting it from train_step

@@ -76,6 +76,14 @@ siamese_network:
     epochs: 80
     batch_size: 16
     learning_rate: 0.0001
+    
+    # Class balancing configuration
+    class_balancing:
+      enabled: true
+      anchor_negative_balance: true  # Balance positive vs negative pairs
+      per_class_balance: true  # Balance across different classes
+      weighting_scheme: "ins"  # Options: "ins" (Inverse Number), "isns" (Inverse Sqrt), "ens" (Effective Number)
+      ens_beta: 0.9999  # Beta parameter for ENS scheme (0.9, 0.99, 0.999, 0.9999)
     optimizer:
       type: "Adam"
       beta_1: 0.9

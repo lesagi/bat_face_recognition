@@ -109,11 +109,12 @@ def test_data_splitter(data_path, skip_preprocessing=False):
             print(f"\n🔍 Testing training data samples...")
             sample_batch = splitter.train_data.take(3)
             
-            for i, (v1, v2, label) in enumerate(sample_batch):
+            for i, (v1, v2, label, class_info) in enumerate(sample_batch):
                 print(f"  Sample {i+1}:")
                 print(f"    Value 1 type: {type(v1.numpy() if hasattr(v1, 'numpy') else v1)}")
                 print(f"    Value 2 type: {type(v2.numpy() if hasattr(v2, 'numpy') else v2)}")
                 print(f"    Label: {label.numpy()}")
+                print(f"    Class: {class_info.numpy().decode('utf-8')}")
                 if not skip_preprocessing:
                     # Expect tensors when preprocessing is applied
                     assert isinstance(v1, tf.Tensor) and isinstance(v2, tf.Tensor)
