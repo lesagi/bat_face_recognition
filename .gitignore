@@ -34,3 +34,4 @@ models/
 predicions*.csv
 batwoman*
 cvat/
+*.out
