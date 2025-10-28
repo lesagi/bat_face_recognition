@@ -19,8 +19,7 @@ mlflow:
   tracking:
     host: "localhost"
     port: 8080
-    # uri: "file:///home/sagilevi1/bat_face_rec_project/mlruns"
-    uri: "file:///Users/MAC/Documents/bat_face_rec/mlruns"
+    uri: "./mlruns"
 
 # =============================================================================
 # MODELS CONFIGURATION

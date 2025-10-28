@@ -67,7 +67,7 @@ class SiameseNetworkTrainer:
 
         # MLflow setup
         self.mlflow_enabled = cfg.mlflow.enabled
-        self.mlflow_tracking_uri = cfg.mlflow.tracking_uri
+        self.mlflow_tracking_uri = self._resolve_mlflow_tracking_uri(cfg.mlflow.tracking_uri)
         self.mlflow_experiment_name = self._build_experiment_name(bat_type, augmented_data, data_source)
         self.parent_run = None
         self.metric_history: Dict[str, List[float]] = {
@@ -127,6 +127,41 @@ class SiameseNetworkTrainer:
 
         # TF checkpoint
         self.checkpoint = tf.train.Checkpoint(opt=self.optimizer, siamese_model=self.siamese_model)
+
+    def _resolve_mlflow_tracking_uri(self, uri: str) -> str:
+        """
+        Resolve MLflow tracking URI to be path-agnostic.
+        If URI is relative (e.g., './mlruns'), resolve it to absolute path based on project root.
+        """
+        # If URI already has a file:// scheme with absolute path, return as-is
+        if uri.startswith("file:///"):
+            return uri
+        
+        # If URI starts with file:./ (relative), strip the file: prefix
+        if uri.startswith("file:./"):
+            uri = uri[5:]  # Remove 'file:'
+        
+        # Check if URI is relative (starts with ./ or doesn't start with /)
+        if uri.startswith("./") or (not uri.startswith("/") and not uri.startswith("file://")):
+            # Get project root (bat_face_rec directory)
+            # Navigate from app/siamese_network/trainer.py -> bat_face_rec
+            current_file = os.path.abspath(__file__)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+            
+            # Remove leading ./ if present
+            relative_path = uri[2:] if uri.startswith("./") else uri
+            
+            # Resolve to absolute path
+            absolute_path = os.path.join(project_root, relative_path)
+            
+            # Return with file:// prefix
+            return f"file://{absolute_path}"
+        
+        # URI is already absolute, add file:// prefix if not present
+        if not uri.startswith("file://"):
+            return f"file://{uri}"
+        
+        return uri
 
     def _build_experiment_name(self, bat_type: str, augmented_data: bool, data_source: str) -> str:
         """Build experiment name from template using provided arguments."""
@@ -284,19 +319,17 @@ class SiameseNetworkTrainer:
         for i, image_path in enumerate(sample_files):
             try:
                 # Load image and get dimensions
-                with Image.open(image_path) as img:
-                    width, height = img.size
-                    img_array = np.array(img)
-                
-                # Create artifact directory
-                artifact_dir = f"sample_images/sample_{i+1}"
+                img = Image.open(image_path)
+                width, height = img.size
+                img_array = np.array(img)
                 
                 # Log image dimensions as text
                 dimensions_text = f"File: {os.path.basename(image_path)}\nDimensions: {width}x{height}\nChannels: {img_array.shape[2] if len(img_array.shape) == 3 else 1}"
-                mlflow.log_text(dimensions_text, f"{artifact_dir}/info.txt")
+                mlflow.log_text(dimensions_text, f"sample_images/sample_{i+1}/info.txt")
                 
-                # Log the actual image
-                mlflow.log_artifact(image_path, artifact_dir)
+                # Log the actual image using mlflow.log_image() for path-agnostic logging
+                # This logs the pixel data directly instead of a file reference
+                mlflow.log_image(img, f"sample_images/sample_{i+1}.png")
                 
             except Exception as e:
                 error_text = f"Error processing {os.path.basename(image_path)}: {str(e)}"
