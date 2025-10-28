@@ -85,6 +85,8 @@ class SiameseNetworkTrainer:
         self.optimizer = optimizer
         # Use reduction='none' to get per-sample loss for weighted loss calculation
         self.loss_function = tf.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+        # Separate loss for testing (unweighted, default reduction)
+        self.test_loss_function = tf.losses.BinaryCrossentropy()
 
         # Class balancing setup
         class_balancing_config = sn_train.get("class_balancing", {})
@@ -526,13 +528,15 @@ class SiameseNetworkTrainer:
         num_batches = 0
 
         print(f"    Testing on {len(self.test_batches)} batches...")
-        for batch_idx, (test_input, test_val, y_true) in enumerate(self.test_batches):
+        # Updated to unpack 4 values: (img1, img2, label, class_info)
+        for batch_idx, (test_input, test_val, y_true, class_info) in enumerate(self.test_batches):
             yhat = self.siamese_model.predict([test_input, test_val])
             
             # Use raw probabilities for metrics (TensorFlow metrics can handle probabilities)
             r.update_state(y_true, yhat)
             p.update_state(y_true, yhat)
-            batch_loss = self.loss_function(y_true, yhat)
+            # Use unweighted test loss (default reduction)
+            batch_loss = self.test_loss_function(y_true, yhat)
             total_loss = total_loss + tf.cast(batch_loss, tf.float32)
             num_batches += 1
             
