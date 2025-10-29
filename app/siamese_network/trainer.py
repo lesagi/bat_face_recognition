@@ -231,36 +231,36 @@ class SiameseNetworkTrainer:
             return
         
         # Log metrics to parent run for step-wise tracking and easy comparison
-        with mlflow.start_run(run_id=self.parent_run.info.run_id):
+        # Parent run is already active from _start_parent_run, so log directly
+        mlflow.log_metrics(
+            {
+                "train_loss": float(train["loss"]),
+                "train_recall": float(train["recall"]),
+                "train_precision": float(train["precision"]),
+                "test_loss": float(test["loss"]),
+                "test_recall": float(test["recall"]),
+                "test_precision": float(test["precision"]),
+            },
+            step=epoch,
+        )
+        
+        # Also log detailed metrics in nested run for this epoch
+        with mlflow.start_run(run_name=f"epoch_{epoch}", nested=True):
+            mlflow.log_param("epoch", int(epoch))
             mlflow.log_metrics(
                 {
-                    "train_loss": float(train["loss"]),
-                    "train_recall": float(train["recall"]),
-                    "train_precision": float(train["precision"]),
-                    "test_loss": float(test["loss"]),
-                    "test_recall": float(test["recall"]),
-                    "test_precision": float(test["precision"]),
-                },
-                step=epoch,
+                    "loss": float(train["loss"]),
+                    "recall": float(train["recall"]),
+                    "precision": float(train["precision"]),
+                }
             )
-            
-            # Also log detailed metrics in nested run for this epoch
-            with mlflow.start_run(run_name=f"epoch_{epoch}", nested=True):
-                mlflow.log_param("epoch", int(epoch))
-                mlflow.log_metrics(
-                    {
-                        "loss": float(train["loss"]),
-                        "recall": float(train["recall"]),
-                        "precision": float(train["precision"]),
-                    }
-                )
-                mlflow.log_metrics(
-                    {
-                        "loss_test": float(test["loss"]),
-                        "recall_test": float(test["recall"]),
-                        "precision_test": float(test["precision"]),
-                    }
-                )
+            mlflow.log_metrics(
+                {
+                    "loss_test": float(test["loss"]),
+                    "recall_test": float(test["recall"]),
+                    "precision_test": float(test["precision"]),
+                }
+            )
 
     def _update_metric_history(self, train: Dict[str, float], test: Dict[str, float]):
         self.metric_history["train_loss"].append(float(train["loss"]))
@@ -288,8 +288,8 @@ class SiameseNetworkTrainer:
             plt.savefig(tmp_file.name)
             plt.close()
             artifact_path = f"metrics/{title.lower().replace(' ', '_')}.png"
-            with mlflow.start_run(run_id=self.parent_run.info.run_id):
-                mlflow.log_artifact(tmp_file.name, artifact_path=os.path.dirname(artifact_path))
+            # Parent run is already active, just log directly
+            mlflow.log_artifact(tmp_file.name, artifact_path=os.path.dirname(artifact_path))
             try:
                 os.unlink(tmp_file.name)
             except OSError:
@@ -384,9 +384,9 @@ class SiameseNetworkTrainer:
             
             # Log to MLflow
             if self.mlflow_enabled:
-                with mlflow.start_run(run_id=self.parent_run.info.run_id):
-                    for key, value in stats.items():
-                        mlflow.log_metric(f"weight_stats/{key}", value, step=0)
+                # Parent run is already active, just log directly
+                for key, value in stats.items():
+                    mlflow.log_metric(f"weight_stats/{key}", value, step=0)
                     
         except Exception as e:
             print(f"⚠️ Warning: Could not log weight statistics: {e}")
