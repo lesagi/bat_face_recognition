@@ -1,0 +1,37 @@
+<form id="pathsForm">
+    <div class="mb-4">
+        <h6 class="border-bottom pb-2">Face Recognition Paths</h6>
+        <div class="mb-3">
+            <label for="basePath" class="form-label">Base Directory</label>
+            <input type="text" class="form-control" id="basePath" name="FACE_RECOGNITION_PATHS.BASE" value="{{ config.FACE_RECOGNITION_PATHS.BASE }}">
+        </div>
+        <div class="mb-3">
+            <label for="trainingDataPath" class="form-label">Training Data Directory</label>
+            <input type="text" class="form-control" id="trainingDataPath" name="FACE_RECOGNITION_PATHS.TRAINING.DATA" value="{{ config.FACE_RECOGNITION_PATHS.TRAINING.DATA }}">
+        </div>
+        <div class="mb-3">
+            <label for="checkpointsPath" class="form-label">Checkpoints Directory</label>
+            <input type="text" class="form-control" id="checkpointsPath" name="FACE_RECOGNITION_PATHS.TRAINING.CHECKPOINTS" value="{{ config.FACE_RECOGNITION_PATHS.TRAINING.CHECKPOINTS }}">
+        </div>
+        <div class="mb-3">
+            <label for="modelPath" class="form-label">Model Directory</label>
+            <input type="text" class="form-control" id="modelPath" name="FACE_RECOGNITION_PATHS.TRAINING.MODEL" value="{{ config.FACE_RECOGNITION_PATHS.TRAINING.MODEL }}">
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <h6 class="border-bottom pb-2">Face Segmentation Paths</h6>
+        <div class="mb-3">
+            <label for="segmentationModelPath" class="form-label">Model Path</label>
+            <input type="text" class="form-control" id="segmentationModelPath" name="FACE_SEGMENTATION_PATHS.MODEL" value="{{ config.FACE_SEGMENTATION_PATHS.MODEL }}">
+        </div>
+        <div class="mb-3">
+            <label for="segmentationConfigPath" class="form-label">Config Path</label>
+            <input type="text" class="form-control" id="segmentationConfigPath" name="FACE_SEGMENTATION_PATHS.CONFIG" value="{{ config.FACE_SEGMENTATION_PATHS.CONFIG }}">
+        </div>
+    </div>
+
+    <div class="d-grid gap-2">
+        <button type="submit" class="btn btn-primary">Save Path Settings</button>
+    </div>
+</form> 

@@ -1,0 +1,16 @@
+<!-- Video Processing Configuration -->
+<form id="videoForm">
+    <div class="mb-3">
+        <label for="VIDEOS_DIR" class="form-label">Videos Directory</label>
+        <input type="text" class="form-control" id="VIDEOS_DIR" name="VIDEOS_DIR" value="{{ config.VIDEOS_DIR }}">
+        <div class="form-text">Directory where video files are stored</div>
+    </div>
+
+    <div class="mb-3">
+        <label for="VIDEOS_PROCESSING_LIMIT" class="form-label">Processing Limit</label>
+        <input type="number" class="form-control" id="VIDEOS_PROCESSING_LIMIT" name="VIDEOS_PROCESSING_LIMIT" value="{{ config.VIDEOS_PROCESSING_LIMIT }}">
+        <div class="form-text">Maximum number of videos to process at once</div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Video Configuration</button>
+</form> 

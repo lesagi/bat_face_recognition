@@ -1,0 +1,106 @@
+<div class="config-section">
+    <h2>Saliency Maps Configuration</h2>
+    <form id="saliencyConfigForm">
+        <div class="form-group">
+            <label for="modelPath">Model Path:</label>
+            <input type="text" id="modelPath" name="modelPath" required>
+        </div>
+        <div class="form-group">
+            <label for="inputDir">Input Directory:</label>
+            <input type="text" id="inputDir" name="inputDir" required>
+        </div>
+        <div class="form-group">
+            <label for="outputDir">Output Directory:</label>
+            <input type="text" id="outputDir" name="outputDir" required>
+        </div>
+        <div class="form-group">
+            <label for="nesting">Nesting (optional):</label>
+            <input type="text" id="nesting" name="nesting">
+        </div>
+        <div class="form-group">
+            <label for="sampleSize">Sample Size:</label>
+            <input type="number" id="sampleSize" name="sampleSize" min="1" value="50" required>
+        </div>
+        <div class="form-group">
+            <label for="figureWidth">Figure Width:</label>
+            <input type="number" id="figureWidth" name="figureWidth" step="0.01" value="8.27" required>
+        </div>
+        <div class="form-group">
+            <label for="figureHeight">Figure Height per Image:</label>
+            <input type="number" id="figureHeight" name="figureHeight" step="0.01" value="5" required>
+        </div>
+        <div class="form-group">
+            <label for="rowSpacing">Row Spacing:</label>
+            <input type="number" id="rowSpacing" name="rowSpacing" step="0.01" value="0.5" required>
+        </div>
+        <div class="form-group">
+            <label for="imageSize">Image Size (width, height):</label>
+            <input type="number" id="imageWidth" name="imageWidth" value="350" required>
+            <input type="number" id="imageHeight" name="imageHeight" value="350" required>
+        </div>
+        <button type="submit" class="save-btn">Save Configuration</button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">Visualization Configuration</h5>
+    </div>
+    <div class="card-body">
+        <form id="visualizationConfigForm">
+            <div class="mb-3">
+                <label for="visModelPath" class="form-label">Model Path</label>
+                <div class="input-group">
+                    <input type="text" class="form-control" id="visModelPath" name="modelPath" value="{{ config.VISUALIZATION_CONFIG.MODEL_PATH if config.VISUALIZATION_CONFIG else '' }}">
+                    <button class="btn btn-outline-secondary" type="button" onclick="selectFile('visModelPath', '.h5')">Browse</button>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="visInputDir" class="form-label">Input Directory</label>
+                <div class="input-group">
+                    <input type="text" class="form-control" id="visInputDir" name="inputDir" value="{{ config.VISUALIZATION_CONFIG.INPUT_DIR if config.VISUALIZATION_CONFIG else '' }}">
+                    <button class="btn btn-outline-secondary" type="button" onclick="selectDirectory('visInputDir')">Browse</button>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="visOutputDir" class="form-label">Output Directory</label>
+                <div class="input-group">
+                    <input type="text" class="form-control" id="visOutputDir" name="outputDir" value="{{ config.VISUALIZATION_CONFIG.OUTPUT_DIR if config.VISUALIZATION_CONFIG else '' }}">
+                    <button class="btn btn-outline-secondary" type="button" onclick="selectDirectory('visOutputDir')">Browse</button>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="visNesting" class="form-label">Optional Subdirectory Structure</label>
+                <input type="text" class="form-control" id="visNesting" name="nesting" value="{{ config.VISUALIZATION_CONFIG.NESTING if config.VISUALIZATION_CONFIG else '' }}">
+            </div>
+            <div class="mb-3">
+                <label for="visSampleSize" class="form-label">Number of Images to Process</label>
+                <input type="number" class="form-control" id="visSampleSize" name="sampleSize" value="{{ config.VISUALIZATION_CONFIG.SAMPLE_SIZE if config.VISUALIZATION_CONFIG else '10' }}">
+            </div>
+            <div class="mb-3">
+                <label for="visFigureWidth" class="form-label">Figure Width (inches)</label>
+                <input type="number" class="form-control" id="visFigureWidth" name="figureWidth" value="{{ config.VISUALIZATION_CONFIG.FIGURE_SIZE[0] if config.VISUALIZATION_CONFIG else '8.27' }}">
+            </div>
+            <div class="mb-3">
+                <label for="visFigureHeight" class="form-label">Figure Height (inches)</label>
+                <input type="number" class="form-control" id="visFigureHeight" name="figureHeight" value="{{ config.VISUALIZATION_CONFIG.FIGURE_SIZE[1] if config.VISUALIZATION_CONFIG else '5' }}">
+            </div>
+            <div class="mb-3">
+                <label for="visRowSpacing" class="form-label">Space Between Rows (inches)</label>
+                <input type="number" class="form-control" id="visRowSpacing" name="rowSpacing" value="{{ config.VISUALIZATION_CONFIG.ROW_SPACING if config.VISUALIZATION_CONFIG else '0.5' }}">
+            </div>
+            <div class="mb-3">
+                <label for="visImageWidth" class="form-label">Image Width (pixels)</label>
+                <input type="number" class="form-control" id="visImageWidth" name="imageWidth" value="{{ config.VISUALIZATION_CONFIG.IMAGE_SIZE[0] if config.VISUALIZATION_CONFIG else '350' }}">
+            </div>
+            <div class="mb-3">
+                <label for="visImageHeight" class="form-label">Image Height (pixels)</label>
+                <input type="number" class="form-control" id="visImageHeight" name="imageHeight" value="{{ config.VISUALIZATION_CONFIG.IMAGE_SIZE[1] if config.VISUALIZATION_CONFIG else '350' }}">
+            </div>
+            <div class="d-flex justify-content-between">
+                <button type="submit" class="btn btn-primary">Save Configuration</button>
+                <button type="button" class="btn btn-success" onclick="runVisualization()">Run Visualization</button>
+            </div>
+        </form>
+    </div>
+</div> 

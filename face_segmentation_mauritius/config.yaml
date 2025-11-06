@@ -1,0 +1,6 @@
+path: /home/sagilevi1/bat_face_rec_project/face_segmentation/data
+train: images/train
+val: images/val
+
+nc: 1
+names: ['bat']
