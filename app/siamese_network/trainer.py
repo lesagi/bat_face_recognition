@@ -192,7 +192,14 @@ class SiameseNetworkTrainer:
         
         mlflow.set_tracking_uri(self.mlflow_tracking_uri)
         mlflow.set_experiment(self.mlflow_experiment_name)
-        self.parent_run = mlflow.start_run(run_name="training")
+        
+        # Build descriptive run name from parameters
+        bat_name = "mauritius" if bat_type == 'm' else "rousettus"
+        aug_str = "augmented" if augmented_data else "no_aug"
+        run_name = f"training_{bat_name}_{data_source}_{aug_str}"
+        
+        print(f"📊 Run name: {run_name}")
+        self.parent_run = mlflow.start_run(run_name=run_name)
         self._log_hyperparameters(bat_type, augmented_data, data_source)
 
     def _end_parent_run(self):
