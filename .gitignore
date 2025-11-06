@@ -4,6 +4,7 @@ data/
 train/
 val/
 runs/
+mlruns/
 __pycache__/
 *.rtsz
 *_example.py
