@@ -1,7 +1,0 @@
-path: /Users/sagilevi/Documents/University/Deep Learning/Bat Face Recognition/data/augmented
-train: train/images
-val: validation/images
-test: test/images
-
-names:
-    0: bat
