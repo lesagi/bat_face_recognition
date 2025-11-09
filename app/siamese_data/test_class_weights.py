@@ -12,7 +12,7 @@ import numpy as np
 # Add the app directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 
-from siamese_network.class_weights import (
+from siamese_data.class_weights import (
     calculate_ins_weights,
     calculate_isns_weights,
     calculate_ens_weights,

@@ -60,11 +60,4 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Launch the Flask application
-echo -e "${GREEN}Starting Flask application...${NC}"
-cd web_app
-python app.py
-
-# Run the pipeline
-echo -e "${GREEN}Running the pipeline...${NC}"
-python pipeline/pipeline.py 
+echo -e "${GREEN}Setup complete!${NC}" 

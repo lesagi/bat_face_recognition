@@ -69,15 +69,15 @@ except ImportError:
 # Import prediction structures and caching
 try:
     print("🔍 Attempting to import prediction modules...")
-    from prediction_structures import (
+    from .prediction_structures import (
         SegmentationPrediction, 
         PosePrediction, 
         PredictionBundle
     )
     print("✅ Successfully imported prediction_structures")
-    from prediction_cache import CacheManager, CacheConfig
+    from .prediction_cache import CacheManager, CacheConfig
     print("✅ Successfully imported prediction_cache")
-    from prediction_transforms import PredictionTransformer, CoordinateMapper
+    from .prediction_transforms import PredictionTransformer, CoordinateMapper
     print("✅ Successfully imported prediction_transforms")
     PREDICTION_IMPORTS_AVAILABLE = True
     print("✅ All prediction imports successful")

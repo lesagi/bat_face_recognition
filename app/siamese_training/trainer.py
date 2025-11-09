@@ -26,9 +26,9 @@ if gpus:
 else:
     print("❌ No GPU found, using CPU")
 
-from .network import SiameseNetwork, L1Dist
-from .data_splitter import SiameseNetworkTrainingDataSplitter
-from .class_weights import ClassWeightCalculator
+from app.siamese_core.network import SiameseNetwork, L1Dist
+from app.siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
+from app.siamese_data.class_weights import ClassWeightCalculator
 from app.config.loader import load_config
 
 
@@ -146,7 +146,7 @@ class SiameseNetworkTrainer:
         # Check if URI is relative (starts with ./ or doesn't start with /)
         if uri.startswith("./") or (not uri.startswith("/") and not uri.startswith("file://")):
             # Get project root (bat_face_rec directory)
-            # Navigate from app/siamese_network/trainer.py -> bat_face_rec
+            # Navigate from app/siamese_training/trainer.py -> bat_face_rec
             current_file = os.path.abspath(__file__)
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
             

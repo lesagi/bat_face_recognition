@@ -1,12 +1,3 @@
-"""
-Image processor package for enhanced image processing capabilities.
-
-This package provides:
-- ImageProcessor: Main orchestration class for model-based and plain processing
-- ImageTransforms: Static class containing all image processing transforms
-- Prediction structures and transformation utilities for augmented image processing
-"""
-
 from .input_processor import SiamesePreprocessingPipeline
 from .prediction_structures import (
     SegmentationPrediction,
@@ -46,3 +37,4 @@ __all__ = [
     "PredictionCache",
     "CacheManager"
 ]
+
