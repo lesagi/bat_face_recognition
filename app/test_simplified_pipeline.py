@@ -23,7 +23,7 @@ def test_simplified_pipeline():
     app_dir = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, app_dir)
 
-    from siamese_network.input_processor import (
+    from siamese_preprocessing.input_processor import (
         SiamesePreprocessingPipeline,
     )
     from background_generation.background_generator import BackgroundGenerator
@@ -160,7 +160,7 @@ def test_single_image():
     app_dir = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, app_dir)
 
-    from siamese_network.input_processor import (
+    from siamese_preprocessing.input_processor import (
         SiamesePreprocessingPipeline,
     )
     from background_generation.background_generator import BackgroundGenerator

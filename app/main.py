@@ -23,12 +23,8 @@ from ultralytics import YOLO
 
 # Import configurations
 from config.general import GPU_ENABLED
-from siamese_network.config import (
-    INPUT_EDGE_LENGTH,
-    EPOCHS,
-    TRAINING_DATA_MAX_SIZE_LIMIT,
-)
-from siamese_network.paths import SIAMESE_PATHS
+# Note: siamese_network.config and paths have been removed
+# All configuration now managed through config.yml via config.loader.load_config()
 
 # from background_replacement.paths import SEGMENTATION_PATHS  # TODO: Fix configuration system
 

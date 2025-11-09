@@ -23,7 +23,7 @@ if project_root not in sys.path:
 
 # Import prediction structures for enhanced functionality
 try:
-    from app.siamese_network.prediction_structures import PosePrediction, SegmentationPrediction
+    from app.siamese_preprocessing.prediction_structures import PosePrediction, SegmentationPrediction
     PREDICTION_IMPORTS_AVAILABLE = True
 except ImportError:
     # Fallback for when siamese_network package is not available
@@ -598,7 +598,7 @@ class ImageTransforms:
             try:
                 print_debug("🔍 segment_image: Creating SegmentationPrediction object...")
                 # Import with path already set up at module level
-                from app.siamese_network.prediction_structures import SegmentationPrediction
+                from app.siamese_preprocessing.prediction_structures import SegmentationPrediction
                 
                 prediction = SegmentationPrediction(
                     mask=mask,
@@ -2096,7 +2096,7 @@ class ImageTransforms:
                                 transformed_predictions = None
                                 if prediction_object is not None:
                                     try:
-                                        from app.siamese_network.prediction_transforms import (
+                                        from app.siamese_preprocessing.prediction_transforms import (
                                             MaskTransformer, 
                                             BoundingBoxTransformer,
                                             CoordinateMapper
@@ -2121,7 +2121,7 @@ class ImageTransforms:
                                         )
                                         
                                         # Create new prediction object
-                                        from app.siamese_network.prediction_structures import SegmentationPrediction
+                                        from app.siamese_preprocessing.prediction_structures import SegmentationPrediction
                                         transformed_predictions = SegmentationPrediction(
                                             mask=transformed_mask,
                                             confidence=prediction_object.confidence,
@@ -2187,7 +2187,7 @@ class ImageTransforms:
             transformed_predictions = None
             if prediction_object is not None:
                 try:
-                    from app.siamese_network.prediction_transforms import (
+                    from app.siamese_preprocessing.prediction_transforms import (
                         MaskTransformer, 
                         BoundingBoxTransformer
                     )
@@ -2206,7 +2206,7 @@ class ImageTransforms:
                     )
                     
                     # Create new prediction object
-                    from app.siamese_network.prediction_structures import SegmentationPrediction
+                    from app.siamese_preprocessing.prediction_structures import SegmentationPrediction
                     transformed_predictions = SegmentationPrediction(
                         mask=transformed_mask,
                         confidence=prediction_object.confidence,

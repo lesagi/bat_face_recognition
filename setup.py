@@ -49,7 +49,6 @@ setup(
         "console_scripts": [
             "bat-face-train=main:main",
             "bat-face-predict=generate_predictions:main",
-            "bat-face-web=web_app.app:main",
             "bat-face-augment=face_annotation_eyes_nose.create_augmented_dataset:main",
         ],
     },

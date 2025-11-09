@@ -34,7 +34,6 @@ help:
 	@echo "Data Commands:"
 	@echo "  augment-data    Run data augmentation script"
 	@echo "  train-model     Train Siamese network model"
-	@echo "  web-app         Start web application"
 
 # Installation
 install:
@@ -109,9 +108,6 @@ augment-data:
 train-model:
 	cd app && python main.py
 
-web-app:
-	cd app && python web_app/app.py
-
 predict:
 	cd app && python generate_predictions.py --help
 
@@ -126,7 +122,6 @@ setup-env:
 quick-start: install-dev setup-hooks
 	@echo "Development environment set up!"
 	@echo "Run 'make augment-data' to start data augmentation"
-	@echo "Run 'make web-app' to start the web application"
 
 # CI/CD simulation
 ci: lint test

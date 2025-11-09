@@ -93,7 +93,7 @@ def load_siamese_model(model_path):
     """
     # Import TensorFlow and L1Dist only when needed
     import tensorflow as tf
-    from siamese_network.network import L1Dist
+    from siamese_core.network import L1Dist
     
     try:
         model = tf.keras.models.load_model(
@@ -347,7 +347,8 @@ def generate_predictions(
     print(f"📁 Processing data from: {input_dir}")
 
     # Import the filename parsing function and splitter
-    from siamese_network.data_splitter import parse_filename_class, SiameseNetworkTrainingDataSplitter
+    from siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
+    from app.utils.filename_parser import parse_filename_class
 
     # Use the training splitter to create pairs with filenames; use all data in training
     print("🔄 Creating data pairs using SiameseNetworkTrainingDataSplitter...")

@@ -13,7 +13,8 @@ import tensorflow as tf
 # Add the app directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 
-from siamese_network.data_splitter import SiameseNetworkTrainingDataSplitter, parse_filename_class, group_files_by_class
+from siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
+from app.utils.filename_parser import parse_filename_class, group_files_by_class
 
 def test_filename_parsing():
     """Test the filename parsing functionality."""

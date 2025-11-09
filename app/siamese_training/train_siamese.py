@@ -13,7 +13,7 @@ parent_dir = os.path.dirname(current_dir)
 app_dir = os.path.dirname(parent_dir)
 sys.path.insert(0, app_dir)
 
-from app.siamese_network.trainer import SiameseNetworkTrainer
+from app.siamese_training.trainer import SiameseNetworkTrainer
 from app.config.loader import load_config
 
 

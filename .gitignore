@@ -5,7 +5,9 @@ train/
 val/
 runs/
 mlruns/*
+mlartifacts/
 __pycache__/
+cache/predictions/
 *.rtsz
 *_example.py
 example_*.py
