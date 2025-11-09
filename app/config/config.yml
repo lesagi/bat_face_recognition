@@ -70,8 +70,8 @@ siamese_network:
     # input_dir: "/Users/MAC/Documents/bat_face_rec/data/processed/rous_siamese_input/videos_cropped_picsum_no_augementation"
     # output_dir: "/Users/MAC/Documents/bat_face_rec/models/siamese/rousettus/04-10-25_vid_cropped_no_aug_data_split_refactor"
     # Batwoman
-    input_dir: "/home/sagilevi1/bat_face_rec_project/data/processed/rous_siamese_input/videos_cropped_picsum_no_augementation"
-    output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/rousettus/29-10-25_video_cropped_no_aug_data_split_refactor"
+    input_dir: "/home/sagilevi1/bat_face_rec_project/data/processed/mauritius/random_background"
+    output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/mauritius/08-11-25_video_randomBg_noAugmentation"
     epochs: 80
     batch_size: 16
     learning_rate: 0.0001

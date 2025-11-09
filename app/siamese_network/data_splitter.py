@@ -4,12 +4,11 @@ Data splitter for Siamese network training.
 
 import os
 import random
-import re
 import tensorflow as tf
 from itertools import combinations, permutations, product
-from collections import defaultdict
 
 from app.config.loader import load_config
+from app.utils.filename_parser import parse_filename_class, group_files_by_class
 
 
 def get_files_from_dir(directory):
@@ -19,64 +18,6 @@ def get_files_from_dir(directory):
         for f in os.listdir(directory)
         if os.path.isfile(os.path.join(directory, f)) and not f.startswith(".DS_Store")
     ]
-
-
-def parse_filename_class(filename):
-    """
-    Parse filename to extract class information.
-    
-    Expected pattern: (?<type>\w)--(?<class>\w+)--(?<id>\w+(\.\d+)?)(?<aug_suffix>--aug(?<aug_id>\d{3}))?
-    
-    Args:
-        filename: The filename to parse
-        
-    Returns:
-        tuple: (type, class_name, id, aug_id) or None if parsing fails
-    """
-    # Remove file extension
-    name_without_ext = os.path.splitext(filename)[0]
-    
-    # New pattern with named groups and optional decimal in id
-    # (?P<type>\w+)--(?P<class>\w+)--(?P<id>\w+(?:\.\d+)?)(?P<aug_suffix>--aug(?P<aug_id>\d{3}))?
-    pattern = r'^(?P<type>\w+)--(?P<class>\w+)--(?P<id>\w+(?:\.\d+)?)(?P<aug_suffix>--aug(?P<aug_id>\d{3}))?$'
-    match = re.match(pattern, name_without_ext)
-
-    if match:
-        groups = match.groupdict()
-        # Maintain backward-compatible return order
-        return groups.get('type'), groups.get('class'), groups.get('id'), groups.get('aug_id')
-    else:
-        return None
-
-
-def group_files_by_class(file_paths):
-    """
-    Group files by their class based on filename parsing.
-    
-    Args:
-        file_paths: List of file paths
-        
-    Returns:
-        dict: Dictionary mapping class names to lists of file paths
-    """
-    class_files = defaultdict(list)
-    
-    for file_path in file_paths:
-        filename = os.path.basename(file_path)
-        parsed = parse_filename_class(filename)
-        
-        if parsed:
-            _, class_name, id, _ = parsed
-            if class_name not in class_files:
-                class_files[class_name] = defaultdict(list)
-            if id not in class_files[class_name]:
-                class_files[class_name][id] = []
-            class_files[class_name][id].append(file_path)
-        else:
-            # Skip files that don't match the expected pattern
-            print(f"Warning: Skipping file with unexpected naming pattern: {filename}")
-    
-    return dict(class_files)
 
 
 def preprocess_siamese_input(file_path):

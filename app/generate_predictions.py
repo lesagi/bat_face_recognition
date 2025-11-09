@@ -114,6 +114,10 @@ def create_siamese_confusion_matrix_plot(
     binary_pred,
     class_verification_data,
     output_path,
+    model_version,
+    bat_type,
+    source,
+    background,
     title="Siamese Network Evaluation",
     show_percentages=True,
 ):
@@ -225,7 +229,7 @@ def create_siamese_confusion_matrix_plot(
         axes[1].set_xticks(x)
         axes[1].set_xticklabels(classes, rotation=45, ha="right")
         axes[1].legend()
-        axes[1].set_ylim(0, 1.0)
+        axes[1].set_ylim(0, 1.5)
 
         # Add value labels on bars
         for bars in [bars1, bars2]:
@@ -252,8 +256,9 @@ def create_siamese_confusion_matrix_plot(
         )
         axes[1].set_title("Per-Class Verification", fontsize=12, fontweight="bold")
 
-    # Overall title
-    fig.suptitle(title, fontsize=16, fontweight="bold")
+    # Overall title with subtitle
+    subtitle = f"Model v{model_version} | Type: {bat_type} | Source: {source} | Background: {background}"
+    fig.suptitle(f"{title}\n{subtitle}", fontsize=16, fontweight="bold")
 
     # Adjust layout with extra space at bottom for metrics
     plt.tight_layout()
@@ -293,7 +298,10 @@ def create_siamese_confusion_matrix_plot(
 def generate_predictions(
     model,
     input_dir,
-    output_dir=None,
+    model_version,
+    bat_type,
+    source,
+    background,
     include_subdirs=None,
     verbose=False,
     max_pairs=None,
@@ -311,7 +319,10 @@ def generate_predictions(
     Args:
         model: Trained Siamese model
         input_dir (str): Path to input directory containing images with filename-based classes
-        output_dir (str, optional): Output directory (defaults to input_dir)
+        model_version (int): Model version number (e.g., 1, 2, 3)
+        bat_type (str): Bat type ('r' for Rousettus or 'm' for Mauritius)
+        source (str): Image source type ('video' or 'still')
+        background (str): Background type used ('green', 'random', or 'original')
         include_subdirs (list, optional): Specific bat classes to include (e.g., ['W', 'H', 'rasmi'])
         verbose (bool): Enable verbose output
         max_pairs (int, optional): Maximum number of pairs to process (for testing)
@@ -323,8 +334,11 @@ def generate_predictions(
     input_shape = model.input_shape[0]  # First input (for Siamese networks)
     model_input_size = input_shape[1]  # Assuming square images (height = width)
     print(f"📏 Model expects input size: {model_input_size}×{model_input_size}")
-    if output_dir is None:
-        output_dir = input_dir
+    
+    # Set fixed output directory relative to project root
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)  # Go up one level from app/
+    output_dir = os.path.join(project_root, "evaluations")
 
     # Validate input directory
     if not os.path.exists(input_dir):
@@ -346,7 +360,7 @@ def generate_predictions(
 
     # Convert dataset elements to python types
     raw_data_pairs = []
-    for f1_b, f2_b, lbl in splitter.train_data.as_numpy_iterator():
+    for f1_b, f2_b, lbl, class_info in splitter.train_data.as_numpy_iterator():
         f1 = f1_b.decode("utf-8") if isinstance(f1_b, (bytes, bytearray)) else str(f1_b)
         f2 = f2_b.decode("utf-8") if isinstance(f2_b, (bytes, bytearray)) else str(f2_b)
         raw_data_pairs.append((f1, f2, float(lbl)))
@@ -414,7 +428,7 @@ def generate_predictions(
 
     # Generate output filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"predictions_{timestamp}.csv"
+    filename = f"evaluation_v{model_version}_{bat_type}_{source}_{background}_{timestamp}.csv"
     csv_path = os.path.join(output_dir, filename)
 
     # Ensure output directory exists
@@ -597,7 +611,7 @@ def generate_predictions(
             }
 
         # Create plot filename
-        plot_filename = f"siamese_confusion_matrix_{timestamp}.png"
+        plot_filename = f"evaluation_v{model_version}_{bat_type}_{source}_{background}_{timestamp}.png"
         plot_path = os.path.join(output_dir, plot_filename)
 
         # Create the plot
@@ -606,6 +620,10 @@ def generate_predictions(
             binary_pred_labels,
             class_verification_rates,
             plot_path,
+            model_version,
+            bat_type,
+            source,
+            background,
             title="Siamese Network Evaluation",
         )
 
@@ -622,22 +640,21 @@ def main():
         epilog="""
 Examples:
     # Basic usage - process all bat classes in data folder
-    python generate_predictions.py --model /path/to/model --input /path/to/data
-    
-    # With custom output directory  
-    python generate_predictions.py --model /path/to/model --input /path/to/data --output /path/to/output
+    python generate_predictions.py --model /path/to/model --input /path/to/data --model-version 1 --bat-type r --source video --background original
     
     # Process specific bat classes only
-    python generate_predictions.py --model /path/to/model --input /path/to/data --subdirs W H rasmi charlie
+    python generate_predictions.py --model /path/to/model --input /path/to/data --model-version 2 --bat-type m --source still --background green --subdirs W H rasmi charlie
     
     # With verbose output
-    python generate_predictions.py -m /path/to/model -i /path/to/data --verbose
+    python generate_predictions.py -m /path/to/model -i /path/to/data --model-version 1 --bat-type r --source video --background original --verbose
     
     # Fast testing with limited pairs
-    python generate_predictions.py -m /path/to/model -i /path/to/data --max-pairs 100
+    python generate_predictions.py -m /path/to/model -i /path/to/data --model-version 1 --bat-type r --source video --background random --max-pairs 100
     
     # Using short argument names
-    python generate_predictions.py -m model_path -i data_path -o output_path
+    python generate_predictions.py -m model_path -i data_path --model-version 3 --bat-type m --source still --background original
+    
+Note: All outputs are saved to the 'evaluations/' directory in the project root.
         """,
     )
 
@@ -653,9 +670,31 @@ Examples:
     )
 
     parser.add_argument(
-        "--output",
-        "-o",
-        help="Path to output directory for predictions (default: same as input)",
+        "--model-version",
+        type=int,
+        required=True,
+        help="Model version number (e.g., 1, 2, 3)",
+    )
+
+    parser.add_argument(
+        "--bat-type",
+        required=True,
+        choices=["r", "m"],
+        help="Bat type: r=Rousettus, m=Mauritius",
+    )
+
+    parser.add_argument(
+        "--source",
+        required=True,
+        choices=["video", "still"],
+        help="Image source type (video or still images)",
+    )
+
+    parser.add_argument(
+        "--background",
+        required=True,
+        choices=["green", "random", "original"],
+        help="Background type used (green, random, or original)",
     )
 
     parser.add_argument(
@@ -684,7 +723,10 @@ Examples:
         result = generate_predictions(
             model=model,
             input_dir=args.input,
-            output_dir=args.output,
+            model_version=args.model_version,
+            bat_type=args.bat_type,
+            source=args.source,
+            background=args.background,
             include_subdirs=args.subdirs,
             verbose=args.verbose,
             max_pairs=args.max_pairs,
