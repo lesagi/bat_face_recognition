@@ -84,6 +84,12 @@ class SiameseNetworkTrainer:
             "test_f1": [],
         }
         self.current_epoch: int = 0
+        
+        # Best model tracking
+        self.best_loss_value: float = float('inf')
+        self.best_loss_epoch: int = 0
+        self.best_f1_value: float = 0.0
+        self.best_f1_epoch: int = 0
 
         # Model, optimizer, loss
         self.siamese_model = SiameseNetwork(L1Dist()).model
@@ -475,7 +481,6 @@ class SiameseNetworkTrainer:
             raise ValueError(
                 "No siamese model available for training. Initialize trainer with a siamese_model."
             )
-        min_train_loss = 1
         for epoch in range(1, self.num_epochs + 1):
             self.current_epoch = epoch
             print("\n Epoch {}/{}".format(epoch, self.num_epochs))
@@ -509,8 +514,6 @@ class SiameseNetworkTrainer:
             # Calculate F1 score
             train_f1 = self._calculate_f1(train_precision, train_recall)
 
-            self.save_model(version=epoch, save_format="tf")
-
             # periodic testing and checkpoints
             print(f"  Running test evaluation...")
             test_loss, test_recall, test_precision, test_f1 = self.test()
@@ -533,12 +536,52 @@ class SiameseNetworkTrainer:
                 print(f"📊 Experiment: {self.mlflow_experiment_name}")
                 print(f"📊 View at: http://localhost:5000")
 
-            if test_loss <= min_train_loss:
-                min_train_loss = test_loss
-                self.checkpoint.save(file_prefix=os.path.join(self.checkpoint_dir, "min"))
+            # Track and save best model based on test_loss (lower is better)
+            if test_loss < self.best_loss_value:
+                self.best_loss_value = test_loss
+                self.best_loss_epoch = epoch
+                print(f"✅ New best test_loss! Loss: {test_loss:.6f} at epoch {epoch}")
+                self.save_model(name="best_model_loss", save_format="tf")
+                self.checkpoint.save(file_prefix=os.path.join(self.checkpoint_dir, "best_loss"))
+                
+                # Log to MLflow
+                if self.mlflow_enabled:
+                    mlflow.log_metric("best_loss_epoch", epoch)
+                    mlflow.log_metric("best_test_loss", test_loss)
+            
+            # Track and save best model based on test_f1 (higher is better)
+            if test_f1 > self.best_f1_value:
+                self.best_f1_value = test_f1
+                self.best_f1_epoch = epoch
+                print(f"✅ New best test_f1! F1: {test_f1:.6f} at epoch {epoch}")
+                self.save_model(name="best_model_f1", save_format="tf")
+                self.checkpoint.save(file_prefix=os.path.join(self.checkpoint_dir, "best_f1"))
+                
+                # Log to MLflow
+                if self.mlflow_enabled:
+                    mlflow.log_metric("best_f1_epoch", epoch)
+                    mlflow.log_metric("best_test_f1", test_f1)
 
+            # Save periodic models (every 10 epochs)
             if epoch % 10 == 0:
+                print(f"💾 Saving periodic model at epoch {epoch}")
+                self.save_model(version=epoch, save_format="tf")
                 self.checkpoint.save(file_prefix=os.path.join(self.checkpoint_dir, "periodic"))
+        
+        # Training completed - log final summary
+        print(f"\n{'='*70}")
+        print(f"🎯 Training completed!")
+        print(f"{'='*70}")
+        print(f"🏆 Best test_loss: {self.best_loss_value:.6f} at epoch {self.best_loss_epoch}")
+        print(f"🏆 Best test_f1: {self.best_f1_value:.6f} at epoch {self.best_f1_epoch}")
+        print(f"{'='*70}\n")
+        
+        # Log final best epochs to MLflow as parameters (persisted)
+        if self.mlflow_enabled:
+            mlflow.log_param("final_best_loss_epoch", self.best_loss_epoch)
+            mlflow.log_param("final_best_loss_value", round(self.best_loss_value, 6))
+            mlflow.log_param("final_best_f1_epoch", self.best_f1_epoch)
+            mlflow.log_param("final_best_f1_value", round(self.best_f1_value, 6))
 
     def test(self):
         if self.siamese_model is None:
