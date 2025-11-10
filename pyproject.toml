@@ -15,3 +15,6 @@ dependencies = [
     "tensorflow[gpu]==2.15.0",
     "tqdm>=4.67.1",
 ]
+
+[dependency-groups]
+dev = []
