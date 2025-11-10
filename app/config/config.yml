@@ -81,7 +81,7 @@ siamese_network:
       enabled: true
       anchor_negative_balance: true  # Balance positive vs negative pairs
       per_class_balance: true  # Balance across different classes
-      weighting_scheme: "ins"  # Options: "ins" (Inverse Number), "isns" (Inverse Sqrt), "ens" (Effective Number)
+      weighting_scheme: "ens"  # Options: "ins" (Inverse Number), "isns" (Inverse Sqrt), "ens" (Effective Number)
       ens_beta: 0.9999  # Beta parameter for ENS scheme (0.9, 0.99, 0.999, 0.9999)
     optimizer:
       type: "Adam"
@@ -116,7 +116,7 @@ siamese_network:
       
       # Prediction caching settings
       prediction_caching:
-        enabled: true
+        enabled: false
         cache_size: 1000
         max_memory_mb: 512
         cache_ttl_hours: 24

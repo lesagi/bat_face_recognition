@@ -77,9 +77,11 @@ class SiameseNetworkTrainer:
             "train_loss": [],
             "train_recall": [],
             "train_precision": [],
+            "train_f1": [],
             "test_loss": [],
             "test_recall": [],
             "test_precision": [],
+            "test_f1": [],
         }
         self.current_epoch: int = 0
 
@@ -247,9 +249,11 @@ class SiameseNetworkTrainer:
                 "train_loss": float(train["loss"]),
                 "train_recall": float(train["recall"]),
                 "train_precision": float(train["precision"]),
+                "train_f1": float(train["f1"]),
                 "test_loss": float(test["loss"]),
                 "test_recall": float(test["recall"]),
                 "test_precision": float(test["precision"]),
+                "test_f1": float(test["f1"]),
             },
             step=epoch,
         )
@@ -262,6 +266,7 @@ class SiameseNetworkTrainer:
                     "loss": float(train["loss"]),
                     "recall": float(train["recall"]),
                     "precision": float(train["precision"]),
+                    "f1": float(train["f1"]),
                 }
             )
             mlflow.log_metrics(
@@ -269,6 +274,7 @@ class SiameseNetworkTrainer:
                     "loss_test": float(test["loss"]),
                     "recall_test": float(test["recall"]),
                     "precision_test": float(test["precision"]),
+                    "f1_test": float(test["f1"]),
                 }
             )
 
@@ -276,9 +282,11 @@ class SiameseNetworkTrainer:
         self.metric_history["train_loss"].append(float(train["loss"]))
         self.metric_history["train_recall"].append(float(train["recall"]))
         self.metric_history["train_precision"].append(float(train["precision"]))
+        self.metric_history["train_f1"].append(float(train["f1"]))
         self.metric_history["test_loss"].append(float(test["loss"]))
         self.metric_history["test_recall"].append(float(test["recall"]))
         self.metric_history["test_precision"].append(float(test["precision"]))
+        self.metric_history["test_f1"].append(float(test["f1"]))
 
     def _plot_and_log_artifacts(self, epoch: int):
         if not self.mlflow_enabled:
@@ -308,6 +316,7 @@ class SiameseNetworkTrainer:
         plot_metric(self.metric_history["train_loss"], self.metric_history["test_loss"], "Loss", "loss")
         plot_metric(self.metric_history["train_recall"], self.metric_history["test_recall"], "Recall", "recall")
         plot_metric(self.metric_history["train_precision"], self.metric_history["test_precision"], "Precision", "precision")
+        plot_metric(self.metric_history["train_f1"], self.metric_history["test_f1"], "F1 Score", "f1")
 
     def _log_sample_images(self):
         """Log 5 random sample images with their names and dimensions as MLflow artifacts."""
@@ -497,22 +506,24 @@ class SiameseNetworkTrainer:
             train_loss = self._to_float(loss)
             train_recall = self._to_float(r.result())
             train_precision = self._to_float(p.result())
+            # Calculate F1 score
+            train_f1 = self._calculate_f1(train_precision, train_recall)
 
             self.save_model(version=epoch, save_format="tf")
 
             # periodic testing and checkpoints
             print(f"  Running test evaluation...")
-            test_loss, test_recall, test_precision = self.test()
-            print(f"  Test results - Loss: {test_loss:.6f}, Recall: {test_recall:.6f}, Precision: {test_precision:.6f}")
+            test_loss, test_recall, test_precision, test_f1 = self.test()
+            print(f"  Test results - Loss: {test_loss:.6f}, Recall: {test_recall:.6f}, Precision: {test_precision:.6f}, F1: {test_f1:.6f}")
 
             self._update_metric_history(
-                {"loss": train_loss, "recall": train_recall, "precision": train_precision},
-                {"loss": test_loss, "recall": test_recall, "precision": test_precision},
+                {"loss": train_loss, "recall": train_recall, "precision": train_precision, "f1": train_f1},
+                {"loss": test_loss, "recall": test_recall, "precision": test_precision, "f1": test_f1},
             )
             self._log_epoch_metrics(
                 epoch,
-                {"loss": train_loss, "recall": train_recall, "precision": train_precision},
-                {"loss": test_loss, "recall": test_recall, "precision": test_precision},
+                {"loss": train_loss, "recall": train_recall, "precision": train_precision, "f1": train_f1},
+                {"loss": test_loss, "recall": test_recall, "precision": test_precision, "f1": test_f1},
             )
             self._plot_and_log_artifacts(epoch)
             
@@ -560,9 +571,11 @@ class SiameseNetworkTrainer:
         recall_val = self._to_float(r.result())
         precision_val = self._to_float(p.result())
         avg_loss_val = self._to_float(avg_loss)
+        # Calculate F1 score
+        f1_val = self._calculate_f1(precision_val, recall_val)
         
-        print(f"    Test metrics - Batches: {num_batches}, Recall: {recall_val:.6f}, Precision: {precision_val:.6f}")
-        return avg_loss_val, recall_val, precision_val
+        print(f"    Test metrics - Batches: {num_batches}, Recall: {recall_val:.6f}, Precision: {precision_val:.6f}, F1: {f1_val:.6f}")
+        return avg_loss_val, recall_val, precision_val, f1_val
 
     @staticmethod
     def _to_float(x):
@@ -570,6 +583,16 @@ class SiameseNetworkTrainer:
             return float(x.numpy())  # type: ignore[attr-defined]
         except Exception:
             return float(x)
+    
+    @staticmethod
+    def _calculate_f1(precision: float, recall: float) -> float:
+        """
+        Calculate F1 score from precision and recall.
+        F1 = 2 * (precision * recall) / (precision + recall)
+        """
+        if precision + recall == 0:
+            return 0.0
+        return 2 * (precision * recall) / (precision + recall)
 
     def save_model(self, name="siamesemodelv2", version=None, save_format="tf"):
         if self.siamese_model is None:
