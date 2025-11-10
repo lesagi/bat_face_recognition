@@ -12,7 +12,8 @@ import tensorflow as tf
 from pathlib import Path
 
 # Add the app directory to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
+# Go up 2 levels from tests/ to get to app/
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from siamese_training.trainer import SiameseNetworkTrainer
 from config.loader import load_config

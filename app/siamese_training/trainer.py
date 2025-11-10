@@ -3,6 +3,8 @@ Siamese network trainer module.
 """
 
 import os
+from pathlib import Path
+import sys
 import tempfile
 import random
 from typing import Any, Dict, List, Optional, Union
@@ -13,6 +15,7 @@ import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
 from PIL import Image
+
 
 # Configure GPU
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -26,10 +29,10 @@ if gpus:
 else:
     print("❌ No GPU found, using CPU")
 
-from app.siamese_core.network import SiameseNetwork, L1Dist
-from app.siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
-from app.siamese_data.class_weights import ClassWeightCalculator
-from app.config.loader import load_config
+from siamese_core.network import SiameseNetwork, L1Dist
+from siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
+from siamese_data.class_weights import ClassWeightCalculator
+from config.loader import load_config
 
 
 class SiameseNetworkTrainer:

@@ -7,8 +7,8 @@ import random
 import tensorflow as tf
 from itertools import combinations, permutations, product
 
-from app.config.loader import load_config
-from app.utils.filename_parser import parse_filename_class, group_files_by_class
+from config.loader import load_config
+from utils.filename_parser import group_files_by_class
 
 
 def get_files_from_dir(directory):
