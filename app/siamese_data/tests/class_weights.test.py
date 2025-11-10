@@ -10,7 +10,7 @@ import unittest
 import numpy as np
 
 # Add the app directory to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from siamese_data.class_weights import (
     calculate_ins_weights,
