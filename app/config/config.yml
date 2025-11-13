@@ -93,7 +93,7 @@ siamese_network:
       from_logits: false
     train_val_split: 0.7
     pair_mode: "combination" # "permutation" or "combination"
-    max_samples_per_class: 20
+    max_samples_per_class: 25
     early_stopping:
       enabled: true
       patience: 10

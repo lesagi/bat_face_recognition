@@ -348,7 +348,7 @@ def generate_predictions(
 
     # Import the filename parsing function and splitter
     from siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
-    from app.utils.filename_parser import parse_filename_class
+    from utils.filename_parser import parse_filename_class
 
     # Use the training splitter to create pairs with filenames; use all data in training
     print("🔄 Creating data pairs using SiameseNetworkTrainingDataSplitter...")
