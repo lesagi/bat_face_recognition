@@ -245,6 +245,12 @@ class SiameseNetworkTrainer:
             "augmented_data": augmented_data,
             "data_source": data_source,
             "experiment_name": self.mlflow_experiment_name,
+            # Weight balancing config
+            "class_balancing_enabled": self.weight_calculator.enabled,
+            "anchor_negative_balance": self.weight_calculator.anchor_negative_balance,
+            "per_class_balance": self.weight_calculator.per_class_balance,
+            "weighting_scheme": self.weight_calculator.weighting_scheme,
+            "ens_beta": self.weight_calculator.ens_beta,
         }
         mlflow.log_params(params)
         self._log_sample_images()
