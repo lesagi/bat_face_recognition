@@ -71,18 +71,21 @@ siamese_network:
     # output_dir: "/Users/MAC/Documents/bat_face_rec/models/siamese/rousettus/04-10-25_vid_cropped_no_aug_data_split_refactor"
     # Batwoman
     input_dir: "/home/sagilevi1/bat_face_rec_project/data/processed/mauritius/random_background"
-    output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/mauritius/08-11-25_video_randomBg_noAugmentation"
+    output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/mauritius/14-11-25_video_randomBg_noAugmentation"
     epochs: 80
-    batch_size: 16
+    batch_size: 32
     learning_rate: 0.0001
     
     # Class balancing configuration
     class_balancing:
       enabled: true
-      anchor_negative_balance: true  # Balance positive vs negative pairs
-      per_class_balance: true  # Balance across different classes
-      weighting_scheme: "ens"  # Options: "ins" (Inverse Number), "isns" (Inverse Sqrt), "ens" (Effective Number)
-      ens_beta: 0.9999  # Beta parameter for ENS scheme (0.9, 0.99, 0.999, 0.9999)
+      anchor_negative_balance: true  # Balance positive vs negative pairs (per-batch adaptive)
+      per_class_balance: true  # Balance across different classes (globally computed)
+      weighting_scheme: "ins"  # Options: "ins" (Inverse Number), "isns" (Inverse Sqrt), "ens" (Effective Number)
+      ens_beta: 0.9  # Beta parameter for ENS scheme (0.9, 0.99, 0.999, 0.9999)
+      # Required when per_class_balance=true: strategy for computing global class distribution
+      global_distribution_strategy: "sampled"  # Options: "file_based" (fast, approximate), "sampled" (balanced), "full_scan" (slow, accurate)
+      sampling_percentage: 0.1  # For 'sampled' strategy: fraction of data to sample (0.0-1.0)
     optimizer:
       type: "Adam"
       beta_1: 0.9
@@ -92,8 +95,8 @@ siamese_network:
       type: "BinaryCrossentropy"
       from_logits: false
     train_val_split: 0.7
-    pair_mode: "combination" # "permutation" or "combination"
-    max_samples_per_class: 25
+    pair_mode: "permutation" # "permutation" or "combination"
+    max_samples_per_class: 10
     early_stopping:
       enabled: true
       patience: 10
@@ -102,7 +105,7 @@ siamese_network:
     checkpoint:
       save_frequency: 10
       save_best_only: true
-      max_checkpoints: 3
+      max_checkpoints: 5
     # Training data preprocessing configuration (pipeline-specific)
     data_preprocessing:
       target_size: 224

@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import random
+import time
 from typing import Any, Dict, List, Optional, Union
 
 import tensorflow as tf
@@ -33,6 +34,7 @@ else:
 from siamese_core.network import SiameseNetwork, L1Dist
 from siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
 from siamese_data.class_weights import ClassWeightCalculator
+from siamese_data.global_distribution import compute_global_class_distribution
 from config.loader import load_config
 
 
@@ -100,19 +102,7 @@ class SiameseNetworkTrainer:
         # Separate loss for testing (unweighted, default reduction)
         self.test_loss_function = tf.losses.BinaryCrossentropy()
 
-        # Class balancing setup
-        class_balancing_config = sn_train.get("class_balancing", {})
-        self.weight_calculator = ClassWeightCalculator(class_balancing_config)
-        
-        if self.weight_calculator.enabled:
-            print(f"🔧 Class balancing enabled:")
-            print(f"   - Anchor/Negative balance: {self.weight_calculator.anchor_negative_balance}")
-            print(f"   - Per-class balance: {self.weight_calculator.per_class_balance}")
-            print(f"   - Weighting scheme: {self.weight_calculator.weighting_scheme}")
-            if self.weight_calculator.weighting_scheme == 'ens':
-                print(f"   - ENS beta: {self.weight_calculator.ens_beta}")
-
-        # Data
+        # Data loading (must come BEFORE class balancing for global distribution)
         print(f"🔧 Loading data from: {self.input_dir}")
         
         # Check GPU availability
@@ -130,7 +120,56 @@ class SiameseNetworkTrainer:
         test_data = self.data_splitter.test_data
         if train_data is None or test_data is None:
             raise ValueError("Data splitter returned no train/test data")
+
+        # Class balancing setup (after data loading)
+        class_balancing_config = sn_train.get("class_balancing", {})
         
+        # Store for MLflow logging
+        self.class_balancing_config = class_balancing_config
+        
+        # Compute global distribution if needed (BEFORE batching and calculator creation)
+        global_dist = None
+        if class_balancing_config.get("per_class_balance", False):
+            strategy = class_balancing_config.get("global_distribution_strategy")
+            if not strategy:
+                raise ValueError(
+                    "per_class_balance=true requires 'global_distribution_strategy' in config. "
+                    "Options: 'file_based', 'sampled', 'full_scan'"
+                )
+            
+            sampling_pct = class_balancing_config.get("sampling_percentage", 0.1)
+            print(f"🔧 Computing global class distribution using '{strategy}' strategy...")
+            start_time = time.time()
+            
+            # Compute before batching
+            global_dist = compute_global_class_distribution(
+                dataset=train_data,
+                strategy=strategy,
+                data_splitter=self.data_splitter,
+                sampling_percentage=sampling_pct
+            )
+            
+            elapsed = time.time() - start_time
+            print(f"   ✅ Global distribution computed in {elapsed:.2f}s")
+            print(f"   📊 Classes: {list(global_dist.keys())}")
+            total_samples = sum(global_dist.values())
+            print(f"   📊 Total samples: {total_samples}")
+        
+        # Initialize calculator with global distribution
+        self.weight_calculator = ClassWeightCalculator(
+            class_balancing_config,
+            global_class_distribution=global_dist
+        )
+        
+        if self.weight_calculator.enabled:
+            print(f"🔧 Class balancing enabled:")
+            print(f"   - Anchor/Negative balance: {self.weight_calculator.anchor_negative_balance}")
+            print(f"   - Per-class balance: {self.weight_calculator.per_class_balance}")
+            print(f"   - Weighting scheme: {self.weight_calculator.weighting_scheme}")
+            if self.weight_calculator.weighting_scheme == 'ens':
+                print(f"   - ENS beta: {self.weight_calculator.ens_beta}")
+        
+        # Create data batches (after class balancing setup)
         print(f"🔧 Creating data batches...")
         self.train_batches = train_data.batch(self.batch_size).prefetch(8)
         self.test_batches = test_data.batch(self.batch_size).prefetch(8)
@@ -217,6 +256,7 @@ class SiameseNetworkTrainer:
         print(f"📊 Run name: {run_name}")
         self.parent_run = mlflow.start_run(run_name=run_name)
         self._log_hyperparameters(bat_type, augmented_data, data_source)
+        self._log_class_balancing_to_mlflow()
 
     def _end_parent_run(self):
         if not self.mlflow_enabled:
@@ -426,6 +466,55 @@ class SiameseNetworkTrainer:
                     
         except Exception as e:
             print(f"⚠️ Warning: Could not log weight statistics: {e}")
+    
+    def _log_class_balancing_to_mlflow(self):
+        """
+        Log class balancing configuration and statistics to MLflow.
+        
+        Should be called after starting the parent MLflow run.
+        """
+        if not self.mlflow_enabled or not self.weight_calculator.enabled:
+            return
+        
+        try:
+            # Log basic configuration
+            mlflow.log_param("class_balancing/enabled", True)
+            mlflow.log_param("class_balancing/anchor_negative_balance", 
+                             self.weight_calculator.anchor_negative_balance)
+            mlflow.log_param("class_balancing/per_class_balance", 
+                             self.weight_calculator.per_class_balance)
+            mlflow.log_param("class_balancing/weighting_scheme", 
+                             self.weight_calculator.weighting_scheme)
+            
+            # Log ENS beta if using ENS scheme
+            if self.weight_calculator.weighting_scheme == 'ens':
+                mlflow.log_param("class_balancing/ens_beta", 
+                                self.weight_calculator.ens_beta)
+            
+            # Log global distribution parameters and values
+            if self.weight_calculator.per_class_balance:
+                strategy = self.class_balancing_config.get("global_distribution_strategy")
+                sampling_pct = self.class_balancing_config.get("sampling_percentage", 0.1)
+                
+                mlflow.log_param("class_balancing/global_distribution_strategy", strategy)
+                mlflow.log_param("class_balancing/sampling_percentage", sampling_pct)
+                
+                # Log actual global distribution as metrics
+                if self.weight_calculator._global_class_distribution:
+                    for cls, count in self.weight_calculator._global_class_distribution.items():
+                        mlflow.log_metric(f"global_distribution/{cls}", count, step=0)
+                    
+                    # Log distribution statistics
+                    counts = list(self.weight_calculator._global_class_distribution.values())
+                    mlflow.log_metric("global_distribution/total_samples", sum(counts), step=0)
+                    mlflow.log_metric("global_distribution/num_classes", len(counts), step=0)
+                    mlflow.log_metric("global_distribution/max_class_size", max(counts), step=0)
+                    mlflow.log_metric("global_distribution/min_class_size", min(counts), step=0)
+                    
+            print(f"   ✅ Class balancing configuration logged to MLflow")
+            
+        except Exception as e:
+            print(f"   ⚠️ Warning: Could not log class balancing to MLflow: {e}")
     
     def train_step(self, batch):
         """
