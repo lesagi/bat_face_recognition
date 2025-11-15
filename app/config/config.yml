@@ -74,14 +74,14 @@ siamese_network:
     output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/mauritius/14-11-25_video_randomBg_noAugmentation"
     epochs: 80
     batch_size: 32
-    learning_rate: 0.0001
+    learning_rate: 0.00005  # Reduced from 0.0001 to prevent overfitting
     
     # Class balancing configuration
     class_balancing:
       enabled: true
       anchor_negative_balance: true  # Balance positive vs negative pairs (per-batch adaptive)
       per_class_balance: true  # Balance across different classes (globally computed)
-      weighting_scheme: "ins"  # Options: "ins" (Inverse Number), "isns" (Inverse Sqrt), "ens" (Effective Number)
+      weighting_scheme: "isns"  # Changed to ISNS (gentler weighting than INS)
       ens_beta: 0.9  # Beta parameter for ENS scheme (0.9, 0.99, 0.999, 0.9999)
       # Required when per_class_balance=true: strategy for computing global class distribution
       global_distribution_strategy: "sampled"  # Options: "file_based" (fast, approximate), "sampled" (balanced), "full_scan" (slow, accurate)
@@ -99,7 +99,7 @@ siamese_network:
     max_samples_per_class: 10
     early_stopping:
       enabled: true
-      patience: 10
+      patience: 5  # Changed from 10 - detect overfitting faster
       min_delta: 0.001
       restore_best_weights: true
     checkpoint:
