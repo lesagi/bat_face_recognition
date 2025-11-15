@@ -232,7 +232,7 @@ class SiameseNetworkTrainingDataSplitter:
         dataset = self.__create_product_dataset(data_set_a, data_set_b, class_a)
         
         if self.mode == "permutation":
-            dataset = self.__create_product_dataset(data_set_b, data_set_a, class_b)
+            dataset = dataset.concatenate(self.__create_product_dataset(data_set_b, data_set_a, class_b))
 
         final_data_set_size = dataset.cardinality().numpy()
         print(f"('{class_a}', '{class_b}'): {final_data_set_size} negative pairs count. Samples per class: {min_samples_per_class}")
@@ -289,14 +289,19 @@ class SiameseNetworkTrainingDataSplitter:
     def __create_training_pairs(self):
         """Create training pairs only from training images. Returns (anchors_ds, negatives_ds) of file paths."""
         print("\n🔍 Creating training pairs...")
-        anchors_ds = None
-        negatives_ds = None
+
+        # Initialize to None in case loops don't execute
+        anchors = None
+        negatives = None
 
         # Create positive pairs (same class) from training images only
         for class_name, train_files in self.train_class_files.items():
             if len(train_files) > 1:  # Need at least 2 files to create pairs
-                anchors = self.__create_anchor_pairs(train_files, class_name)
-                anchors_ds = anchors if anchors_ds is None else anchors_ds.concatenate(anchors)
+                class_anchors = self.__create_anchor_pairs(train_files, class_name)
+                if anchors is None:
+                    anchors = class_anchors
+                else:
+                    anchors = anchors.concatenate(class_anchors)
 
         # Create negative pairs (different classes) from training images only
         class_names_list = list(self.train_class_files.keys())
@@ -304,26 +309,30 @@ class SiameseNetworkTrainingDataSplitter:
             for class_b in class_names_list[i+1:]:
                 files_a = self.train_class_files[class_a]
                 files_b = self.train_class_files[class_b]
-                negatives = self.__create_negative_pairs(files_a, files_b, class_a, class_b, False)
-                if self.mode == "permutation":
-                    negatives = negatives.concatenate(
-                        self.__create_negative_pairs(files_b, files_a, class_b, class_a, False)
-                    )
-                negatives_ds = negatives if negatives_ds is None else negatives_ds.concatenate(negatives)
+                class_negatives = self.__create_negative_pairs(files_a, files_b, class_a, class_b, False)
+                if negatives is None:
+                    negatives = class_negatives
+                else:
+                    negatives = negatives.concatenate(class_negatives)
 
-        return anchors_ds, negatives_ds
+        return anchors, negatives
 
     def __create_testing_pairs(self):
         """Create testing pairs only from testing images. Returns (anchors_ds, negatives_ds) of file paths."""
         print("\n🔍 Creating testing pairs...")
-        anchors_ds = None
-        negatives_ds = None
+
+        # Initialize to None in case loops don't execute
+        anchors = None
+        negatives = None
 
         # Create positive pairs (same class) from testing images only
         for class_name, test_files in self.test_class_files.items():
             if len(test_files) > 1:  # Need at least 2 files to create pairs
-                anchors = self.__create_anchor_pairs(test_files, class_name)
-                anchors_ds = anchors if anchors_ds is None else anchors_ds.concatenate(anchors)
+                class_anchors = self.__create_anchor_pairs(test_files, class_name)
+                if anchors is None:
+                    anchors = class_anchors
+                else:
+                    anchors = anchors.concatenate(class_anchors)
 
         # Create negative pairs (different classes) from testing images only
         class_names_list = list(self.test_class_files.keys())
@@ -331,14 +340,13 @@ class SiameseNetworkTrainingDataSplitter:
             for class_b in class_names_list[i+1:]:
                 files_a = self.test_class_files[class_a]
                 files_b = self.test_class_files[class_b]
-                negatives = self.__create_negative_pairs(files_a, files_b, class_a, class_b, False)
-                if self.mode == "permutation":
-                    negatives = negatives.concatenate(
-                        self.__create_negative_pairs(files_b, files_a, class_b, class_a, False)
-                    )
-                negatives_ds = negatives if negatives_ds is None else negatives_ds.concatenate(negatives)
+                class_negatives = self.__create_negative_pairs(files_a, files_b, class_a, class_b, False)
+                if negatives is None:
+                    negatives = class_negatives
+                else:
+                    negatives = negatives.concatenate(class_negatives)
 
-        return anchors_ds, negatives_ds
+        return anchors, negatives
 
     def __add_to_training_data(self, data):
         """Add data to training dataset."""

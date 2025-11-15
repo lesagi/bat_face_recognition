@@ -15,6 +15,12 @@ import numpy as np
 from typing import Dict, Tuple, List, Union, Optional
 from collections import Counter
 
+# Import anchor/negative weight calculation from dedicated module
+from siamese_data.anchor_negative_weights import (
+    calculate_anchor_negative_weights,
+    compute_batch_anchor_negative_weights
+)
+
 
 def calculate_ins_weights(class_counts: Dict[str, int]) -> Dict[str, float]:
     """
@@ -142,54 +148,6 @@ def calculate_ens_weights(class_counts: Dict[str, int], beta: float = 0.9999) ->
     return normalized_weights
 
 
-def calculate_anchor_negative_weights(
-    num_anchors: int, 
-    num_negatives: int
-) -> Tuple[float, float]:
-    """
-    Calculate weights to balance anchor (positive) and negative pairs.
-    
-    The goal is to make both types contribute equally to the loss, so:
-    - If there are more negatives, anchors get higher weight
-    - If there are more anchors, negatives get higher weight
-    
-    Returns weights that sum to 1.0 and create a 50/50 contribution split.
-    
-    Args:
-        num_anchors: Number of anchor (positive) pairs
-        num_negatives: Number of negative pairs
-        
-    Returns:
-        Tuple of (anchor_weight, negative_weight)
-        
-    Raises:
-        ValueError: If either count is zero or negative
-    """
-    if num_anchors <= 0:
-        raise ValueError("Number of anchors must be positive")
-    
-    if num_negatives <= 0:
-        raise ValueError("Number of negatives must be positive")
-    
-    # Total pairs
-    total = num_anchors + num_negatives
-    
-    # Weight inversely proportional to count
-    # anchor_weight * num_anchors = negative_weight * num_negatives (for equal contribution)
-    # anchor_weight + negative_weight = 1 (normalized)
-    
-    # Solving: anchor_weight = total / (2 * num_anchors)
-    anchor_weight = 0.5 * total / num_anchors
-    negative_weight = 0.5 * total / num_negatives
-    
-    # Normalize to sum to 1
-    total_weight = anchor_weight + negative_weight
-    anchor_weight /= total_weight
-    negative_weight /= total_weight
-    
-    return anchor_weight, negative_weight
-
-
 def calculate_per_class_weights(
     class_counts: Dict[str, int],
     scheme: str = 'ins',
@@ -245,7 +203,7 @@ class ClassWeightCalculator:
         weights = calculator.compute_sample_weights(labels, class_info)
     """
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, global_class_distribution: Optional[Dict[str, int]] = None):
         """
         Initialize the weight calculator.
         
@@ -256,12 +214,28 @@ class ClassWeightCalculator:
                 - per_class_balance (bool): Balance across classes
                 - weighting_scheme (str): 'ins', 'isns', or 'ens'
                 - ens_beta (float): Beta parameter for ENS scheme
+            global_class_distribution: Global class distribution for per-class balancing.
+                Required if per_class_balance is True.
+                
+        Raises:
+            ValueError: If per_class_balance is True but global_class_distribution is None
         """
         self.enabled = config.get('enabled', False)
         self.anchor_negative_balance = config.get('anchor_negative_balance', True)
         self.per_class_balance = config.get('per_class_balance', True)
         self.weighting_scheme = config.get('weighting_scheme', 'ins')
         self.ens_beta = config.get('ens_beta', 0.9999)
+        
+        # Store global class distribution
+        self._global_class_distribution = global_class_distribution
+        
+        # Strict validation: per_class_balance requires global distribution (only when enabled)
+        if self.enabled and self.per_class_balance and self._global_class_distribution is None:
+            raise ValueError(
+                "per_class_balance=True requires global_class_distribution. "
+                "Use 'global_distribution_strategy' in config to compute it. "
+                "Options: 'file_based', 'sampled', 'full_scan'"
+            )
         
         # Cached weights
         self._anchor_weight = None
@@ -308,9 +282,10 @@ class ClassWeightCalculator:
         
         # Apply per-class balancing
         if self.per_class_balance:
-            class_weights = self._compute_class_weights(class_info)
+            class_weights = self._compute_class_weights()
             
             # Apply to each sample based on its class
+            # class_info is used here only for weight APPLICATION, not counting
             for i, cls in enumerate(class_info):
                 weights[i] *= class_weights[cls]
         
@@ -319,6 +294,32 @@ class ClassWeightCalculator:
         weights = weights / np.mean(weights)
         
         return weights
+    
+    def set_global_class_distribution(self, distribution: Dict[str, int]) -> None:
+        """
+        Set the global class distribution after initialization.
+        
+        Useful for lazy initialization patterns where the distribution
+        is computed after the calculator is created.
+        
+        Args:
+            distribution: Dictionary mapping class names to sample counts
+            
+        Raises:
+            ValueError: If distribution is empty or invalid
+        """
+        if not distribution:
+            raise ValueError("Global class distribution cannot be empty")
+        
+        # Validate all values are positive integers
+        for class_name, count in distribution.items():
+            if not isinstance(count, int) or count <= 0:
+                raise ValueError(
+                    f"Invalid count for class '{class_name}': {count}. "
+                    "All counts must be positive integers."
+                )
+        
+        self._global_class_distribution = distribution
     
     def _compute_anchor_negative_weights(
         self,
@@ -341,17 +342,28 @@ class ClassWeightCalculator:
         
         return calculate_anchor_negative_weights(int(num_anchors), int(num_negatives))
     
-    def _compute_class_weights(
-        self,
-        class_info: List[str]
-    ) -> Dict[str, float]:
-        """Compute per-class weights from class information."""
-        # Count samples per class
-        class_counts = Counter(class_info)
+    def _compute_class_weights(self) -> Dict[str, float]:
+        """
+        Compute per-class weights from global class distribution.
         
-        # Calculate weights using specified scheme
+        Uses the globally-computed class distribution (stable across batches)
+        rather than per-batch counts (which can vary significantly).
+        
+        Returns:
+            Dictionary mapping class names to weights
+            
+        Raises:
+            ValueError: If global distribution is not set (defensive check)
+        """
+        if self._global_class_distribution is None:
+            raise ValueError(
+                "Global class distribution is not set. This should not happen "
+                "if per_class_balance validation passed during initialization."
+            )
+        
+        # Calculate weights using global distribution and specified scheme
         return calculate_per_class_weights(
-            class_counts,
+            self._global_class_distribution,
             scheme=self.weighting_scheme,
             beta=self.ens_beta
         )

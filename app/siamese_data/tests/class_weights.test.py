@@ -205,7 +205,7 @@ class TestClassWeightCalculator(unittest.TestCase):
     """Test the main ClassWeightCalculator class."""
 
     def test_calculator_initialization(self):
-        """Calculator should initialize with config."""
+        """Calculator should initialize with config and global distribution."""
         config = {
             'enabled': True,
             'anchor_negative_balance': True,
@@ -214,7 +214,10 @@ class TestClassWeightCalculator(unittest.TestCase):
             'ens_beta': 0.9999,
         }
         
-        calculator = ClassWeightCalculator(config)
+        # Provide global distribution when per_class_balance is True
+        global_dist = {'A': 100, 'B': 200, 'C': 150}
+        
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
         self.assertTrue(calculator.enabled)
         self.assertEqual(calculator.weighting_scheme, 'ins')
 
@@ -267,7 +270,10 @@ class TestClassWeightCalculator(unittest.TestCase):
             'weighting_scheme': 'ins',
         }
         
-        calculator = ClassWeightCalculator(config)
+        # Provide global distribution reflecting class imbalance
+        global_dist = {'A': 500, 'B': 100}  # A has 5x more samples
+        
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
         
         # Class A: 5 samples, Class B: 1 sample
         labels = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 0.0])
@@ -287,7 +293,10 @@ class TestClassWeightCalculator(unittest.TestCase):
             'weighting_scheme': 'ins',
         }
         
-        calculator = ClassWeightCalculator(config)
+        # Provide global distribution
+        global_dist = {'A': 200, 'B': 300, 'C': 100}
+        
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
         
         # Mixed scenario
         labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
@@ -310,7 +319,10 @@ class TestClassWeightCalculator(unittest.TestCase):
             'weighting_scheme': 'ins',
         }
         
-        calculator = ClassWeightCalculator(config)
+        # Provide global distribution
+        global_dist = {'A': 150, 'B': 200, 'C': 100}
+        
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
         
         labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
         class_info = ['A', 'A', 'B', 'B', 'C']
@@ -377,7 +389,10 @@ class TestEdgeCases(unittest.TestCase):
             'weighting_scheme': 'ins',
         }
         
-        calculator = ClassWeightCalculator(config)
+        # Provide global distribution
+        global_dist = {'A': 100, 'B': 200, 'C': 150}
+        
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
         
         labels = np.array([1.0, 0.0])
         class_info = ['A', 'B', 'C']  # Wrong length
@@ -398,7 +413,10 @@ class TestIntegrationScenarios(unittest.TestCase):
             'weighting_scheme': 'ins',
         }
         
-        calculator = ClassWeightCalculator(config)
+        # Provide global distribution reflecting moderate imbalance
+        global_dist = {'A': 200, 'B': 300, 'C': 100, 'D': 250, 'E': 150}
+        
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
         
         # Simulate real data: different class sizes
         # Class A: 20 pairs, Class B: 30 pairs, Class C: 10 pairs
@@ -453,6 +471,232 @@ class TestIntegrationScenarios(unittest.TestCase):
         # Should be roughly equal (balanced)
         ratio = anchor_contribution / negative_contribution
         self.assertAlmostEqual(ratio, 1.0, places=1)
+
+
+class TestStrictValidation(unittest.TestCase):
+    """Test strict validation requirements for global class distribution."""
+
+    def test_per_class_balance_without_global_dist_raises_error(self):
+        """per_class_balance=True without global distribution should raise ValueError."""
+        config = {
+            'enabled': True,
+            'anchor_negative_balance': True,
+            'per_class_balance': True,
+            'weighting_scheme': 'ins',
+        }
+        
+        with self.assertRaises(ValueError) as context:
+            ClassWeightCalculator(config, global_class_distribution=None)
+        
+        # Check error message is informative
+        error_msg = str(context.exception)
+        self.assertIn("per_class_balance", error_msg)
+        self.assertIn("global_class_distribution", error_msg)
+        self.assertIn("global_distribution_strategy", error_msg)
+    
+    def test_anchor_negative_balance_works_without_global_dist(self):
+        """anchor_negative_balance should work without global distribution."""
+        config = {
+            'enabled': True,
+            'anchor_negative_balance': True,
+            'per_class_balance': False,  # Disabled
+            'weighting_scheme': 'ins',
+        }
+        
+        # Should not raise error
+        calculator = ClassWeightCalculator(config, global_class_distribution=None)
+        
+        labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
+        class_info = ['A', 'A', 'B', 'B', 'C']
+        
+        weights = calculator.compute_sample_weights(labels, class_info)
+        self.assertEqual(len(weights), 5)
+    
+    def test_disabled_calculator_works_without_global_dist(self):
+        """Disabled calculator should work without global distribution."""
+        config = {
+            'enabled': False,
+        }
+        
+        # Should not raise error
+        calculator = ClassWeightCalculator(config, global_class_distribution=None)
+        
+        labels = np.array([1.0, 0.0])
+        class_info = ['A', 'B']
+        
+        weights = calculator.compute_sample_weights(labels, class_info)
+        np.testing.assert_array_equal(weights, np.ones(2))
+    
+    def test_error_message_suggests_solutions(self):
+        """Error message should suggest configuration options."""
+        config = {
+            'enabled': True,
+            'per_class_balance': True,
+        }
+        
+        with self.assertRaises(ValueError) as context:
+            ClassWeightCalculator(config)
+        
+        error_msg = str(context.exception)
+        # Should mention all three strategies
+        self.assertIn("file_based", error_msg)
+        self.assertIn("sampled", error_msg)
+        self.assertIn("full_scan", error_msg)
+
+
+class TestGlobalClassWeights(unittest.TestCase):
+    """Test global class weight behavior."""
+
+    def test_weights_stable_across_batches(self):
+        """Global weights should remain stable across different batches."""
+        config = {
+            'enabled': True,
+            'anchor_negative_balance': False,
+            'per_class_balance': True,
+            'weighting_scheme': 'ins',
+        }
+        
+        # Global distribution: A=100, B=300, C=600
+        global_dist = {'A': 100, 'B': 300, 'C': 600}
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
+        
+        # Batch 1: Mostly class A
+        labels1 = np.array([1.0] * 5)
+        class_info1 = ['A', 'A', 'A', 'A', 'A']
+        weights1 = calculator.compute_sample_weights(labels1, class_info1)
+        
+        # Batch 2: Mostly class C
+        labels2 = np.array([1.0] * 5)
+        class_info2 = ['C', 'C', 'C', 'C', 'C']
+        weights2 = calculator.compute_sample_weights(labels2, class_info2)
+        
+        # Class A samples should always get higher weight than class C
+        # regardless of batch composition
+        self.assertGreater(weights1[0], weights2[0])
+    
+    def test_class_info_used_for_weight_application(self):
+        """class_info should be used for weight application, not counting."""
+        config = {
+            'enabled': True,
+            'anchor_negative_balance': False,
+            'per_class_balance': True,
+            'weighting_scheme': 'ins',
+        }
+        
+        # Global distribution: A=100, B=200
+        global_dist = {'A': 100, 'B': 200}
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
+        
+        # Batch with uneven class distribution (different from global)
+        labels = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
+        class_info = ['A', 'B', 'B', 'B', 'B']  # 1 A, 4 B in batch
+        
+        weights = calculator.compute_sample_weights(labels, class_info)
+        
+        # A sample should get higher weight (based on global dist, not batch dist)
+        self.assertGreater(weights[0], weights[1])
+    
+    def test_hybrid_approach_combines_both(self):
+        """Hybrid approach should combine per-batch anchor/negative + global per-class."""
+        config = {
+            'enabled': True,
+            'anchor_negative_balance': True,
+            'per_class_balance': True,
+            'weighting_scheme': 'ins',
+        }
+        
+        # Global distribution: A=100, B=300
+        global_dist = {'A': 100, 'B': 300}
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
+        
+        # Batch: 2 anchors from A, 8 negatives from B
+        labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        class_info = ['A', 'A', 'B', 'B', 'B', 'B', 'B', 'B', 'B', 'B']
+        
+        weights = calculator.compute_sample_weights(labels, class_info)
+        
+        # Anchors should get higher weight (per-batch balancing)
+        anchor_weight = weights[0]
+        negative_weight = weights[2]
+        self.assertGreater(anchor_weight, negative_weight)
+        
+        # Class A should also get higher weight (global per-class balancing)
+        # Both effects should be present
+        self.assertGreater(weights[0], weights[2])
+    
+    def test_set_global_distribution_after_init(self):
+        """set_global_class_distribution should allow lazy initialization."""
+        config = {
+            'enabled': True,
+            'anchor_negative_balance': False,
+            'per_class_balance': False,  # Start with it disabled
+        }
+        
+        calculator = ClassWeightCalculator(config)
+        
+        # Now set global distribution
+        global_dist = {'A': 100, 'B': 200}
+        calculator.set_global_class_distribution(global_dist)
+        
+        # Should be stored
+        self.assertIsNotNone(calculator._global_class_distribution)
+        self.assertEqual(calculator._global_class_distribution, global_dist)
+    
+    def test_set_global_distribution_validates_input(self):
+        """set_global_class_distribution should validate input."""
+        config = {'enabled': False}
+        calculator = ClassWeightCalculator(config)
+        
+        # Empty distribution should raise error
+        with self.assertRaises(ValueError):
+            calculator.set_global_class_distribution({})
+        
+        # Invalid count should raise error
+        with self.assertRaises(ValueError):
+            calculator.set_global_class_distribution({'A': 0})
+        
+        with self.assertRaises(ValueError):
+            calculator.set_global_class_distribution({'A': -10})
+    
+    def test_weights_use_global_not_batch_counts(self):
+        """Weights should be computed from global distribution, not batch counts."""
+        config = {
+            'enabled': True,
+            'anchor_negative_balance': False,
+            'per_class_balance': True,
+            'weighting_scheme': 'ins',
+        }
+        
+        # Global distribution: A=100, B=300 (B has 3x more)
+        global_dist = {'A': 100, 'B': 300}
+        calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
+        
+        # Batch 1: Mostly A (opposite of global)
+        labels1 = np.array([1.0] * 4)
+        class_info1 = ['A', 'A', 'A', 'B']
+        weights1 = calculator.compute_sample_weights(labels1, class_info1)
+        
+        # Batch 2: Mostly B (matches global)
+        labels2 = np.array([1.0] * 4)
+        class_info2 = ['A', 'B', 'B', 'B']
+        weights2 = calculator.compute_sample_weights(labels2, class_info2)
+        
+        # A should always get higher weight regardless of batch composition
+        # Batch 1: A weight
+        a_weight_batch1 = weights1[0]
+        # Batch 2: A weight
+        a_weight_batch2 = weights2[0]
+        
+        # Weights for class A should be similar across batches
+        # (they're normalized differently but relative to B should be consistent)
+        b_weight_batch1 = weights1[3]
+        b_weight_batch2 = weights2[1]
+        
+        ratio1 = a_weight_batch1 / b_weight_batch1
+        ratio2 = a_weight_batch2 / b_weight_batch2
+        
+        # Ratios should be similar (stable based on global dist)
+        self.assertAlmostEqual(ratio1, ratio2, places=1)
 
 
 if __name__ == '__main__':
