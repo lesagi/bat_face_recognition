@@ -93,6 +93,14 @@ class SiameseNetworkTrainer:
         self.best_loss_epoch: int = 0
         self.best_f1_value: float = 0.0
         self.best_f1_epoch: int = 0
+        
+        # Early stopping tracking
+        self.early_stopping_enabled = sn_train.get("early_stopping", {}).get("enabled", False)
+        self.early_stopping_patience = sn_train.get("early_stopping", {}).get("patience", 10)
+        self.early_stopping_min_delta = sn_train.get("early_stopping", {}).get("min_delta", 0.001)
+        self.early_stopping_restore_best = sn_train.get("early_stopping", {}).get("restore_best_weights", True)
+        self.early_stopping_counter = 0
+        self.early_stopping_best_value = 0.0  # Track best F1 for early stopping
 
         # Model, optimizer, loss
         self.siamese_model = SiameseNetwork(L1Dist()).model
@@ -516,6 +524,49 @@ class SiameseNetworkTrainer:
         except Exception as e:
             print(f"   ⚠️ Warning: Could not log class balancing to MLflow: {e}")
     
+    def _check_early_stopping(self, current_f1: float, epoch: int) -> bool:
+        """
+        Check if training should stop early based on F1-score improvement.
+        
+        Args:
+            current_f1: Current epoch's F1-score
+            epoch: Current epoch number
+            
+        Returns:
+            True if training should stop, False otherwise
+        """
+        if not self.early_stopping_enabled:
+            return False
+        
+        # Check if F1 improved by more than min_delta
+        if current_f1 > self.early_stopping_best_value + self.early_stopping_min_delta:
+            # Improvement detected
+            self.early_stopping_best_value = current_f1
+            self.early_stopping_counter = 0
+            return False
+        else:
+            # No improvement
+            self.early_stopping_counter += 1
+            print(f"⚠️  Early stopping: {self.early_stopping_counter}/{self.early_stopping_patience} epochs without improvement")
+            
+            if self.early_stopping_counter >= self.early_stopping_patience:
+                print(f"\n{'='*70}")
+                print(f"🛑 Early stopping triggered!")
+                print(f"   No improvement in F1-score for {self.early_stopping_patience} epochs")
+                print(f"   Best F1: {self.early_stopping_best_value:.6f}")
+                print(f"   Stopping at epoch {epoch}")
+                print(f"{'='*70}\n")
+                
+                # Log to MLflow
+                if self.mlflow_enabled:
+                    mlflow.log_param("early_stopped", True)
+                    mlflow.log_param("early_stop_epoch", epoch)
+                    mlflow.log_metric("early_stop_best_f1", self.early_stopping_best_value)
+                
+                return True
+        
+        return False
+    
     def train_step(self, batch):
         """
         Perform a single training step with optional sample weighting.
@@ -661,6 +712,20 @@ class SiameseNetworkTrainer:
                 if self.mlflow_enabled:
                     mlflow.log_metric("best_f1_epoch", epoch)
                     mlflow.log_metric("best_test_f1", test_f1)
+            
+            # Check early stopping (after tracking best F1)
+            if self._check_early_stopping(test_f1, epoch):
+                # Restore best weights if configured
+                if self.early_stopping_restore_best:
+                    print(f"🔄 Restoring best model weights from epoch {self.best_f1_epoch}")
+                    best_model_path = os.path.join(self.model_output_dir, "best_model_f1")
+                    if os.path.exists(best_model_path):
+                        self.siamese_model = tf.keras.models.load_model(
+                            best_model_path,
+                            custom_objects={"L1Dist": L1Dist}
+                        )
+                        print(f"✅ Best weights restored (F1: {self.best_f1_value:.6f})")
+                break  # Exit training loop
 
             # Save periodic models (every 10 epochs)
             if epoch % 10 == 0:
@@ -670,7 +735,10 @@ class SiameseNetworkTrainer:
         
         # Training completed - log final summary
         print(f"\n{'='*70}")
-        print(f"🎯 Training completed!")
+        if self.early_stopping_enabled and self.early_stopping_counter >= self.early_stopping_patience:
+            print(f"🎯 Training stopped early at epoch {epoch}/{self.num_epochs}")
+        else:
+            print(f"🎯 Training completed! ({self.num_epochs} epochs)")
         print(f"{'='*70}")
         print(f"🏆 Best test_loss: {self.best_loss_value:.6f} at epoch {self.best_loss_epoch}")
         print(f"🏆 Best test_f1: {self.best_f1_value:.6f} at epoch {self.best_f1_epoch}")
