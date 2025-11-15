@@ -118,9 +118,13 @@ class SiameseNetworkTrainer:
         # Check GPU availability
         print(f"🔧 TensorFlow GPU available: {tf.config.list_physical_devices('GPU')}")
         print(f"🔧 TensorFlow built with CUDA: {tf.test.is_built_with_cuda()}")
+
+        # Get training portion from config
+        training_portion = sn_train.get("train_val_split", 0.7)
+        pair_mode = sn_train.get("pair_mode", "permutation")
         
         self.data_splitter = SiameseNetworkTrainingDataSplitter(
-            [self.input_dir], training_portion=0.7, mode="permutation"
+            [self.input_dir], training_portion=training_portion, mode=pair_mode
         )
         train_data = self.data_splitter.train_data
         test_data = self.data_splitter.test_data
