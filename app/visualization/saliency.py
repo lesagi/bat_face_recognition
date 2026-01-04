@@ -507,6 +507,112 @@ class SiameseModelSaliencyMapCreator:
 
         gradients = tape.gradient(output, image)
         return gradients
+    
+    def generate_per_bat_saliency_images(self, method="integrated_gradients", smoothing=True):
+        """
+        Generate separate saliency map images for each bat class.
+        Each image shows original on left and saliency map on right.
+        
+        Args:
+            method (str): Saliency computation method
+            smoothing (bool): Whether to apply Gaussian smoothing
+        
+        Returns:
+            list: List of output file paths
+        """
+        from utils.filename_parser import parse_filename_class
+        
+        # Group images by bat class
+        bat_classes = {}
+        for img_path in self.images:
+            full_img_path = os.path.join(self.input_dir_path, img_path) if not os.path.isabs(img_path) else img_path
+            filename = os.path.basename(full_img_path)
+            parsed = parse_filename_class(filename)
+            if parsed:
+                bat_class = parsed[1]  # Extract bat class name
+                if bat_class not in bat_classes:
+                    bat_classes[bat_class] = []
+                bat_classes[bat_class].append(full_img_path)
+        
+        output_files = []
+        
+        # Process each bat class
+        for bat_class, img_paths in bat_classes.items():
+            print(f"Processing {len(img_paths)} images for bat class: {bat_class}")
+            
+            # Process each image for this bat class
+            for img_path in img_paths:
+                try:
+                    # Load and preprocess image
+                    img = preprocess_siamese_input(
+                        img_path, target_size=(self.input_size, self.input_size)
+                    )
+                    anchor = tf.convert_to_tensor(np.expand_dims(img, axis=0), dtype=tf.float32)
+                    
+                    # Create random counterpart
+                    from utils.image_utils import create_random_image
+                    random_counterpart = create_random_image(img)
+                    counterpart = tf.convert_to_tensor(
+                        np.expand_dims(random_counterpart, axis=0), dtype=tf.float32
+                    )
+                    
+                    # Compute saliency map
+                    if method == "integrated_gradients":
+                        gradients = self.compute_integrated_gradients(anchor, counterpart)
+                    elif method == "guided_gradients":
+                        gradients = self.compute_guided_gradients(anchor, counterpart)
+                    elif method == "smoothed_gradients":
+                        gradients = self.compute_smoothed_gradients(anchor, counterpart)
+                    else:
+                        gradients = self.compute_standard_gradients(anchor, counterpart)
+                    
+                    # Process saliency map
+                    saliency = self.process_saliency_map(gradients, method="magnitude")
+                    
+                    if smoothing:
+                        saliency = self.apply_gaussian_smoothing(saliency[0], sigma=1.0)
+                    else:
+                        saliency = saliency[0]
+                    
+                    saliency = self.normalize_saliency_map(saliency)
+                    
+                    # Create side-by-side visualization
+                    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+                    
+                    # Original image
+                    img_display = tf.image.resize(img, (350, 350))
+                    axes[0].imshow(img_display)
+                    axes[0].axis("off")
+                    axes[0].set_title("Original", fontsize=12, fontweight="bold")
+                    
+                    # Saliency map
+                    saliency_display = tf.image.resize(
+                        tf.expand_dims(saliency, axis=-1), (350, 350)
+                    )
+                    axes[1].imshow(saliency_display[:, :, 0], cmap="hot")
+                    axes[1].axis("off")
+                    axes[1].set_title(f"Saliency Map ({method.replace('_', ' ').title()})", fontsize=12, fontweight="bold")
+                    
+                    # Add overall title
+                    img_filename = os.path.basename(img_path)
+                    fig.suptitle(f"{bat_class} - {img_filename}", fontsize=14, fontweight="bold")
+                    
+                    plt.tight_layout()
+                    
+                    # Save image
+                    output_filename = f"{bat_class}_{os.path.splitext(img_filename)[0]}_saliency.png"
+                    output_path = os.path.join(self.output_dir_path, output_filename)
+                    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+                    plt.close()
+                    
+                    output_files.append(output_path)
+                    
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+                    continue
+        
+        print(f"Generated {len(output_files)} saliency images")
+        return output_files
 
 
 class MeanSaliencyMapCreator:

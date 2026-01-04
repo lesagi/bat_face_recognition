@@ -25,23 +25,18 @@ def main():
                         help="Whether the data is augmented")
     parser.add_argument("--data-source", dest="data_source", type=str, required=True, choices=['video', 'still'],
                         help="Data source: 'video' or 'still'")
+    parser.add_argument("--permute-labels", dest="permute_labels", action="store_true",
+                        help="Enable label permutation test mode")
     args = parser.parse_args()
-    # Load configuration
-    config = load_config()
-    input_dir = config.siamese_network.training.get("input_dir")
-    
-    if not input_dir:
-        print("❌ Error: No input_dir specified in config file")
-        return
     
     print("🚀 Starting Siamese Network Training")
-    print(f"📁 Input directory: {input_dir}")
+    print("📁 Input directory: Using random_bg_input from config")
     print()
 
     try:
         # Create and run the trainer
         print("🔧 Initializing trainer...")
-        trainer = SiameseNetworkTrainer(args.bat_type, args.augmented_data, args.data_source, input_dir)
+        trainer = SiameseNetworkTrainer(args.bat_type, args.augmented_data, args.data_source, permute_labels=args.permute_labels)
         
         print("✅ Trainer initialized successfully!")
         print(f"📊 Training pairs: {trainer.train_batches.cardinality().numpy()}")

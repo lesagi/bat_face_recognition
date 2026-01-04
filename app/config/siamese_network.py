@@ -28,3 +28,15 @@ class SiameseNetworkConfig:
     @property
     def deployment(self) -> Dict[str, Any]:
         return self._config.get("deployment", {})
+    
+    @property
+    def input_paths(self) -> Dict[str, Any]:
+        return self._config.get("input_paths", {})
+    
+    @property
+    def generate_predictions(self) -> Dict[str, Any]:
+        return self._config.get("generate_predictions", {})
+    
+    @property
+    def saliency_maps(self) -> Dict[str, Any]:
+        return self._config.get("saliency_maps", {})

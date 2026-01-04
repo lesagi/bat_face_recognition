@@ -153,7 +153,167 @@ def validate_input_directory(input_dir):
     return False
 
 
+def generate_saliency_maps_from_config(
+    model_path,
+    input_dir,
+    output_dir,
+    method=None,
+    sample_size=None,
+    fast_mode=None,
+    input_size=None,
+    integration_steps=None,
+    smoothing_samples=None,
+    nesting=None,
+    no_smoothing=False,
+    max_images=None,
+    base_method=None,
+    use_mean_image_background=False,
+):
+    """
+    Generate saliency maps using configuration from config.yml.
+    
+    Args:
+        model_path (str): Path to trained Siamese model directory
+        input_dir (str): Path to input directory containing images
+        output_dir (str): Path to output directory for saliency maps
+        method (str, optional): Saliency computation method. If None, reads from config.
+        sample_size (int, optional): Number of images to sample. If None, reads from config.
+        fast_mode (bool, optional): Use faster parameters. If None, reads from config.
+        input_size (int, optional): Input image size. If None, auto-detects from model.
+        integration_steps (int, optional): Integration steps. If None, reads from config.
+        smoothing_samples (int, optional): Smoothing samples. If None, reads from config.
+        nesting (str, optional): Nested subdirectory name
+        no_smoothing (bool): Disable Gaussian smoothing
+        max_images (int, optional): Max images for mean_saliency method
+        base_method (str, optional): Base method for mean_saliency. If None, reads from config.
+        use_mean_image_background (bool): Use mean image background for mean_saliency
+    
+    Returns:
+        str: Path to output file
+    """
+    # Import config loader
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    app_dir = os.path.dirname(os.path.dirname(current_dir))
+    sys.path.insert(0, app_dir)
+    from app.config.loader import load_config
+    
+    cfg = load_config()
+    saliency_config = cfg.siamese_network.saliency_maps
+    
+    # Get config values with fallback to function parameters
+    method = method or saliency_config.get("method", "integrated_gradients")
+    sample_size = sample_size if sample_size is not None else saliency_config.get("sample_size", 25)
+    fast_mode = fast_mode if fast_mode is not None else saliency_config.get("fast_mode", False)
+    integration_steps = integration_steps if integration_steps is not None else saliency_config.get("integration_steps")
+    smoothing_samples = smoothing_samples if smoothing_samples is not None else saliency_config.get("smoothing_samples")
+    base_method = base_method or saliency_config.get("base_method", "guided_gradients")
+    use_mean_image_background = use_mean_image_background or saliency_config.get("use_mean_image_background", False)
+    
+    # Validate input directory
+    if not validate_input_directory(input_dir):
+        raise ValueError(f"Invalid input directory: {input_dir}")
+    
+    if not os.path.exists(model_path):
+        raise ValueError(f"Model path does not exist: {model_path}")
+    
+    # Load the model
+    model, detected_input_size = load_model(model_path)
+    
+    # Use provided input_size or auto-detected size
+    final_input_size = input_size if input_size else detected_input_size
+    print(f"📏 Final input size: {final_input_size}x{final_input_size}")
+    
+    # Create saliency map generator
+    print(f"Creating saliency maps for images in: {input_dir}")
+    print(f"Using model: {model_path}")
+    print(f"Method: {method}")
+    print(f"Output directory: {output_dir}")
+    if nesting:
+        print(f"Nested subdirectory: {nesting}")
+    if fast_mode:
+        print("🚀 Fast mode enabled - using reduced parameters for speed")
+    
+    saliency_creator = SiameseModelSaliencyMapCreator(
+        model=model,
+        input_dir_path=input_dir,
+        output_dir_path=output_dir,
+        nesting=nesting,
+        sample_size=sample_size,
+        fast_mode=fast_mode,
+        input_size=final_input_size,
+        integration_steps=integration_steps,
+        smoothing_samples=smoothing_samples,
+    )
+    
+    # Show detected structure information
+    if saliency_creator.subdirs:
+        if any('--' in subdir for subdir in saliency_creator.subdirs):
+            print(f"📁 Detected flat structure with {len(saliency_creator.subdirs)} unique individuals")
+        else:
+            print(f"📁 Detected nested structure with {len(saliency_creator.subdirs)} subdirectories")
+    else:
+        print(f"📁 Detected flat structure with {saliency_creator.num_images} image files")
+    
+    print(f"📊 Found {saliency_creator.num_images} total images")
+    print(f"🎯 Will process {saliency_creator.actual_sample_size} images for saliency maps")
+    
+    # Generate saliency maps
+    start_time = time.time()
+    
+    if method == "standard":
+        print("Generating standard saliency maps...")
+        saliency_creator.compute_saliency_map()
+        print(f"Standard saliency maps generated successfully!")
+        print(f"Output file: {saliency_creator.output_file_path}")
+        output_file = saliency_creator.output_file_path
+    elif method == "mean_saliency":
+        print("Generating mean saliency map across all images...")
+        
+        # Create mean saliency creator
+        mean_creator = MeanSaliencyMapCreator(
+            model=model,
+            input_dir_path=input_dir,
+            output_dir_path=output_dir,
+            nesting=nesting,
+            input_size=final_input_size,
+            integration_steps=integration_steps,
+            smoothing_samples=smoothing_samples,
+            fast_mode=fast_mode,
+        )
+        
+        # Show detected structure information for mean saliency
+        print(f"📊 Found {len(mean_creator.all_images)} total images for mean computation")
+        if max_images:
+            print(f"🎯 Will process up to {max_images} images for mean saliency")
+        
+        print(f"Using {base_method} as base method for mean computation")
+        
+        output_file = mean_creator.compute_mean_saliency_map(
+            method=base_method,
+            max_images=max_images,
+            use_mean_image_background=use_mean_image_background,
+        )
+        print(f"Mean saliency map generated successfully!")
+        print(f"Output file: {output_file}")
+    else:
+        print(f"Generating advanced saliency maps using {method}...")
+        smoothing = not no_smoothing
+        output_file = saliency_creator.compute_advanced_saliency_maps(
+            method=method, smoothing=smoothing
+        )
+        print(f"Advanced saliency maps generated successfully!")
+        print(f"Output file: {output_file}")
+    
+    elapsed_time = time.time() - start_time
+    print(f"⏱️  Total processing time: {elapsed_time:.1f} seconds")
+    
+    return output_file
+
+
 def main():
+    """
+    CLI entry point for run_saliency_maps (kept for backward compatibility).
+    """
     parser = argparse.ArgumentParser(
         description="Generate saliency maps for Siamese network analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,

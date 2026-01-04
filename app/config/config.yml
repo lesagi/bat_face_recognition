@@ -67,13 +67,13 @@ siamese_network:
   # Training configuration
   training:
     # Local
-    # input_dir: "/Users/MAC/Documents/bat_face_rec/data/processed/rous_siamese_input/videos_cropped_picsum_no_augementation"
     # output_dir: "/Users/MAC/Documents/bat_face_rec/models/siamese/rousettus/04-10-25_vid_cropped_no_aug_data_split_refactor"
     # Batwoman
-    input_dir: "/home/sagilevi1/bat_face_rec_project/data/processed/mauritius/random_background"
-    output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/mauritius/14-11-25_video_randomBg_noAugmentation"
+    # Base path where output directories will be created (actual dir name: {date}_{experiment_id}_{run_id})
+    # Training input directory is taken from input_paths.random_bg_input
+    output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/rousettus"
     epochs: 80
-    batch_size: 32
+    batch_size: 16
     learning_rate: 0.00005  # Reduced from 0.0001 to prevent overfitting
     
     # Class balancing configuration
@@ -86,6 +86,8 @@ siamese_network:
       # Required when per_class_balance=true: strategy for computing global class distribution
       global_distribution_strategy: "sampled"  # Options: "file_based" (fast, approximate), "sampled" (balanced), "full_scan" (slow, accurate)
       sampling_percentage: 0.1  # For 'sampled' strategy: fraction of data to sample (0.0-1.0)
+      # Strategy for combining weights of multiple classes in negative pairs
+      negative_pair_combination: "sum"  # Options: "sum" (stable, recommended), "geometric_mean" (balanced), "product" (aggressive)
     optimizer:
       type: "Adam"
       beta_1: 0.9
@@ -96,7 +98,8 @@ siamese_network:
       from_logits: false
     train_val_split: 0.7
     pair_mode: "permutation" # "permutation" or "combination"
-    max_samples_per_class: 10
+    permute_labels: false # Label permutation test mode
+    max_samples_per_class: 25
     early_stopping:
       enabled: true
       patience: 5  # Changed from 10 - detect overfitting faster
@@ -112,14 +115,15 @@ siamese_network:
       interpolation: "bilinear"
       normalize: true
       scale_factor: 255.0
-      face_outer_margin_ratio: 0
-      background:
+      face_outer_margin_ratio: 0.1
+      background_replacement:
+        enabled: false
         type: "picsum"
         # color: [0, 255, 0]  # options: blur, noise, gradient, picsum, solid_color
       
       # Prediction caching settings
       prediction_caching:
-        enabled: false
+        enabled: true
         cache_size: 1000
         max_memory_mb: 512
         cache_ttl_hours: 24
@@ -152,6 +156,29 @@ siamese_network:
       enabled: true
       save_path: "confusion_matrix.png"
   
+  # Input paths for different background types
+  input_paths:
+    original_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/rousettus/video/not_augmented/original_bg"
+    random_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/rousettus/video/not_augmented/random_bg"
+    green_bg_input: #"/home/sagilevi1/bat_face_rec_project/data/processed/mauritius/green_background"
+  
+  # Generate predictions configuration
+  generate_predictions:
+    # model_version is automatically set from best_f1_epoch during training
+    subdirs: null  # Optional list of bat classes to process (e.g., ["W", "H", "rasmi"])
+    verbose: false
+    max_pairs: null  # Optional limit for testing (null = process all)
+  
+  # Saliency maps configuration
+  saliency_maps:
+    method: "integrated_gradients"  # Options: "standard", "integrated_gradients", "guided_gradients", "smoothed_gradients", "comparison", "mean_saliency"
+    sample_size: 25
+    fast_mode: false
+    integration_steps: null  # Optional custom steps (default: 20, or 10 in fast mode)
+    smoothing_samples: null  # Optional custom samples (default: 10, or 5 in fast mode)
+    base_method: "guided_gradients"  # For mean_saliency method
+    use_mean_image_background: false
+  
   # Logging
   logging:
     tensorboard: true
@@ -165,7 +192,7 @@ siamese_network:
   
   # Advanced
   advanced:
-    mixed_precision: false
+    mixed_precision: true
     gradient_clipping:
       enabled: false
       clip_norm: 1.0

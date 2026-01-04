@@ -44,32 +44,55 @@ class SiameseNetworkTrainer:
         bat_type: str,
         augmented_data: bool,
         data_source: str,
-        input_dir: Optional[str] = None,
         optimizer=tf.keras.optimizers.Adam(1e-4),
         loss_function=tf.losses.BinaryCrossentropy(),
+        permute_labels: Optional[bool] = None,
     ):
         cfg = load_config()
         sn_train = cfg.siamese_network.training
+        
+        # Use config value if not explicitly provided
+        if permute_labels is None:
+            permute_labels = sn_train.get("permute_labels", False)
+        
+        # Mixed Precision Setup
+        self.mixed_precision_enabled = cfg.siamese_network.advanced.get("mixed_precision", False)
+        if self.mixed_precision_enabled:
+            print("🚀 Enabling Mixed Precision training...")
+            policy = tf.keras.mixed_precision.Policy('mixed_float16')
+            tf.keras.mixed_precision.set_global_policy(policy)
+            print(f"   - Compute dtype: {policy.compute_dtype}")
+            print(f"   - Variable dtype: {policy.variable_dtype}")
 
-        # Data dirs
-        self.input_dir = input_dir or sn_train.get("input_dir")
+        self.permute_labels = permute_labels
+        input_paths = cfg.siamese_network.input_paths
+
+        # Data dirs - always use random_bg_input from config for training
+        self.input_dir = input_paths.get("random_bg_input")
+        
         if not self.input_dir or not os.path.exists(self.input_dir):
-            raise ValueError(f"Invalid or missing training input_dir: {self.input_dir}")
+            raise ValueError(f"Invalid or missing training input_dir: {self.input_dir}. "
+                           f"Please set input_paths.random_bg_input in config.yml")
 
         # Training hyperparameters
         self.num_epochs = sn_train.get("epochs", 80)
         self.batch_size = sn_train.get("batch_size", 16)
 
-        # Output paths
-        model_output_dir = sn_train.get("output_dir")
-        if not model_output_dir:
+        # Output paths - base directory from config
+        base_output_dir = sn_train.get("output_dir")
+        if not base_output_dir:
             raise ValueError("Missing siamese_network.training.output_dir in config")
-        os.makedirs(model_output_dir, exist_ok=True)
-        self.model_output_dir = model_output_dir
-
-        # Checkpoints path (inside model output root)
-        self.checkpoint_dir = os.path.join(self.model_output_dir, "checkpoints")
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        
+        # Store training parameters for post-training automation
+        self.bat_type = bat_type
+        self.augmented_data = augmented_data
+        self.data_source = data_source
+        
+        # Create output directory with format: {date}_{experiment_id}_{run_id}
+        # We'll create the actual directory name after MLflow run starts (to get run_id)
+        self.base_output_dir = base_output_dir
+        self.model_output_dir = None  # Will be set in _create_output_directory()
+        self.checkpoint_dir = None  # Will be set in _create_output_directory()
 
         # MLflow setup
         self.mlflow_enabled = cfg.mlflow.enabled
@@ -105,6 +128,11 @@ class SiameseNetworkTrainer:
         # Model, optimizer, loss
         self.siamese_model = SiameseNetwork(L1Dist()).model
         self.optimizer = optimizer
+        
+        # Wrap optimizer for mixed precision if enabled
+        if self.mixed_precision_enabled:
+            self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
+            
         # Use reduction='none' to get per-sample loss for weighted loss calculation
         self.loss_function = tf.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
         # Separate loss for testing (unweighted, default reduction)
@@ -122,7 +150,7 @@ class SiameseNetworkTrainer:
         pair_mode = sn_train.get("pair_mode", "permutation")
         
         self.data_splitter = SiameseNetworkTrainingDataSplitter(
-            [self.input_dir], training_portion=training_portion, mode=pair_mode
+            [self.input_dir], training_portion=training_portion, mode=pair_mode, permute_labels=self.permute_labels
         )
         train_data = self.data_splitter.train_data
         test_data = self.data_splitter.test_data
@@ -246,9 +274,41 @@ class SiameseNetworkTrainer:
         experiment_name = f"siamese_{bat_name}_{data_source}_{aug_str}"
         return experiment_name
 
+    def _create_output_directory(self):
+        """
+        Create output directory with format: {date}_{experiment_id}_{run_id}
+        """
+        from datetime import datetime
+        
+        # Get date in YYYYMMDD format
+        date_str = datetime.now().strftime("%Y%m%d")
+        
+        # Get experiment ID from MLflow experiment name
+        experiment_id = self.mlflow_experiment_name if self.mlflow_enabled else "siamese_unknown"
+        
+        # Get run ID from MLflow if enabled, otherwise use timestamp
+        if self.mlflow_enabled and self.parent_run:
+            run_id = self.parent_run.info.run_id[:8]  # Use first 8 chars of run_id
+        else:
+            run_id = datetime.now().strftime("%H%M%S")
+        
+        # Create directory name
+        dir_name = f"{date_str}_{experiment_id}_{run_id}"
+        self.model_output_dir = os.path.join(self.base_output_dir, dir_name)
+        os.makedirs(self.model_output_dir, exist_ok=True)
+        
+        # Create checkpoints directory
+        self.checkpoint_dir = os.path.join(self.model_output_dir, "checkpoints")
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        
+        print(f"📁 Created output directory: {self.model_output_dir}")
+    
     def _start_parent_run(self, bat_type: str, augmented_data: bool, data_source: str):
         if not self.mlflow_enabled:
+            # Create output directory even if MLflow is disabled
+            self._create_output_directory()
             return
+        
         print(f"🔧 Starting MLflow run...")
         print(f"📊 Experiment name: {self.mlflow_experiment_name}")
         print(f"📊 Tracking URI: {self.mlflow_tracking_uri}")
@@ -263,6 +323,10 @@ class SiameseNetworkTrainer:
         
         print(f"📊 Run name: {run_name}")
         self.parent_run = mlflow.start_run(run_name=run_name)
+        
+        # Create output directory now that we have run_id
+        self._create_output_directory()
+        
         self._log_hyperparameters(bat_type, augmented_data, data_source)
         self._log_class_balancing_to_mlflow()
 
@@ -299,6 +363,8 @@ class SiameseNetworkTrainer:
             "per_class_balance": self.weight_calculator.per_class_balance,
             "weighting_scheme": self.weight_calculator.weighting_scheme,
             "ens_beta": self.weight_calculator.ens_beta,
+            "negative_pair_combination": self.weight_calculator.negative_pair_combination,
+            "permute_labels": self.permute_labels,
         }
         mlflow.log_params(params)
         self._log_sample_images()
@@ -567,6 +633,7 @@ class SiameseNetworkTrainer:
         
         return False
     
+    
     def train_step(self, batch):
         """
         Perform a single training step with optional sample weighting.
@@ -575,7 +642,7 @@ class SiameseNetworkTrainer:
             batch: Tuple of (img1, img2, label, class_info)
             
         Returns:
-            Weighted loss value
+            Tuple of (Weighted loss value, predictions)
         """
         if self.siamese_model is None:
             raise ValueError(
@@ -607,16 +674,26 @@ class SiameseNetworkTrainer:
                 )
                 
                 # Apply weights to loss
-                weights_tf = tf.constant(weights, dtype=tf.float32)
+                # Cast weights to match loss dtype (which might be float16 in mixed precision)
+                weights_tf = tf.cast(tf.constant(weights), dtype=per_sample_loss.dtype)
                 weighted_loss = per_sample_loss * weights_tf
                 loss = tf.reduce_mean(weighted_loss)
             else:
                 # No weighting, just reduce mean
                 loss = tf.reduce_mean(per_sample_loss)
 
-        grad = tape.gradient(loss, self.siamese_model.trainable_variables)
+            # Scale loss if using mixed precision
+            if self.mixed_precision_enabled:
+                scaled_loss = self.optimizer.get_scaled_loss(loss)
+
+        if self.mixed_precision_enabled:
+            scaled_grad = tape.gradient(scaled_loss, self.siamese_model.trainable_variables)
+            grad = self.optimizer.get_unscaled_gradients(scaled_grad)
+        else:
+            grad = tape.gradient(loss, self.siamese_model.trainable_variables)
+            
         self.optimizer.apply_gradients(zip(grad, self.siamese_model.trainable_variables))
-        return loss
+        return loss, yhat
 
     def fit(self, bat_type: str, augmented_data: bool, data_source: str):
         self._start_parent_run(bat_type, augmented_data, data_source)
@@ -650,10 +727,10 @@ class SiameseNetworkTrainer:
                     weight_stats_logged = True
                     
                 print(f"  Processing batch {idx + 1}/{len(self.train_batches)}")
-                loss = self.train_step(batch)
-                # Print loss after getting it from train_step
-                print(f"    Loss: {float(loss.numpy()):.6f}")
-                yhat = self.siamese_model.predict(x=batch[:2])
+                loss, yhat = self.train_step(batch)
+                
+                # Print loss
+                print(f"    Loss: {float(loss):.6f}")
                 
                 # Use raw probabilities for metrics (TensorFlow metrics can handle probabilities)
                 r.update_state(batch[2], yhat)
@@ -750,6 +827,12 @@ class SiameseNetworkTrainer:
             mlflow.log_param("final_best_loss_value", round(self.best_loss_value, 6))
             mlflow.log_param("final_best_f1_epoch", self.best_f1_epoch)
             mlflow.log_param("final_best_f1_value", round(self.best_f1_value, 6))
+        
+        # Post-training automation: generate predictions and saliency maps
+        print(f"\n{'='*70}")
+        print(f"🚀 Starting post-training automation...")
+        print(f"{'='*70}\n")
+        self._run_post_training_automation()
 
     def test(self):
         if self.siamese_model is None:
@@ -817,3 +900,131 @@ class SiameseNetworkTrainer:
         if version:
             name = f"{name}_v{version}"
         self.siamese_model.save(os.path.join(save_dir, name), save_format=save_format)
+    
+    def _run_post_training_automation(self):
+        """
+        Run post-training automation: generate predictions and saliency maps.
+        """
+        try:
+            # Import post-training modules
+            import sys
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            app_dir = os.path.dirname(current_dir)
+            sys.path.insert(0, app_dir)
+            
+            from app.generate_predictions import generate_predictions_from_config
+            
+            # Get best model path (best_model_f1)
+            best_model_path = os.path.join(self.model_output_dir, "best_model_f1")
+            if not os.path.exists(best_model_path):
+                print(f"⚠️  Best model not found at {best_model_path}, skipping post-training automation")
+                return
+            
+            print(f"📦 Using best model: {best_model_path}")
+            
+            # Get config for input paths
+            cfg = load_config()
+            input_paths = cfg.siamese_network.input_paths
+            pred_config = cfg.siamese_network.generate_predictions
+            saliency_config = cfg.siamese_network.saliency_maps
+            
+            # 1. Generate predictions
+            print(f"\n📊 Generating predictions...")
+            try:
+                # Use best_f1_epoch as model_version
+                model_version = self.best_f1_epoch
+                print(f"   Using model version (best F1 epoch): {model_version}")
+                
+                result = generate_predictions_from_config(
+                    model_path=best_model_path,
+                    output_dir=self.model_output_dir,
+                    bat_type=self.bat_type,
+                    source=self.data_source,
+                    background="original",  # Always use original background for evaluation
+                    model_version=model_version,
+                    include_subdirs=pred_config.get("subdirs"),
+                    verbose=pred_config.get("verbose", False),
+                    max_pairs=pred_config.get("max_pairs"),
+                )
+                if isinstance(result, tuple):
+                    csv_path, plot_path = result
+                    print(f"✅ Predictions saved to: {csv_path}")
+                    if plot_path:
+                        print(f"✅ Confusion matrix saved to: {plot_path}")
+                else:
+                    print(f"✅ Predictions saved to: {result}")
+            except Exception as e:
+                print(f"❌ Error generating predictions: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # 2. Generate saliency maps
+            print(f"\n🎨 Generating saliency maps...")
+            try:
+                # Create saliency subdirectory
+                saliency_output_dir = os.path.join(self.model_output_dir, "saliency")
+                os.makedirs(saliency_output_dir, exist_ok=True)
+                
+                # Get original background input directory
+                original_bg_input = input_paths.get("original_bg_input")
+                if not original_bg_input or not os.path.exists(original_bg_input):
+                    print(f"⚠️  Original background input directory not found: {original_bg_input}")
+                    print(f"   Skipping saliency map generation")
+                    return
+                
+                # Generate saliency maps using per-bat method
+                from visualization.saliency import SiameseModelSaliencyMapCreator
+                import tensorflow as tf
+                from siamese_core.network import L1Dist
+                
+                # Load model for saliency
+                model = tf.keras.models.load_model(
+                    best_model_path,
+                    custom_objects={
+                        "L1Dist": L1Dist,
+                        "BinaryCrossentropy": tf.losses.BinaryCrossentropy,
+                    },
+                )
+                
+                # Detect input size
+                input_shape = model.input_shape[0]
+                input_size = input_shape[1] if len(input_shape) > 1 else 224
+                
+                # Create saliency creator
+                saliency_creator = SiameseModelSaliencyMapCreator(
+                    model=model,
+                    input_dir_path=original_bg_input,
+                    output_dir_path=saliency_output_dir,
+                    nesting=None,
+                    sample_size=saliency_config.get("sample_size", 25),
+                    fast_mode=saliency_config.get("fast_mode", False),
+                    input_size=input_size,
+                    integration_steps=saliency_config.get("integration_steps"),
+                    smoothing_samples=saliency_config.get("smoothing_samples"),
+                )
+                
+                # Generate per-bat saliency images
+                method = saliency_config.get("method", "integrated_gradients")
+                smoothing = True  # Default to smoothing unless explicitly disabled
+                
+                print(f"   Using method: {method}")
+                output_files = saliency_creator.generate_per_bat_saliency_images(
+                    method=method,
+                    smoothing=smoothing,
+                )
+                
+                print(f"✅ Generated {len(output_files)} saliency images in: {saliency_output_dir}")
+                
+            except Exception as e:
+                print(f"❌ Error generating saliency maps: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            print(f"\n{'='*70}")
+            print(f"✅ Post-training automation completed!")
+            print(f"{'='*70}\n")
+            
+        except Exception as e:
+            print(f"❌ Error in post-training automation: {e}")
+            import traceback
+            traceback.print_exc()

@@ -92,7 +92,7 @@ class TestStrategySelection(unittest.TestCase):
     def _create_mock_dataset(self, class_data):
         """Helper to create a mock TensorFlow dataset."""
         if not class_data:
-            class_data = [('A', 'A', 1.0, 'classA')]
+            class_data = [('A', 'A', 1.0, 'classA:1.0')]
         
         def generator():
             for item in class_data:
@@ -189,7 +189,9 @@ class TestSampledStrategy(unittest.TestCase):
         data = []
         for class_name, count in class_counts.items():
             for i in range(count):
-                data.append((f'img1_{i}', f'img2_{i}', 1.0, class_name))
+                # Use PairClassInfo serialized format: "class_name:1.0"
+                class_info_str = f'{class_name}:1.0'
+                data.append((f'img1_{i}', f'img2_{i}', 1.0, class_info_str))
         
         def generator():
             for item in data:
@@ -282,7 +284,9 @@ class TestFullScanStrategy(unittest.TestCase):
         data = []
         for class_name, count in class_counts.items():
             for i in range(count):
-                data.append((f'img1_{i}', f'img2_{i}', 1.0, class_name))
+                # Use PairClassInfo serialized format: "class_name:1.0"
+                class_info_str = f'{class_name}:1.0'
+                data.append((f'img1_{i}', f'img2_{i}', 1.0, class_info_str))
         
         def generator():
             for item in data:
@@ -393,7 +397,9 @@ class TestIntegration(unittest.TestCase):
         data = []
         for class_name, count in class_counts.items():
             for i in range(count):
-                data.append((f'img1_{class_name}_{i}', f'img2_{class_name}_{i}', 1.0, class_name))
+                # Use PairClassInfo serialized format: "class_name:1.0"
+                class_info_str = f'{class_name}:1.0'
+                data.append((f'img1_{class_name}_{i}', f'img2_{class_name}_{i}', 1.0, class_info_str))
         
         def generator():
             for item in data:

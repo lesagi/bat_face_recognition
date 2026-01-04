@@ -34,7 +34,7 @@ class SiameseNetwork:
             embedding_model(input_img), embedding_model(validation_img)
         )
 
-        classifier = Dense(1, activation="sigmoid")(distances)
+        classifier = Dense(1, activation="sigmoid", dtype='float32')(distances)
 
         return Model(
             inputs=[input_img, validation_img],

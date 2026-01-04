@@ -49,13 +49,27 @@ def test_trainer_initialization():
         data_path = create_tiny_test_dataset(td)
         
         try:
-            # Create trainer (this will test data loading and weight calculation)
-            trainer = SiameseNetworkTrainer(
-                bat_type='r',
-                augmented_data=False,
-                data_source='video',
-                input_dir=data_path
-            )
+            # Mock the config to use our test data path
+            import unittest.mock
+            from unittest.mock import MagicMock
+            
+            # Create a mock config that returns our test data path
+            mock_config = load_config()
+            # Override the input_paths to use test data
+            mock_config.siamese_network.input_paths = {
+                'random_bg_input': data_path,
+                'original_bg_input': data_path,
+                'green_bg_input': data_path
+            }
+            
+            # Patch load_config to return our mock (patch where it's used in the trainer module)
+            with unittest.mock.patch('siamese_training.trainer.load_config', return_value=mock_config):
+                # Create trainer (this will test data loading and weight calculation)
+                trainer = SiameseNetworkTrainer(
+                    bat_type='r',
+                    augmented_data=False,
+                    data_source='video'
+                )
             
             print("✅ Trainer initialized successfully")
             

@@ -298,6 +298,7 @@ def create_siamese_confusion_matrix_plot(
 def generate_predictions(
     model,
     input_dir,
+    output_dir,
     model_version,
     bat_type,
     source,
@@ -335,11 +336,6 @@ def generate_predictions(
     model_input_size = input_shape[1]  # Assuming square images (height = width)
     print(f"📏 Model expects input size: {model_input_size}×{model_input_size}")
     
-    # Set fixed output directory relative to project root
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)  # Go up one level from app/
-    output_dir = os.path.join(project_root, "evaluations")
-
     # Validate input directory
     if not os.path.exists(input_dir):
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
@@ -634,7 +630,83 @@ def generate_predictions(
         return csv_path, None
 
 
+def generate_predictions_from_config(
+    model_path,
+    output_dir,
+    bat_type,
+    source,
+    background,
+    model_version,
+    include_subdirs=None,
+    verbose=None,
+    max_pairs=None,
+):
+    """
+    Generate predictions using configuration from config.yml.
+    
+    Args:
+        model_path (str): Path to trained Siamese model directory
+        output_dir (str): Output directory for predictions
+        bat_type (str): Bat type ('r' for Rousettus or 'm' for Mauritius)
+        source (str): Image source type ('video' or 'still')
+        background (str): Background type ('green', 'random', or 'original')
+        model_version (int): Model version number (typically the best F1 epoch from training)
+        include_subdirs (list, optional): Specific bat classes to process. If None, reads from config.
+        verbose (bool, optional): Enable verbose output. If None, reads from config.
+        max_pairs (int, optional): Maximum number of pairs to process. If None, reads from config.
+    
+    Returns:
+        tuple: (csv_path, plot_path) or (csv_path, None)
+    """
+    # Import config loader
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    app_dir = os.path.dirname(current_dir)
+    sys.path.insert(0, app_dir)
+    from app.config.loader import load_config
+    
+    cfg = load_config()
+    pred_config = cfg.siamese_network.generate_predictions
+    input_paths = cfg.siamese_network.input_paths
+    
+    # Get input directory based on background type
+    input_dir = input_paths.get("original_bg_input")
+    
+    if not input_dir or not os.path.exists(input_dir):
+        raise ValueError(f"Input directory not found for background '{background}': {input_dir}")
+    
+    # Get config values with fallback to function parameters
+    # model_version is required and should be passed from training (best_f1_epoch)
+    if model_version is None:
+        raise ValueError("model_version is required and should be the best_f1_epoch from training")
+    
+    include_subdirs = include_subdirs if include_subdirs is not None else pred_config.get("subdirs")
+    verbose = verbose if verbose is not None else pred_config.get("verbose", False)
+    max_pairs = max_pairs if max_pairs is not None else pred_config.get("max_pairs")
+    
+    # Load the model
+    model = load_siamese_model(model_path)
+    
+    # Generate predictions
+    result = generate_predictions(
+        model=model,
+        input_dir=input_dir,
+        output_dir=output_dir,
+        model_version=model_version,
+        bat_type=bat_type,
+        source=source,
+        background=background,
+        include_subdirs=include_subdirs,
+        verbose=verbose,
+        max_pairs=max_pairs,
+    )
+    
+    return result
+
+
 def main():
+    """
+    CLI entry point for generate_predictions (kept for backward compatibility).
+    """
     parser = argparse.ArgumentParser(
         description="Generate prediction results for Siamese network evaluation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -674,7 +746,7 @@ Note: All outputs are saved to the 'evaluations/' directory in the project root.
         "--model-version",
         type=int,
         required=True,
-        help="Model version number (e.g., 1, 2, 3)",
+        help="Model version number (typically the epoch number, e.g., best F1 epoch)",
     )
 
     parser.add_argument(
@@ -714,6 +786,12 @@ Note: All outputs are saved to the 'evaluations/' directory in the project root.
         help="Maximum number of pairs to process (for testing/faster execution)",
     )
 
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="Output directory for predictions (default: evaluations/ in project root)",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -724,6 +802,7 @@ Note: All outputs are saved to the 'evaluations/' directory in the project root.
         result = generate_predictions(
             model=model,
             input_dir=args.input,
+            output_dir=args.output,
             model_version=args.model_version,
             bat_type=args.bat_type,
             source=args.source,
