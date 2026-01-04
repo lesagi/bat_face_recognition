@@ -9,6 +9,7 @@ from itertools import combinations, permutations, product
 
 from config.loader import load_config
 from utils.filename_parser import group_files_by_class
+from siamese_data.pair_class_info import PairClassInfo
 
 
 def get_files_from_dir(directory):
@@ -81,8 +82,9 @@ class SiameseNetworkTrainingDataSplitter:
     """
 
     def __init__(
-        self, images_dirs_paths_list, training_portion=0.7, mode="combination", skip_preprocessing=False, preprocess_fn=preprocess_twin_input_function
+        self, images_dirs_paths_list, training_portion=0.7, mode="combination", skip_preprocessing=False, preprocess_fn=preprocess_twin_input_function, permute_labels=False
     ):
+        self.permute_labels = permute_labels
         self.images_directories_collection = images_dirs_paths_list
         self.training_portion = training_portion
         self.mode = mode
@@ -152,109 +154,187 @@ class SiameseNetworkTrainingDataSplitter:
         # Shuffle the final datasets
         self.__shuffle_final_datasets()
 
+    def __create_dataset_from_pairs(self, pairs_left, pairs_right, labels_list, class_info_strings):
+        """
+        Helper method to create TensorFlow dataset from pair components.
+        
+        Args:
+            pairs_left: List of left images in pairs
+            pairs_right: List of right images in pairs
+            labels_list: List of labels (1.0 or 0.0)
+            class_info_strings: List of serialized PairClassInfo strings
+            
+        Returns:
+            TensorFlow Dataset with structure (img1, img2, label, class_info)
+        """
+        if len(pairs_left) == 0:
+            # Return empty dataset with correct structure
+            return tf.data.Dataset.from_tensor_slices((
+                tf.constant([], dtype=tf.string),
+                tf.constant([], dtype=tf.string),
+                tf.constant([], dtype=tf.float32),
+                tf.constant([], dtype=tf.string),
+            ))
+        
+        pairs_lefties = tf.data.Dataset.from_tensor_slices(pairs_left)
+        pairs_righties = tf.data.Dataset.from_tensor_slices(pairs_right)
+        
+        # If permute_labels is True, randomize the labels
+        if self.permute_labels and len(labels_list) > 0:
+            labels_list = [float(random.choice([0.0, 1.0])) for _ in labels_list]
+            
+        labels = tf.data.Dataset.from_tensor_slices(labels_list)
+        class_info = tf.data.Dataset.from_tensor_slices(class_info_strings)
+        
+        return tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels, class_info))
+
     def __create_anchor_pairs(self, anchor_images_list, class_name):
+        """
+        Create positive (anchor) pairs from same class.
+        
+        Args:
+            anchor_images_list: List of image paths from same class
+            class_name: Name of the class
+            
+        Returns:
+            TensorFlow Dataset of positive pairs with single-class PairClassInfo
+        """
         anchor_class_size = len(anchor_images_list)
         if anchor_class_size < 2:
-            # Return empty dataset with correct structure (path, path, label, class_info)
-            empty = tf.data.Dataset.from_tensor_slices(
-                (
-                    tf.constant([], dtype=tf.string),
-                    tf.constant([], dtype=tf.string),
-                    tf.constant([], dtype=tf.float32),
-                    tf.constant([], dtype=tf.string),
-                )
-            )
+            # Return empty dataset
+            empty = self.__create_dataset_from_pairs([], [], [], [])
             print(f"{class_name:<10}| {'Anchor size: ':<10}{anchor_class_size:<5}| {'Final count: ':<10}{0:<10}")
             return empty
-        # Local config for size limit
+        
+        # Get config for size limit
         cfg = load_config()
         max_limit = cfg.siamese_network.training.get("max_samples_per_class")
-
+        
         min_samples_count = min(anchor_class_size, max_limit) if max_limit is not None else anchor_class_size
         data = tf.data.Dataset.from_tensor_slices(anchor_images_list)
-        # Use a concrete buffer size to avoid UNKNOWN_CARDINALITY issues
         buffer_size = max(1, anchor_class_size)
         data = data.shuffle(buffer_size, seed=random.randint(20, 80)).take(min_samples_count)
         
+        # Create pairs using combinations or permutations
         pairs = (
             list(combinations(list(data), 2))
             if self.mode == "combination"
             else list(permutations(list(data), 2))
         )
-    
-        # combinations([1, 3, 4, 5], 2) -> [(1, 3), (1, 4), (1, 5), (3, 4), (3, 5), (4, 5)]
-        pairs_lefties = tf.data.Dataset.from_tensor_slices([a for a, b in pairs]) # [1, 1, 1, 3, 3, 4]
-        pairs_righties = tf.data.Dataset.from_tensor_slices([b for a, b in pairs]) # [3, 4, 5, 4, 5, 5]
-        labels = tf.data.Dataset.from_tensor_slices(tf.ones(len(pairs))) # [1, 1, 1, 1, 1, 1]
-        # Add class information for each pair
-        class_info = tf.data.Dataset.from_tensor_slices([class_name] * len(pairs))
-        dataset = tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels, class_info)) # [(1, 3, 1, 'A'), ...]
         
-        print(f"{class_name:<10}| {'Anchor size: ':<10}{anchor_class_size:<5}| {'Final count: ':<10}{dataset.cardinality().numpy():<10}")
+        # Extract pair components
+        pairs_left = [a for a, b in pairs]
+        pairs_right = [b for a, b in pairs]
+        labels_list = [1.0] * len(pairs)  # All positive pairs
+        
+        # Create single-class PairClassInfo for each pair
+        # Note: We need one string per pair, even though they're all identical
+        class_info_strings = [
+            PairClassInfo.create_single_class(class_name).to_string() 
+            for _ in range(len(pairs))
+        ]
+        
+        dataset = self.__create_dataset_from_pairs(pairs_left, pairs_right, labels_list, class_info_strings)
+        
+        print(f"{class_name:<10}| {'Anchor size: ':<10}{anchor_class_size:<5}| {'Final count: ':<10}{len(pairs):<10}")
         return dataset
 
+    def __create_negative_pair_dataset(self, list_a, list_b, class_a, class_b):
+        """
+        Create negative pair dataset from two different classes.
+        
+        Args:
+            list_a: List of images from first class
+            list_b: List of images from second class
+            class_a: Name of first class
+            class_b: Name of second class
+            
+        Returns:
+            TensorFlow Dataset of negative pairs with dual-class PairClassInfo
+        """
+        lists_product = list(product(list_a, list_b))
+        
+        if len(lists_product) == 0:
+            return self.__create_dataset_from_pairs([], [], [], [])
+        
+        # Extract pair components
+        pairs_left = [a for a, b in lists_product]
+        pairs_right = [b for a, b in lists_product]
+        labels_list = [0.0] * len(lists_product)  # All negative pairs
+        
+        # Create dual-class PairClassInfo for each pair
+        # Note: We need one string per pair with BOTH class names
+        class_info_strings = [
+            PairClassInfo.create_dual_class(class_a, class_b).to_string() 
+            for _ in range(len(lists_product))
+        ]
+        
+        return self.__create_dataset_from_pairs(pairs_left, pairs_right, labels_list, class_info_strings)
+
     def __create_negative_pairs(self, list_a, list_b, class_a, class_b, should_shuffle=True):
+        """
+        Create negative pairs from two different classes.
+        
+        Args:
+            list_a: List of images from first class
+            list_b: List of images from second class
+            class_a: Name of first class
+            class_b: Name of second class
+            should_shuffle: Whether to shuffle the lists
+            
+        Returns:
+            TensorFlow Dataset of negative pairs
+        """
         list_a_size = len(list_a)
         data_set_a = tf.data.Dataset.from_tensor_slices(list_a)
-
+        
         list_b_size = len(list_b)
         data_set_b = tf.data.Dataset.from_tensor_slices(list_b)
-
+        
         min_size_class = min(list_a_size, list_b_size)
         min_samples_per_class = min_size_class
-
-        # Local config for size limit
+        
+        # Get config for size limit
         cfg = load_config()
         max_samples_per_class = cfg.siamese_network.training.get("max_samples_per_class")
         if max_samples_per_class is not None:
             min_samples_per_class = min(min_size_class, max_samples_per_class)
-
-        shuffle_seed = random.randint(20, 80) if should_shuffle else None
-
-        # If no samples are available, return an empty dataset with correct structure
+        
+        # If no samples, return empty dataset
         if min_samples_per_class == 0:
-            empty = tf.data.Dataset.from_tensor_slices(
-                (
-                    tf.constant([], dtype=tf.string),
-                    tf.constant([], dtype=tf.string),
-                    tf.constant([], dtype=tf.float32),
-                    tf.constant([], dtype=tf.string),
-                )
-            )
+            empty = self.__create_dataset_from_pairs([], [], [], [])
             print(f"('{class_a}', '{class_b}'): 0 negative pairs count. Samples per class: 0")
             return empty
-      
-        # Use concrete buffer sizes based on list lengths to avoid UNKNOWN_CARDINALITY
+        
+        # Shuffle and take samples
+        shuffle_seed = random.randint(20, 80) if should_shuffle else None
         buffer_a = max(1, list_a_size)
         buffer_b = max(1, list_b_size)
         data_set_a = data_set_a.shuffle(buffer_a, seed=shuffle_seed).take(min_samples_per_class)
         data_set_b = data_set_b.shuffle(buffer_b, seed=shuffle_seed).take(min_samples_per_class)
-        dataset = self.__create_product_dataset(data_set_a, data_set_b, class_a)
         
+        # Create negative pair dataset with BOTH class names
+        dataset = self.__create_negative_pair_dataset(
+            list(data_set_a), 
+            list(data_set_b), 
+            class_a, 
+            class_b
+        )
+        
+        # For permutation mode, add reverse pairs
         if self.mode == "permutation":
-            dataset = dataset.concatenate(self.__create_product_dataset(data_set_b, data_set_a, class_b))
-
+            dataset = dataset.concatenate(
+                self.__create_negative_pair_dataset(
+                    list(data_set_b),
+                    list(data_set_a),
+                    class_b,
+                    class_a
+                )
+            )
+        
         final_data_set_size = dataset.cardinality().numpy()
         print(f"('{class_a}', '{class_b}'): {final_data_set_size} negative pairs count. Samples per class: {min_samples_per_class}")
         return dataset
-
-    def __create_product_dataset(self, tensor1, tensor2, class_name):
-        list1 = list(tensor1)
-        list2 = list(tensor2)
-        lists_product = list(product(list1, list2))
-        if len(lists_product) == 0:
-            pairs_lefties = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.string))
-            pairs_righties = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.string))
-            labels = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.float32))
-            class_info = tf.data.Dataset.from_tensor_slices(tf.constant([], dtype=tf.string))
-        else:
-            pairs_lefties = tf.data.Dataset.from_tensor_slices([a for a, b in lists_product]) 
-            pairs_righties = tf.data.Dataset.from_tensor_slices([b for a, b in lists_product])
-            labels = tf.data.Dataset.from_tensor_slices(tf.zeros(len(list(lists_product)), dtype=tf.float32))
-            # Add class information for negative pairs (use one of the classes)
-            class_info = tf.data.Dataset.from_tensor_slices([class_name] * len(lists_product))
-        return tf.data.Dataset.zip((pairs_lefties, pairs_righties, labels, class_info))
-
 
     def __split_individual_images(self):
         """Split individual images into train/test sets per class to prevent data leakage.

@@ -14,6 +14,8 @@ from typing import Dict, Optional
 from collections import Counter
 import tensorflow as tf
 
+from siamese_data.pair_class_info import PairClassInfo
+
 
 class GlobalDistributionStrategy(str, Enum):
     """Strategies for computing global class distribution."""
@@ -169,10 +171,15 @@ def _compute_from_sampling(
         
         for idx, (_, _, _, class_info) in enumerate(dataset):
             if idx % skip_rate == 0:
-                class_name = class_info.numpy()
-                if isinstance(class_name, bytes):
-                    class_name = class_name.decode('utf-8')
-                class_counter[class_name] += 1
+                class_info_str = class_info.numpy()
+                if isinstance(class_info_str, bytes):
+                    class_info_str = class_info_str.decode('utf-8')
+                
+                # Parse PairClassInfo to get individual classes
+                pair_info = PairClassInfo.from_string(class_info_str)
+                for cls in pair_info.classes:
+                    class_counter[cls.name] += 1
+                
                 samples_processed += 1
                 
                 # Safety limit: stop after 10000 samples
@@ -183,10 +190,15 @@ def _compute_from_sampling(
         num_samples = max(1, int(cardinality * sampling_percentage))
         
         for _, _, _, class_info in dataset.take(num_samples):
-            class_name = class_info.numpy()
-            if isinstance(class_name, bytes):
-                class_name = class_name.decode('utf-8')
-            class_counter[class_name] += 1
+            class_info_str = class_info.numpy()
+            if isinstance(class_info_str, bytes):
+                class_info_str = class_info_str.decode('utf-8')
+            
+            # Parse PairClassInfo to get individual classes
+            pair_info = PairClassInfo.from_string(class_info_str)
+            for cls in pair_info.classes:
+                class_counter[cls.name] += 1
+            
             samples_processed += 1
     
     if not class_counter:
@@ -226,10 +238,15 @@ def _compute_from_full_scan(dataset: tf.data.Dataset) -> Dict[str, int]:
     
     # Iterate through entire dataset
     for _, _, _, class_info in dataset:
-        class_name = class_info.numpy()
-        if isinstance(class_name, bytes):
-            class_name = class_name.decode('utf-8')
-        class_counter[class_name] += 1
+        class_info_str = class_info.numpy()
+        if isinstance(class_info_str, bytes):
+            class_info_str = class_info_str.decode('utf-8')
+        
+        # Parse PairClassInfo to get individual classes
+        pair_info = PairClassInfo.from_string(class_info_str)
+        for cls in pair_info.classes:
+            class_counter[cls.name] += 1
+        
         samples_processed += 1
     
     if not class_counter:

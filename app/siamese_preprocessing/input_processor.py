@@ -69,15 +69,15 @@ except ImportError:
 # Import prediction structures and caching
 try:
     print("🔍 Attempting to import prediction modules...")
-    from .prediction_structures import (
+    from app.siamese_preprocessing.prediction_structures import (
         SegmentationPrediction, 
         PosePrediction, 
         PredictionBundle
     )
     print("✅ Successfully imported prediction_structures")
-    from .prediction_cache import CacheManager, CacheConfig
+    from app.siamese_preprocessing.prediction_cache import CacheManager, CacheConfig
     print("✅ Successfully imported prediction_cache")
-    from .prediction_transforms import PredictionTransformer, CoordinateMapper
+    from app.siamese_preprocessing.prediction_transforms import PredictionTransformer, CoordinateMapper
     print("✅ Successfully imported prediction_transforms")
     PREDICTION_IMPORTS_AVAILABLE = True
     print("✅ All prediction imports successful")
@@ -119,8 +119,12 @@ class SiamesePreprocessingPipeline:
             "picsum": BackgroundGenerator.picsum,
             "solid_color": BackgroundGenerator.solid_color,
         }
-        bg_type = siamese_dp.get('background', {}).get('type', 'blur')
-        self.background_generator = background_generators.get(bg_type, BackgroundGenerator.blur)
+        bg_config = siamese_dp.get('background_replacement', {})
+        
+        self.background_enabled = bg_config.get('enabled', False)  # Default to False
+        self.background_generator = None
+        if self.background_enabled:
+            self.background_generator = background_generators.get(bg_config.get('type', 'blur'), BackgroundGenerator.blur)
 
         self.face_outer_margin_ratio = face_outer_margin_ratio
         self.target_size = siamese_dp.get('target_size', 224)
@@ -546,7 +550,7 @@ class SiamesePreprocessingPipeline:
             if debug:
                 print("🔍 Step 5: Replacing background...")
             
-            if cropped_mask is not None:
+            if self.background_enabled and cropped_mask is not None:
                 if debug:
                     print(f"🔍 About to call apply_background_replacement with:")
                     print(f"   - current_image shape: {current_image.shape}")
@@ -577,6 +581,9 @@ class SiamesePreprocessingPipeline:
                         print(f"🔍 Saved debug background replaced image: {debug_path}")
                 else:
                     print("⚠️ Background replacement failed, continuing without...")
+            elif not self.background_enabled:
+                if debug:
+                    print("🔍 Background replacement disabled, skipping...")
             else:
                 print("⚠️ No mask available, skipping background replacement...")
 
@@ -679,8 +686,9 @@ class SiamesePreprocessingPipeline:
             print(f"⚠️  No image files found in {input_dir}")
             return []
 
+        bg_info = f"using {self.background_generator.__name__} backgrounds" if self.background_enabled else "with original backgrounds"
         print(
-            f"🔄 Processing {total_files} images with advanced pipeline using {self.background_generator.__name__} backgrounds..."
+            f"🔄 Processing {total_files} images with advanced pipeline {bg_info}..."
         )
         print(f"🔧 Config: margin_ratio={self.face_outer_margin_ratio}, target_size={self.target_size}, normalize_scale={self.normalize_scale}")
 

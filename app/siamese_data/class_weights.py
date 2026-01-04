@@ -14,12 +14,88 @@ References:
 import numpy as np
 from typing import Dict, Tuple, List, Union, Optional
 from collections import Counter
+from enum import Enum
 
 # Import anchor/negative weight calculation from dedicated module
 from siamese_data.anchor_negative_weights import (
     calculate_anchor_negative_weights,
     compute_batch_anchor_negative_weights
 )
+
+# Import PairClassInfo for multi-class pair support
+from siamese_data.pair_class_info import PairClassInfo
+
+
+class NegativePairCombination(str, Enum):
+    """
+    Strategies for combining weights of multiple classes in negative pairs.
+    
+    - SUM: Most stable, recommended for general use
+    - GEOMETRIC_MEAN: Balanced approach between sum and product
+    - PRODUCT: Aggressive weighting for extreme imbalance
+    """
+    SUM = "sum"
+    GEOMETRIC_MEAN = "geometric_mean"
+    PRODUCT = "product"
+
+
+def combine_class_weights(
+    weights: List[float],
+    combination: str
+) -> float:
+    """
+    Combine multiple class weights into single pair weight.
+    
+    This function is used for negative pairs that involve multiple classes.
+    Different combination strategies provide different sensitivity to class imbalance.
+    
+    Args:
+        weights: List of individual class weights (from global distribution)
+        combination: Combination strategy ('sum', 'geometric_mean', 'product')
+        
+    Returns:
+        Combined weight value
+        
+    Raises:
+        ValueError: If combination strategy is invalid or weights list is empty
+        
+    Example:
+        >>> # Two classes with different frequencies
+        >>> weights = [0.2, 0.5]  # Class A rarer than Class B
+        >>> combine_class_weights(weights, 'sum')
+        2.857...  # 2 / (0.2 + 0.5)
+    """
+    if not weights:
+        raise ValueError("Weights list cannot be empty")
+    
+    # Single weight case - return as-is (positive pairs)
+    if len(weights) == 1:
+        return weights[0]
+    
+    combination = combination.lower()
+    
+    if combination == NegativePairCombination.SUM:
+        # w = N / (w_a + w_b + ...) - normalized to match single class scale
+        # This is the most stable approach, recommended by research
+        return len(weights) / sum(weights)
+    
+    elif combination == NegativePairCombination.GEOMETRIC_MEAN:
+        # w = 1 / (w_a * w_b * ...)^(1/N)
+        # Balanced approach - geometric mean of inverse weights
+        product = np.prod(weights)
+        return 1.0 / (product ** (1.0 / len(weights)))
+    
+    elif combination == NegativePairCombination.PRODUCT:
+        # w = 1 / (w_a * w_b * ...)
+        # Most aggressive - can create very large weights for rare pairs
+        return 1.0 / np.prod(weights)
+    
+    else:
+        valid_strategies = [e.value for e in NegativePairCombination]
+        raise ValueError(
+            f"Invalid combination strategy: '{combination}'. "
+            f"Must be one of: {valid_strategies}"
+        )
 
 
 def calculate_ins_weights(class_counts: Dict[str, int]) -> Dict[str, float]:
@@ -214,17 +290,29 @@ class ClassWeightCalculator:
                 - per_class_balance (bool): Balance across classes
                 - weighting_scheme (str): 'ins', 'isns', or 'ens'
                 - ens_beta (float): Beta parameter for ENS scheme
+                - negative_pair_combination (str): Strategy for combining multi-class weights
+                    ('sum', 'geometric_mean', 'product')
             global_class_distribution: Global class distribution for per-class balancing.
                 Required if per_class_balance is True.
                 
         Raises:
             ValueError: If per_class_balance is True but global_class_distribution is None
+            ValueError: If negative_pair_combination is invalid
         """
         self.enabled = config.get('enabled', False)
         self.anchor_negative_balance = config.get('anchor_negative_balance', True)
         self.per_class_balance = config.get('per_class_balance', True)
         self.weighting_scheme = config.get('weighting_scheme', 'ins')
         self.ens_beta = config.get('ens_beta', 0.9999)
+        self.negative_pair_combination = config.get('negative_pair_combination', 'sum')
+        
+        # Validate combination strategy
+        valid_strategies = [e.value for e in NegativePairCombination]
+        if self.negative_pair_combination not in valid_strategies:
+            raise ValueError(
+                f"Invalid negative_pair_combination: '{self.negative_pair_combination}'. "
+                f"Must be one of: {valid_strategies}"
+            )
         
         # Store global class distribution
         self._global_class_distribution = global_class_distribution
@@ -250,9 +338,14 @@ class ClassWeightCalculator:
         """
         Compute per-sample weights for a batch of training samples.
         
+        Now supports multi-class pairs (e.g., negative pairs with two classes).
+        The class_info parameter contains serialized PairClassInfo strings.
+        
         Args:
             labels: Array of labels (1.0 for anchors/positives, 0.0 for negatives)
-            class_info: List of class identifiers for each sample
+            class_info: List of serialized PairClassInfo strings
+                - Positive pairs: "class_a:1.0"
+                - Negative pairs: "class_a:1.0|class_b:1.0"
             
         Returns:
             Array of weights (same length as labels)
@@ -272,7 +365,7 @@ class ClassWeightCalculator:
         # Initialize weights to 1
         weights = np.ones(len(labels), dtype=np.float32)
         
-        # Apply anchor/negative balancing
+        # Apply anchor/negative balancing (pair-level balance)
         if self.anchor_negative_balance:
             anchor_weight, negative_weight = self._compute_anchor_negative_weights(labels)
             
@@ -280,14 +373,32 @@ class ClassWeightCalculator:
             weights[labels == 1.0] *= anchor_weight
             weights[labels == 0.0] *= negative_weight
         
-        # Apply per-class balancing
+        # Apply per-class balancing (class-level balance) with multi-class support
         if self.per_class_balance:
-            class_weights = self._compute_class_weights()
+            global_class_weights = self._compute_class_weights()
             
-            # Apply to each sample based on its class
-            # class_info is used here only for weight APPLICATION, not counting
-            for i, cls in enumerate(class_info):
-                weights[i] *= class_weights[cls]
+            # Process each pair
+            for i, class_info_str in enumerate(class_info):
+                # Parse serialized PairClassInfo
+                pair_info = PairClassInfo.from_string(class_info_str)
+                
+                # Get weights for all classes in this pair
+                pair_class_weights = [
+                    global_class_weights.get(cls.name, 1.0)
+                    for cls in pair_info.classes
+                ]
+                
+                # Apply weight based on number of classes
+                if len(pair_class_weights) == 1:
+                    # Positive pair: single class
+                    weights[i] *= pair_class_weights[0]
+                else:
+                    # Negative pair: combine multiple class weights
+                    combined_weight = combine_class_weights(
+                        pair_class_weights,
+                        self.negative_pair_combination
+                    )
+                    weights[i] *= combined_weight
         
         # Normalize weights to prevent loss scale issues
         # Keep mean at 1.0 so loss magnitude is comparable

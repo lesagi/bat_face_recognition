@@ -19,6 +19,8 @@ from siamese_data.class_weights import (
     calculate_anchor_negative_weights,
     calculate_per_class_weights,
     ClassWeightCalculator,
+    combine_class_weights,
+    NegativePairCombination,
 )
 
 
@@ -231,7 +233,7 @@ class TestClassWeightCalculator(unittest.TestCase):
         
         # Mock data: 3 samples, 2 anchors (label=1), 1 negative (label=0)
         labels = np.array([1.0, 1.0, 0.0])
-        class_info = ['A', 'B', 'A']
+        class_info = ['A:1.0', 'B:1.0', 'A:1.0']
         
         weights = calculator.compute_sample_weights(labels, class_info)
         
@@ -251,7 +253,7 @@ class TestClassWeightCalculator(unittest.TestCase):
         
         # 2 anchors, 8 negatives (1:4 ratio)
         labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        class_info = ['A'] * 10
+        class_info = ['A:1.0'] * 10
         
         weights = calculator.compute_sample_weights(labels, class_info)
         
@@ -277,7 +279,7 @@ class TestClassWeightCalculator(unittest.TestCase):
         
         # Class A: 5 samples, Class B: 1 sample
         labels = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 0.0])
-        class_info = ['A', 'A', 'A', 'A', 'A', 'B']
+        class_info = ['A:1.0', 'A:1.0', 'A:1.0', 'A:1.0', 'A:1.0', 'B:1.0']
         
         weights = calculator.compute_sample_weights(labels, class_info)
         
@@ -300,7 +302,7 @@ class TestClassWeightCalculator(unittest.TestCase):
         
         # Mixed scenario
         labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
-        class_info = ['A', 'A', 'B', 'B', 'C']
+        class_info = ['A:1.0', 'A:1.0', 'B:1.0', 'B:1.0', 'C:1.0']
         
         weights = calculator.compute_sample_weights(labels, class_info)
         
@@ -325,7 +327,7 @@ class TestClassWeightCalculator(unittest.TestCase):
         calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
         
         labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
-        class_info = ['A', 'A', 'B', 'B', 'C']
+        class_info = ['A:1.0', 'A:1.0', 'B:1.0', 'B:1.0', 'C:1.0']
         
         weights = calculator.compute_sample_weights(labels, class_info)
         stats = calculator.compute_weight_statistics(weights, labels)
@@ -395,7 +397,7 @@ class TestEdgeCases(unittest.TestCase):
         calculator = ClassWeightCalculator(config, global_class_distribution=global_dist)
         
         labels = np.array([1.0, 0.0])
-        class_info = ['A', 'B', 'C']  # Wrong length
+        class_info = ['A:1.0', 'B:1.0', 'C:1.0']  # Wrong length
         
         with self.assertRaises(ValueError):
             calculator.compute_sample_weights(labels, class_info)
@@ -427,8 +429,8 @@ class TestIntegrationScenarios(unittest.TestCase):
         ])
         
         class_info = (
-            ['A'] * 10 + ['B'] * 15 + ['C'] * 5 +  # Anchors
-            ['A'] * 10 + ['B'] * 15 + ['C'] * 5   # Negatives
+            ['A:1.0'] * 10 + ['B:1.0'] * 15 + ['C:1.0'] * 5 +  # Anchors
+            ['A:1.0'] * 10 + ['B:1.0'] * 15 + ['C:1.0'] * 5   # Negatives
         )
         
         weights = calculator.compute_sample_weights(labels, class_info)
@@ -438,8 +440,8 @@ class TestIntegrationScenarios(unittest.TestCase):
         self.assertTrue(np.all(weights > 0))
         
         # Minority class C should get higher weights
-        class_c_weights = weights[np.array([i for i, c in enumerate(class_info) if c == 'C'])]
-        class_b_weights = weights[np.array([i for i, c in enumerate(class_info) if c == 'B'])]
+        class_c_weights = weights[np.array([i for i, c in enumerate(class_info) if c == 'C:1.0'])]
+        class_b_weights = weights[np.array([i for i, c in enumerate(class_info) if c == 'B:1.0'])]
         
         self.assertGreater(np.mean(class_c_weights), np.mean(class_b_weights))
 
@@ -460,7 +462,7 @@ class TestIntegrationScenarios(unittest.TestCase):
             np.zeros(100),
         ])
         
-        class_info = ['A'] * 110
+        class_info = ['A:1.0'] * 110
         
         weights = calculator.compute_sample_weights(labels, class_info)
         
@@ -507,7 +509,7 @@ class TestStrictValidation(unittest.TestCase):
         calculator = ClassWeightCalculator(config, global_class_distribution=None)
         
         labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
-        class_info = ['A', 'A', 'B', 'B', 'C']
+        class_info = ['A:1.0', 'A:1.0', 'B:1.0', 'B:1.0', 'C:1.0']
         
         weights = calculator.compute_sample_weights(labels, class_info)
         self.assertEqual(len(weights), 5)
@@ -522,7 +524,7 @@ class TestStrictValidation(unittest.TestCase):
         calculator = ClassWeightCalculator(config, global_class_distribution=None)
         
         labels = np.array([1.0, 0.0])
-        class_info = ['A', 'B']
+        class_info = ['A:1.0', 'B:1.0']
         
         weights = calculator.compute_sample_weights(labels, class_info)
         np.testing.assert_array_equal(weights, np.ones(2))
@@ -562,12 +564,12 @@ class TestGlobalClassWeights(unittest.TestCase):
         
         # Batch 1: Mostly class A
         labels1 = np.array([1.0] * 5)
-        class_info1 = ['A', 'A', 'A', 'A', 'A']
+        class_info1 = ['A:1.0', 'A:1.0', 'A:1.0', 'A:1.0', 'A:1.0']
         weights1 = calculator.compute_sample_weights(labels1, class_info1)
         
         # Batch 2: Mostly class C
         labels2 = np.array([1.0] * 5)
-        class_info2 = ['C', 'C', 'C', 'C', 'C']
+        class_info2 = ['C:1.0', 'C:1.0', 'C:1.0', 'C:1.0', 'C:1.0']
         weights2 = calculator.compute_sample_weights(labels2, class_info2)
         
         # Class A samples should always get higher weight than class C
@@ -589,7 +591,7 @@ class TestGlobalClassWeights(unittest.TestCase):
         
         # Batch with uneven class distribution (different from global)
         labels = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
-        class_info = ['A', 'B', 'B', 'B', 'B']  # 1 A, 4 B in batch
+        class_info = ['A:1.0', 'B:1.0', 'B:1.0', 'B:1.0', 'B:1.0']  # 1 A, 4 B in batch
         
         weights = calculator.compute_sample_weights(labels, class_info)
         
@@ -611,7 +613,7 @@ class TestGlobalClassWeights(unittest.TestCase):
         
         # Batch: 2 anchors from A, 8 negatives from B
         labels = np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        class_info = ['A', 'A', 'B', 'B', 'B', 'B', 'B', 'B', 'B', 'B']
+        class_info = ['A:1.0', 'A:1.0', 'B:1.0', 'B:1.0', 'B:1.0', 'B:1.0', 'B:1.0', 'B:1.0', 'B:1.0', 'B:1.0']
         
         weights = calculator.compute_sample_weights(labels, class_info)
         
@@ -673,12 +675,12 @@ class TestGlobalClassWeights(unittest.TestCase):
         
         # Batch 1: Mostly A (opposite of global)
         labels1 = np.array([1.0] * 4)
-        class_info1 = ['A', 'A', 'A', 'B']
+        class_info1 = ['A:1.0', 'A:1.0', 'A:1.0', 'B:1.0']
         weights1 = calculator.compute_sample_weights(labels1, class_info1)
         
         # Batch 2: Mostly B (matches global)
         labels2 = np.array([1.0] * 4)
-        class_info2 = ['A', 'B', 'B', 'B']
+        class_info2 = ['A:1.0', 'B:1.0', 'B:1.0', 'B:1.0']
         weights2 = calculator.compute_sample_weights(labels2, class_info2)
         
         # A should always get higher weight regardless of batch composition
@@ -697,6 +699,222 @@ class TestGlobalClassWeights(unittest.TestCase):
         
         # Ratios should be similar (stable based on global dist)
         self.assertAlmostEqual(ratio1, ratio2, places=1)
+
+
+class TestWeightCombination(unittest.TestCase):
+    """Test weight combination strategies for multi-class pairs."""
+    
+    def test_sum_combination(self):
+        """SUM strategy should combine weights using inverse sum."""
+        weights = [0.5, 0.3]
+        result = combine_class_weights(weights, "sum")
+        expected = 2.0 / (0.5 + 0.3)  # 2 / 0.8 = 2.5
+        self.assertAlmostEqual(result, expected, places=5)
+    
+    def test_sum_combination_three_weights(self):
+        """SUM strategy should work with three weights."""
+        weights = [0.2, 0.3, 0.5]
+        result = combine_class_weights(weights, "sum")
+        expected = 3.0 / (0.2 + 0.3 + 0.5)  # 3 / 1.0 = 3.0
+        self.assertAlmostEqual(result, expected, places=5)
+    
+    def test_geometric_mean_combination(self):
+        """GEOMETRIC_MEAN strategy should use geometric mean."""
+        weights = [0.4, 0.9]
+        result = combine_class_weights(weights, "geometric_mean")
+        expected = 1.0 / np.sqrt(0.4 * 0.9)
+        self.assertAlmostEqual(result, expected, places=5)
+    
+    def test_geometric_mean_combination_three_weights(self):
+        """GEOMETRIC_MEAN strategy should work with three weights."""
+        weights = [0.2, 0.3, 0.6]
+        result = combine_class_weights(weights, "geometric_mean")
+        product = 0.2 * 0.3 * 0.6
+        expected = 1.0 / (product ** (1.0 / 3.0))
+        self.assertAlmostEqual(result, expected, places=5)
+    
+    def test_product_combination(self):
+        """PRODUCT strategy should multiply weights."""
+        weights = [0.5, 0.2]
+        result = combine_class_weights(weights, "product")
+        expected = 1.0 / (0.5 * 0.2)  # 1 / 0.1 = 10
+        self.assertAlmostEqual(result, expected, places=5)
+    
+    def test_product_combination_three_weights(self):
+        """PRODUCT strategy should work with three weights."""
+        weights = [0.2, 0.5, 0.4]
+        result = combine_class_weights(weights, "product")
+        expected = 1.0 / (0.2 * 0.5 * 0.4)  # 1 / 0.04 = 25
+        self.assertAlmostEqual(result, expected, places=5)
+    
+    def test_single_weight_returns_itself(self):
+        """Single weight should be returned as-is for all strategies."""
+        weights = [0.7]
+        for strategy in ["sum", "geometric_mean", "product"]:
+            result = combine_class_weights(weights, strategy)
+            self.assertAlmostEqual(result, 0.7, places=5)
+    
+    def test_strategy_case_insensitive(self):
+        """Strategy names should be case-insensitive."""
+        weights = [0.5, 0.3]
+        result_lower = combine_class_weights(weights, "sum")
+        result_upper = combine_class_weights(weights, "SUM")
+        result_mixed = combine_class_weights(weights, "Sum")
+        self.assertAlmostEqual(result_lower, result_upper, places=5)
+        self.assertAlmostEqual(result_lower, result_mixed, places=5)
+    
+    def test_invalid_strategy_raises_error(self):
+        """Invalid strategy should raise ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            combine_class_weights([0.5, 0.3], "invalid")
+        self.assertIn("Invalid combination strategy", str(ctx.exception))
+        self.assertIn("invalid", str(ctx.exception))
+    
+    def test_empty_weights_raises_error(self):
+        """Empty weights list should raise ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            combine_class_weights([], "sum")
+        self.assertIn("cannot be empty", str(ctx.exception))
+    
+    def test_different_strategies_yield_different_results(self):
+        """Different strategies should produce different weights."""
+        weights = [0.2, 0.8]
+        
+        sum_result = combine_class_weights(weights, "sum")
+        geom_result = combine_class_weights(weights, "geometric_mean")
+        prod_result = combine_class_weights(weights, "product")
+        
+        # All should be different
+        self.assertNotAlmostEqual(sum_result, geom_result, places=2)
+        self.assertNotAlmostEqual(sum_result, prod_result, places=2)
+        self.assertNotAlmostEqual(geom_result, prod_result, places=2)
+        
+        # Product should be most aggressive (highest weight)
+        self.assertGreater(prod_result, sum_result)
+        # Geometric mean should be in between
+        self.assertGreater(geom_result, sum_result)
+
+
+class TestClassWeightCalculatorWithMultiClass(unittest.TestCase):
+    """Test ClassWeightCalculator with multi-class PairClassInfo strings."""
+    
+    def test_positive_pair_single_class_weight(self):
+        """Positive pairs with single class should get single class weight."""
+        config = {
+            'enabled': True,
+            'per_class_balance': True,
+            'anchor_negative_balance': False,
+            'weighting_scheme': 'ins',
+            'negative_pair_combination': 'sum'
+        }
+        global_dist = {'A': 100, 'B': 50}
+        calculator = ClassWeightCalculator(config, global_dist)
+        
+        labels = np.array([1.0])  # Positive pair
+        class_info = ["A:1.0"]  # Single class
+        
+        weights = calculator.compute_sample_weights(labels, class_info)
+        self.assertEqual(len(weights), 1)
+        self.assertGreater(weights[0], 0)
+        
+        # Class A should get a specific weight based on its frequency
+        # With INS and 100 vs 50 samples, class weights are normalized
+        # A gets 1/100, B gets 1/50, normalized: A=0.333, B=0.667
+        # So A should get lower weight than B
+    
+    def test_negative_pair_dual_class_weight(self):
+        """Negative pairs with two classes should get combined weight."""
+        config = {
+            'enabled': True,
+            'per_class_balance': True,
+            'anchor_negative_balance': False,
+            'weighting_scheme': 'ins',
+            'negative_pair_combination': 'sum'
+        }
+        global_dist = {'A': 100, 'B': 50}
+        calculator = ClassWeightCalculator(config, global_dist)
+        
+        labels = np.array([0.0])  # Negative pair
+        class_info = ["A:1.0|B:1.0"]  # Two classes
+        
+        weights = calculator.compute_sample_weights(labels, class_info)
+        self.assertEqual(len(weights), 1)
+        self.assertGreater(weights[0], 0)
+    
+    def test_different_combinations_yield_different_weights(self):
+        """Different combination strategies should produce different results."""
+        global_dist = {'A': 100, 'B': 50, 'C': 200}
+        # Use multiple samples to see relative differences
+        labels = np.array([0.0, 0.0, 1.0])
+        class_info = ["A:1.0|B:1.0", "B:1.0|C:1.0", "A:1.0"]
+        
+        weights_sum = ClassWeightCalculator(
+            {'enabled': True, 'per_class_balance': True, 'anchor_negative_balance': True,
+             'weighting_scheme': 'ins', 'negative_pair_combination': 'sum'},
+            global_dist
+        ).compute_sample_weights(labels, class_info)
+        
+        weights_product = ClassWeightCalculator(
+            {'enabled': True, 'per_class_balance': True, 'anchor_negative_balance': True,
+             'weighting_scheme': 'ins', 'negative_pair_combination': 'product'},
+            global_dist
+        ).compute_sample_weights(labels, class_info)
+        
+        weights_geom = ClassWeightCalculator(
+            {'enabled': True, 'per_class_balance': True, 'anchor_negative_balance': True,
+             'weighting_scheme': 'ins', 'negative_pair_combination': 'geometric_mean'},
+            global_dist
+        ).compute_sample_weights(labels, class_info)
+        
+        # Check the ratio of first negative pair to second negative pair
+        # (A|B) vs (B|C) should differ by strategy
+        ratio_sum = weights_sum[0] / weights_sum[1]
+        ratio_product = weights_product[0] / weights_product[1]
+        ratio_geom = weights_geom[0] / weights_geom[1]
+        
+        # Different strategies should produce different ratios
+        self.assertNotAlmostEqual(ratio_sum, ratio_product, places=2)
+        self.assertNotAlmostEqual(ratio_sum, ratio_geom, places=2)
+    
+    def test_mixed_positive_negative_pairs(self):
+        """Calculator should handle mix of positive and negative pairs."""
+        config = {
+            'enabled': True,
+            'per_class_balance': True,
+            'anchor_negative_balance': False,
+            'weighting_scheme': 'ins',
+            'negative_pair_combination': 'sum'
+        }
+        global_dist = {'A': 100, 'B': 50, 'C': 200}
+        calculator = ClassWeightCalculator(config, global_dist)
+        
+        labels = np.array([1.0, 0.0, 1.0, 0.0])  # Mix of positive and negative
+        class_info = ["A:1.0", "A:1.0|B:1.0", "B:1.0", "B:1.0|C:1.0"]
+        
+        weights = calculator.compute_sample_weights(labels, class_info)
+        self.assertEqual(len(weights), 4)
+        # All weights should be positive
+        self.assertTrue(np.all(weights > 0))
+    
+    def test_triple_class_negative_pair(self):
+        """Calculator should handle negative pairs with more than 2 classes."""
+        config = {
+            'enabled': True,
+            'per_class_balance': True,
+            'anchor_negative_balance': False,
+            'weighting_scheme': 'ins',
+            'negative_pair_combination': 'sum'
+        }
+        global_dist = {'A': 100, 'B': 50, 'C': 200}
+        calculator = ClassWeightCalculator(config, global_dist)
+        
+        labels = np.array([0.0])
+        # Hypothetical 3-class pair (edge case, but DTO supports it)
+        class_info = ["A:1.0|B:1.0|C:1.0"]
+        
+        weights = calculator.compute_sample_weights(labels, class_info)
+        self.assertEqual(len(weights), 1)
+        self.assertGreater(weights[0], 0)
 
 
 if __name__ == '__main__':
