@@ -55,11 +55,18 @@ def test_trainer_initialization():
             
             # Create a mock config that returns our test data path
             mock_config = load_config()
-            # Override the input_paths to use test data
+            # Override the input_paths to use test data (nested structure for both bat types)
             mock_config.siamese_network.input_paths = {
-                'random_bg_input': data_path,
-                'original_bg_input': data_path,
-                'green_bg_input': data_path
+                'mauritius': {
+                    'random_bg_input': data_path,
+                    'original_bg_input': data_path,
+                    'green_bg_input': data_path
+                },
+                'rousettus': {
+                    'random_bg_input': data_path,
+                    'original_bg_input': data_path,
+                    'green_bg_input': data_path
+                }
             }
             
             # Patch load_config to return our mock (patch where it's used in the trainer module)

@@ -65,14 +65,17 @@ class SiameseNetworkTrainer:
             print(f"   - Variable dtype: {policy.variable_dtype}")
 
         self.permute_labels = permute_labels
-        input_paths = cfg.siamese_network.input_paths
+        
+        # Get bat-type-specific input paths
+        bat_key = 'mauritius' if bat_type == 'm' else 'rousettus'
+        input_paths = cfg.siamese_network.input_paths[bat_key]
 
         # Data dirs - always use random_bg_input from config for training
         self.input_dir = input_paths.get("random_bg_input")
         
         if not self.input_dir or not os.path.exists(self.input_dir):
             raise ValueError(f"Invalid or missing training input_dir: {self.input_dir}. "
-                           f"Please set input_paths.random_bg_input in config.yml")
+                           f"Please set input_paths.{bat_key}.random_bg_input in config.yml")
 
         # Training hyperparameters
         self.num_epochs = sn_train.get("epochs", 80)
@@ -205,10 +208,23 @@ class SiameseNetworkTrainer:
             if self.weight_calculator.weighting_scheme == 'ens':
                 print(f"   - ENS beta: {self.weight_calculator.ens_beta}")
         
+        # Create TensorFlow lookup table for per-class weights (GPU-optimized)
+        if self.weight_calculator.enabled and self.weight_calculator.per_class_balance:
+            self.class_weight_table = self.weight_calculator.create_weight_lookup_table()
+            if self.class_weight_table is not None:
+                print(f"   ✅ Created TensorFlow weight lookup table")
+        else:
+            self.class_weight_table = None
+        
         # Create data batches (after class balancing setup)
+        # Optimized pipeline: use AUTOTUNE for prefetch (no .cache() to avoid RAM bloat on large datasets)
         print(f"🔧 Creating data batches...")
-        self.train_batches = train_data.batch(self.batch_size).prefetch(8)
-        self.test_batches = test_data.batch(self.batch_size).prefetch(8)
+        self.train_batches = (
+            train_data
+            .batch(self.batch_size)
+            .prefetch(tf.data.AUTOTUNE)
+        )
+        self.test_batches = test_data.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         print(f"✅ Data loading completed")
         
         # Print class distribution if class balancing is enabled
@@ -633,10 +649,43 @@ class SiameseNetworkTrainer:
         
         return False
     
+    def _compute_anchor_negative_weights_tf(self, labels: tf.Tensor) -> tf.Tensor:
+        """
+        Compute anchor/negative weights using pure TensorFlow ops.
+        
+        This replicates the logic from anchor_negative_weights.py but runs entirely on GPU.
+        Weights are computed so that anchor and negative samples contribute equally to loss.
+        
+        Args:
+            labels: Tensor of labels (1.0 for anchors/positives, 0.0 for negatives)
+            
+        Returns:
+            Tensor of per-sample weights
+        """
+        num_anchors = tf.reduce_sum(tf.cast(labels == 1.0, tf.float32))
+        num_negatives = tf.reduce_sum(tf.cast(labels == 0.0, tf.float32))
+        total = num_anchors + num_negatives
+        
+        # Compute weights (avoid division by zero)
+        anchor_weight = 0.5 * total / tf.maximum(num_anchors, 1e-6)
+        negative_weight = 0.5 * total / tf.maximum(num_negatives, 1e-6)
+        
+        # Normalize so weights sum to 1
+        total_weight = anchor_weight + negative_weight
+        anchor_weight = anchor_weight / total_weight
+        negative_weight = negative_weight / total_weight
+        
+        # Apply to each sample based on label
+        anchor_mask = tf.cast(labels == 1.0, tf.float32)
+        negative_mask = tf.cast(labels == 0.0, tf.float32)
+        return anchor_mask * anchor_weight + negative_mask * negative_weight
     
+    @tf.function
     def train_step(self, batch):
         """
         Perform a single training step with optional sample weighting.
+        
+        Uses pure TensorFlow operations for weight computation to maximize GPU utilization.
         
         Args:
             batch: Tuple of (img1, img2, label, class_info)
@@ -649,6 +698,7 @@ class SiameseNetworkTrainer:
                 "No siamese model available for training. Initialize trainer with a siamese_model."
             )
 
+        # All computations inside tape using pure TensorFlow ops for GPU efficiency
         with tf.GradientTape() as tape:
             # Extract batch components
             x = [batch[0], batch[1]]
@@ -661,22 +711,26 @@ class SiameseNetworkTrainer:
             # Compute per-sample loss
             per_sample_loss = self.loss_function(y, yhat)
             
-            # Apply sample weights if enabled
+            # Apply sample weights if enabled (all TensorFlow ops)
             if self.weight_calculator.enabled:
-                # Convert class_info tensor to list of strings
-                class_info_list = [c.decode('utf-8') if isinstance(c, bytes) else c.numpy().decode('utf-8') 
-                                   for c in class_info.numpy()]
+                weights = tf.ones_like(per_sample_loss)
                 
-                # Compute sample weights
-                weights = self.weight_calculator.compute_sample_weights(
-                    labels=y.numpy(),
-                    class_info=class_info_list
-                )
+                # Anchor/Negative balance (pure TensorFlow)
+                if self.weight_calculator.anchor_negative_balance:
+                    an_weights = self._compute_anchor_negative_weights_tf(y)
+                    weights = weights * an_weights
                 
-                # Apply weights to loss
-                # Cast weights to match loss dtype (which might be float16 in mixed precision)
-                weights_tf = tf.cast(tf.constant(weights), dtype=per_sample_loss.dtype)
-                weighted_loss = per_sample_loss * weights_tf
+                # Per-class balance (TensorFlow lookup table)
+                if self.class_weight_table is not None:
+                    class_weights = self.class_weight_table.lookup(class_info)
+                    weights = weights * class_weights
+                
+                # Normalize weights to mean=1.0
+                weights = weights / tf.reduce_mean(weights)
+                
+                # Cast weights to match loss dtype and apply
+                weights_casted = tf.cast(weights, dtype=per_sample_loss.dtype)
+                weighted_loss = per_sample_loss * weights_casted
                 loss = tf.reduce_mean(weighted_loss)
             else:
                 # No weighting, just reduce mean
@@ -725,17 +779,21 @@ class SiameseNetworkTrainer:
                 if idx == 0 and epoch == 1 and self.weight_calculator.enabled and not weight_stats_logged:
                     self._log_weight_statistics(batch)
                     weight_stats_logged = True
-                    
-                print(f"  Processing batch {idx + 1}/{len(self.train_batches)}")
+                
                 loss, yhat = self.train_step(batch)
                 
-                # Print loss
-                print(f"    Loss: {float(loss):.6f}")
+                # Log batch loss to MLflow every 100 batches (reduces GPU sync overhead)
+                if self.mlflow_enabled and (idx + 1) % 100 == 0:
+                    step = (epoch - 1) * len(self.train_batches) + idx
+                    mlflow.log_metric("batch_loss", float(loss), step=step)
                 
                 # Use raw probabilities for metrics (TensorFlow metrics can handle probabilities)
                 r.update_state(batch[2], yhat)
                 p.update_state(batch[2], yhat)
-                progbar.update(idx + 1)
+                
+                # Update progress bar every 100 batches or at the end (reduces output in nohup)
+                if (idx + 1) % 100 == 0 or (idx + 1) == len(self.train_batches):
+                    progbar.update(idx + 1)
             train_loss = self._to_float(loss)
             train_recall = self._to_float(r.result())
             train_precision = self._to_float(p.result())
@@ -924,7 +982,11 @@ class SiameseNetworkTrainer:
             
             # Get config for input paths
             cfg = load_config()
-            input_paths = cfg.siamese_network.input_paths
+            
+            # Get bat-type-specific input paths
+            bat_key = 'mauritius' if self.bat_type == 'm' else 'rousettus'
+            input_paths = cfg.siamese_network.input_paths[bat_key]
+            
             pred_config = cfg.siamese_network.generate_predictions
             saliency_config = cfg.siamese_network.saliency_maps
             

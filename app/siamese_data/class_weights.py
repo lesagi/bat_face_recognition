@@ -479,6 +479,50 @@ class ClassWeightCalculator:
             beta=self.ens_beta
         )
     
+    def create_weight_lookup_table(self):
+        """
+        Create a TensorFlow hash table for O(1) weight lookups.
+        
+        Pre-computes weights for all possible class_info strings (both single-class
+        for positive pairs and dual-class for negative pairs).
+        
+        Returns:
+            tf.lookup.StaticHashTable or None if per_class_balance is disabled
+        """
+        import tensorflow as tf
+        
+        if not self.per_class_balance or self._global_class_distribution is None:
+            return None
+        
+        class_weights = self._compute_class_weights()
+        class_names = list(class_weights.keys())
+        keys, values = [], []
+        
+        # Single-class entries (positive pairs): "class_a:1.0"
+        for cls in class_names:
+            keys.append(f"{cls}:1.0")
+            values.append(class_weights[cls])
+        
+        # Dual-class entries (negative pairs): "class_a:1.0|class_b:1.0"
+        for i, cls_a in enumerate(class_names):
+            for cls_b in class_names[i+1:]:
+                combined = combine_class_weights(
+                    [class_weights[cls_a], class_weights[cls_b]], 
+                    self.negative_pair_combination
+                )
+                # Add both orderings
+                keys.append(f"{cls_a}:1.0|{cls_b}:1.0")
+                values.append(combined)
+                keys.append(f"{cls_b}:1.0|{cls_a}:1.0")
+                values.append(combined)
+        
+        # Create TensorFlow hash table
+        init = tf.lookup.KeyValueTensorInitializer(
+            keys=tf.constant(keys),
+            values=tf.constant(values, dtype=tf.float32)
+        )
+        return tf.lookup.StaticHashTable(init, default_value=1.0)
+    
     def compute_weight_statistics(
         self,
         weights: np.ndarray,

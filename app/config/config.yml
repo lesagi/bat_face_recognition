@@ -73,7 +73,7 @@ siamese_network:
     # Training input directory is taken from input_paths.random_bg_input
     output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/rousettus"
     epochs: 80
-    batch_size: 16
+    batch_size: 32
     learning_rate: 0.00005  # Reduced from 0.0001 to prevent overfitting
     
     # Class balancing configuration
@@ -158,9 +158,14 @@ siamese_network:
   
   # Input paths for different background types
   input_paths:
-    original_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/rousettus/video/not_augmented/original_bg"
-    random_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/rousettus/video/not_augmented/random_bg"
-    green_bg_input: #"/home/sagilevi1/bat_face_rec_project/data/processed/mauritius/green_background"
+    mauritius:
+      original_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/mauritius/video/not_augmented/original_bg"
+      random_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/mauritius/video/not_augmented/random_bg"
+      green_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/mauritius/green_bg"
+    rousettus:
+      original_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/rousettus/video/not_augmented/original_bg"
+      random_bg_input: "/home/sagilevi1/bat_face_rec_project/data/processed/rousettus/video/not_augmented/random_bg"
+      green_bg_input: null
   
   # Generate predictions configuration
   generate_predictions:
