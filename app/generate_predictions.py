@@ -666,7 +666,10 @@ def generate_predictions_from_config(
     
     cfg = load_config()
     pred_config = cfg.siamese_network.generate_predictions
-    input_paths = cfg.siamese_network.input_paths
+    
+    # Get bat-type-specific input paths
+    bat_key = 'mauritius' if bat_type == 'm' else 'rousettus'
+    input_paths = cfg.siamese_network.input_paths[bat_key]
     
     # Get input directory based on background type
     input_dir = input_paths.get("original_bg_input")
