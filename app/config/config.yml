@@ -351,3 +351,51 @@ utils:
     format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     file_logging: true
     console_logging: true
+
+# =============================================================================
+# STATISTICAL TESTS CONFIGURATION
+# =============================================================================
+statistical_tests:
+  # Permutation test for model significance validation
+  permutation_test:
+    # Number of permutation iterations to build null distribution
+    # More iterations = more accurate p-value estimate, but longer runtime
+    # Recommended: 100-1000 for final validation, 50-100 for quick checks
+    n_permutations: 100
+    
+    # Number of training epochs per permutation iteration
+    # Fewer epochs than full training since we only need approximate performance
+    # Recommended: 5-15 epochs (enough to see if model can learn anything)
+    permutation_epochs: 10
+    
+    # Significance level for hypothesis testing (alpha)
+    # P-value below this threshold = statistically significant
+    significance_level: 0.05
+    
+    # Metrics to test for significance
+    # Each metric will have its own p-value calculated
+    metrics_to_test:
+      - "f1"
+      - "accuracy"
+      - "precision"
+      - "recall"
+    
+    # Whether to save the full null distribution for each metric
+    # Useful for visualization, but increases output file size
+    save_null_distribution: true
+    
+    # Output directory for permutation test results
+    # Will be created as: {output_dir}/{timestamp}/
+    output_dir: "evaluations/permutation_tests"
+    
+    # Optimized mode settings for faster iteration
+    # Use --mode optimized to enable these settings
+    optimized_mode:
+      # Reduced number of permutations (still statistically meaningful)
+      n_permutations: 30
+      # Fewer epochs per permutation
+      permutation_epochs: 5
+      # Fraction of data to sample (0.25 = 25% of data)
+      sample_fraction: 0.25
+      # Fraction of shuffle buffer size (smaller = faster startup)
+      shuffle_buffer_fraction: 0.5
