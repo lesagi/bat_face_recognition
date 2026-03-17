@@ -388,14 +388,21 @@ statistical_tests:
     # Will be created as: {output_dir}/{timestamp}/
     output_dir: "evaluations/permutation_tests"
     
-    # Optimized mode settings for faster iteration
+    # Optimized mode settings for faster permutation test runs
     # Use --mode optimized to enable these settings
     optimized_mode:
-      # Reduced number of permutations (still statistically meaningful)
-      n_permutations: 30
-      # Fewer epochs per permutation
-      permutation_epochs: 5
-      # Fraction of data to sample (0.25 = 25% of data)
-      sample_fraction: 0.25
-      # Fraction of shuffle buffer size (smaller = faster startup)
+      # Minimum permutations for p<0.01 capability
+      n_permutations: 100
+      # Epochs per permutation - enough for convergence signal
+      permutation_epochs: 10
+      # Use 50% of data -- null distribution is self-consistent since all permutations
+      # use the same conditions. Main effect is slightly higher variance in null distribution.
+      sample_fraction: 0.5
+      # Smaller shuffle buffer
       shuffle_buffer_fraction: 0.5
+      # Use SGD optimizer instead of Adam (saves ~3GB GPU memory)
+      optimizer: "sgd"
+      # Larger batch size for GPU utilization (default siamese batch_size is too small)
+      batch_size: 128
+      # Only evaluate on the final epoch (skip intermediate evaluations for speed)
+      eval_last_only: true
