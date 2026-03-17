@@ -100,11 +100,14 @@ statistical_tests:
     save_null_distribution: true   # Save full distributions
     
     # Optimized mode settings (use --mode optimized)
+    # Designed for memory-constrained runs while preserving statistical validity
     optimized_mode:
-      n_permutations: 30          # Reduced iterations
-      permutation_epochs: 5        # Fewer epochs
-      sample_fraction: 0.25        # Use 25% of data
+      n_permutations: 100         # Minimum for p<0.01 capability
+      permutation_epochs: 10       # Enough for convergence
+      sample_fraction: 1.0         # Full data (sampling invalidates test)
       shuffle_buffer_fraction: 0.5 # Smaller shuffle buffer
+      optimizer: "sgd"             # SGD uses ~3GB less GPU memory than Adam
+      gradient_accumulation_steps: 4  # Reduces peak memory
 ```
 
 ## How to Use
@@ -178,32 +181,48 @@ python -m app.statistical_tests.run_permutation_test --help
 - `--no-plots`: Skip visualization generation
 - `--verbose`: Enable detailed output
 
-#### Optimized Mode
+#### Optimized Mode (Memory-Efficient)
 
-For faster iteration during development or quick validation, use `--mode optimized`:
+For memory-constrained environments (e.g., GPU OOM issues), use `--mode optimized`:
 
 ```bash
-# Quick test (~2-4 hours instead of 100+ hours)
+# Memory-efficient run with full statistical validity
 python -m app.statistical_tests.run_permutation_test \
   --mlflow-run-id abc123def456 \
   --mode optimized \
   --verbose
 ```
 
-**Optimized mode settings (configurable in `config.yml`):**
-- 30 permutations (vs 100 in normal mode)
-- 5 epochs per permutation (vs 10)
-- 25% of training data (sampled)
-- 50% shuffle buffer size (faster startup)
+**Optimized mode features (configurable in `config.yml`):**
+- SGD optimizer instead of Adam (saves ~3GB GPU memory)
+- Gradient accumulation (4 steps) to reduce peak memory
+- Smaller shuffle buffer (50%)
+- Full data and permutation count preserved for statistical validity
 
-| Mode | Permutations | Epochs | Data | Est. Time |
-|------|-------------|--------|------|-----------|
-| Normal | 100 | 10 | 100% | ~100+ hours |
-| Optimized | 30 | 5 | 25% | ~2-4 hours |
+| Mode | Optimizer | Grad Accum | Memory Savings | Statistical Validity |
+|------|-----------|------------|----------------|---------------------|
+| Normal | Adam | 1 | Baseline | Full |
+| Optimized | SGD | 4 | ~3-5GB GPU | Full |
 
 **When to use each mode:**
-- **Optimized**: Development, debugging, quick sanity checks
-- **Normal**: Final validation, publication-ready results
+- **Normal**: When you have sufficient GPU memory (~24GB+)
+- **Optimized**: When experiencing OOM errors, or on smaller GPUs
+
+### Statistical Validity Requirements
+
+The permutation test p-value resolution depends on the number of permutations:
+
+| Desired p-value | Minimum n_permutations |
+|-----------------|------------------------|
+| p < 0.05        | 20                     |
+| p < 0.01        | 100                    |
+| p < 0.001       | 1000                   |
+
+**Important:** The default `n_permutations=100` allows detecting significance at p < 0.01.
+
+**Warning about data sampling:** If you use `sample_fraction < 1.0`, the observed metrics 
+must also come from the same sampled data subset. Otherwise, you're comparing metrics from 
+different data distributions, which invalidates the statistical test.
 
 ### Method 2: Using Python API
 

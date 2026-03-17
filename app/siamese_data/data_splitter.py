@@ -82,9 +82,10 @@ class SiameseNetworkTrainingDataSplitter:
     """
 
     def __init__(
-        self, images_dirs_paths_list, training_portion=0.7, mode="combination", skip_preprocessing=False, preprocess_fn=preprocess_twin_input_function, permute_labels=False
+        self, images_dirs_paths_list, training_portion=0.7, mode="combination", skip_preprocessing=False, preprocess_fn=preprocess_twin_input_function, permute_labels=False, split_seed=None
     ):
         self.permute_labels = permute_labels
+        self.split_seed = split_seed
         self.images_directories_collection = images_dirs_paths_list
         self.training_portion = training_portion
         self.mode = mode
@@ -130,18 +131,7 @@ class SiameseNetworkTrainingDataSplitter:
         # Create testing pairs (only from testing images)
         test_anchors, test_negatives = self.__create_testing_pairs()
 
-        # Apply preprocessing at constructor if not skipped
-        if not self.skip_preprocessing:
-            if train_anchors is not None:
-                train_anchors = train_anchors.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
-            if train_negatives is not None:
-                train_negatives = train_negatives.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
-            if test_anchors is not None:
-                test_anchors = test_anchors.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
-            if test_negatives is not None:
-                test_negatives = test_negatives.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
-
-        # Add to datasets
+        # Concatenate positive + negative pairs (still raw file-path tuples)
         if train_anchors is not None:
             self.__add_to_training_data(train_anchors)
         if train_negatives is not None:
@@ -150,6 +140,17 @@ class SiameseNetworkTrainingDataSplitter:
             self.__add_to_testing_data(test_anchors)
         if test_negatives is not None:
             self.__add_to_testing_data(test_negatives)
+
+        # Permute labels across the combined positive+negative set.
+        # Must happen BEFORE preprocessing so iteration is cheap (file-path strings).
+        self.__permute_combined_labels()
+
+        # Apply preprocessing
+        if not self.skip_preprocessing:
+            if self.train_data is not None:
+                self.train_data = self.train_data.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
+            if self.test_data is not None:
+                self.test_data = self.test_data.map(self.preprocess_fn, num_parallel_calls=tf.data.AUTOTUNE)
         
         # Shuffle the final datasets
         self.__shuffle_final_datasets()
@@ -179,10 +180,6 @@ class SiameseNetworkTrainingDataSplitter:
         pairs_lefties = tf.data.Dataset.from_tensor_slices(pairs_left)
         pairs_righties = tf.data.Dataset.from_tensor_slices(pairs_right)
         
-        # If permute_labels is True, randomize the labels
-        if self.permute_labels and len(labels_list) > 0:
-            labels_list = [float(random.choice([0.0, 1.0])) for _ in labels_list]
-            
         labels = tf.data.Dataset.from_tensor_slices(labels_list)
         class_info = tf.data.Dataset.from_tensor_slices(class_info_strings)
         
@@ -341,10 +338,12 @@ class SiameseNetworkTrainingDataSplitter:
         We are considering all augemented images of specific image as a single image, not individual images."""
         print("\n🔍 Splitting individual images into train/test sets...")
         
+        rng = random.Random(self.split_seed) if self.split_seed is not None else random
+        
         for class_name, ids in self.class_files.items():
             # Shuffle files for random split
             shuffled_ids = list(ids)
-            random.shuffle(shuffled_ids)
+            rng.shuffle(shuffled_ids)
             
             # Calculate split sizes
             total_samples = len(shuffled_ids)
@@ -442,25 +441,55 @@ class SiameseNetworkTrainingDataSplitter:
         else:
             self.test_data = self.test_data.concatenate(data)
 
+    def __permute_combined_labels(self):
+        if not self.permute_labels:
+            return
+
+        for attr in ('train_data', 'test_data'):
+            dataset = getattr(self, attr)
+            if dataset is None:
+                continue
+
+            size = dataset.cardinality().numpy()
+            if size <= 0:
+                continue
+
+            labels = [float(item[2].numpy()) for item in dataset]
+            pos_count = sum(1 for l in labels if l == 1.0)
+            random.shuffle(labels)
+
+            label_ds = tf.data.Dataset.from_tensor_slices(labels)
+            other_ds = dataset.map(lambda a, b, _l, c: (a, b, c))
+            new_ds = tf.data.Dataset.zip((other_ds, label_ds)).map(
+                lambda data, new_label: (data[0], data[1], new_label, data[2])
+            )
+            setattr(self, attr, new_ds)
+
+            print(f"  Permuted {attr} labels: {size} pairs ({pos_count} positive, {size - pos_count} negative)")
+
     def __shuffle_final_datasets(self):
         """Shuffle the final training and testing datasets."""
         print("\n🔍 Shuffling final datasets...")
         
         if self.train_data is not None:
-            train_size = self.train_data.cardinality().numpy()
-            if train_size > 0:
+            self.train_size = self.train_data.cardinality().numpy()
+            if self.train_size > 0:
                 self.train_data = self.train_data.shuffle(
-                    buffer_size=train_size, seed=random.randint(20, 80)
+                    buffer_size=self.train_size, seed=random.randint(20, 80)
                 )
-            print(f"  Training dataset: {train_size} pairs")
+            print(f"  Training dataset: {self.train_size} pairs")
+        else:
+            self.train_size = 0
         
         if self.test_data is not None:
-            test_size = self.test_data.cardinality().numpy()
-            if test_size > 0:
+            self.test_size = self.test_data.cardinality().numpy()
+            if self.test_size > 0:
                 self.test_data = self.test_data.shuffle(
-                    buffer_size=test_size, seed=random.randint(20, 80)
+                    buffer_size=self.test_size, seed=random.randint(20, 80)
                 )
-            print(f"  Testing dataset: {test_size} pairs")
+            print(f"  Testing dataset: {self.test_size} pairs")
+        else:
+            self.test_size = 0
     
     def get_class_distribution(self, dataset='train'):
         """
