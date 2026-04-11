@@ -33,6 +33,7 @@ requirements*.txt
 *.md
 !README.md
 !*/README.md
+!docs/**/*.md
 models/*
 !app/models/
 predicions*.csv
