@@ -12,12 +12,14 @@ Training prompts for species, data source, augmentation, background, and train/t
 (image_split vs bat_split), then launches train_siamese with matching flags.
 """
 
+import json
 import os
 import subprocess
 import sys
 from datetime import datetime
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "app"))
 
 
 def prompt_choice(prompt, options, default=None):
@@ -229,24 +231,160 @@ def run_saliency():
         sys.exit(subprocess.call(cmd_parts, cwd=PROJECT_ROOT))
 
 
+def _load_config():
+    """Load project config.yml."""
+    from config.loader import load_config
+    return load_config()
+
+
 def run_evaluate():
-    """Interactive model evaluation."""
-    print("\n--- Evaluation Configuration ---\n")
+    """Interactive evaluation of a trained experiment."""
+    print("\n--- Evaluate Trained Experiment ---\n")
 
-    model_path = input("Model path: ").strip()
-    input_dir = input("Input data directory: ").strip()
+    cfg = _load_config()
+    sn_train = cfg.siamese_network.training
 
+    # Step 1: Species
+    species_map = {"m": "mauritius", "r": "rousettus"}
+    bat_type = prompt_choice("Bat species:", [
+        ("Mauritius (m)", "m"),
+        ("Rousettus (r)", "r"),
+    ])
+    species = species_map[bat_type]
+
+    # Step 2: Choose experiment
+    output_dirs = sn_train.get("output_dir")
+    experiments_base = output_dirs[species]
+    if not os.path.isdir(experiments_base):
+        print(f"  No experiments directory found: {experiments_base}")
+        return
+
+    experiment_dirs = sorted(
+        [d for d in os.listdir(experiments_base)
+         if os.path.isdir(os.path.join(experiments_base, d))],
+        reverse=True,
+    )
+    if not experiment_dirs:
+        print(f"  No experiments found in {experiments_base}")
+        return
+
+    experiment_options = [(d, d) for d in experiment_dirs]
+    experiment = prompt_choice("\nChoose experiment:", experiment_options)
+    experiment_path = os.path.join(experiments_base, experiment)
+
+    # Step 3: Choose model (epoch)
+    model_subdirs = sorted([
+        d for d in os.listdir(experiment_path)
+        if d.startswith("best_model_") and os.path.isdir(os.path.join(experiment_path, d))
+    ])
+    if not model_subdirs:
+        print(f"  No best_model_* directories found in {experiment_path}")
+        return
+
+    model_options = [(d, d) for d in model_subdirs]
+    model_options.append(("Enter custom model path", "__custom__"))
+    model_choice = prompt_choice("\nChoose model:", model_options)
+
+    if model_choice == "__custom__":
+        model_path = input("  Full model path: ").strip()
+    else:
+        model_path = os.path.join(experiment_path, model_choice)
+
+    # Read model_version from training_summary.json if available
+    model_version = 0
+    summary_path = os.path.join(experiment_path, "training_summary.json")
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path) as f:
+                summary = json.load(f)
+            if model_choice == "best_model_f1" and "best_f1" in summary:
+                model_version = summary["best_f1"]["epoch"]
+            elif model_choice == "best_model_loss" and "best_loss" in summary:
+                model_version = summary["best_loss"]["epoch"]
+            elif model_choice == "best_model_recall" and "best_recall" in summary:
+                model_version = summary["best_recall"]["epoch"]
+            elif model_choice == "best_model_precision" and "best_precision" in summary:
+                model_version = summary["best_precision"]["epoch"]
+        except Exception:
+            pass
+    if model_version == 0:
+        raw = input("  Model version/epoch number [0]: ").strip()
+        model_version = int(raw) if raw else 0
+
+    # Step 4: Evaluation background
+    bg_type = prompt_choice("\nEvaluation background:", [
+        ("Green", "green"),
+        ("Random", "random"),
+        ("Original", "original"),
+    ])
+
+    # Step 5: Data source
+    data_source = prompt_choice("\nData source:", [
+        ("Video frames", "video"),
+        ("Still images", "still"),
+    ])
+
+    # Step 6: Background execution
+    run_in_bg = prompt_yn("\nRun in background (nohup)?", default=True)
+
+    # Build command
     cmd_parts = [
         sys.executable, "-m", "app.generate_predictions",
         "--model", model_path,
-        "--input", input_dir,
+        "--input", _resolve_input_dir(cfg, species, bg_type),
+        "--model-version", str(model_version),
+        "--bat-type", bat_type,
+        "--source", data_source,
+        "--background", bg_type,
+        "--output", experiment_path,
     ]
 
-    cmd_str = " ".join(cmd_parts)
-    print(f"\n  {cmd_str}")
+    # Summary
+    print(f"\n--- Summary ---")
+    print(f"  Species:      {species}")
+    print(f"  Experiment:   {experiment}")
+    print(f"  Model:        {model_choice}")
+    print(f"  Version:      {model_version}")
+    print(f"  Background:   {bg_type}")
+    print(f"  Data source:  {data_source}")
+    print(f"  Output dir:   {experiment_path}")
+    print(f"  Nohup:        {'Yes' if run_in_bg else 'No'}")
 
-    if prompt_yn("\nProceed?", default=True):
+    if not prompt_yn("\nProceed?", default=True):
+        print("Aborted.")
+        return
+
+    cmd_str = " ".join(cmd_parts)
+
+    if run_in_bg:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_dir = os.path.join(PROJECT_ROOT, "logs", "evaluation")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"{timestamp}.log")
+
+        print(f"\nLaunching evaluation...")
+        print(f"   {cmd_str}")
+        print(f"   Log: {log_file}")
+
+        with open(log_file, "w") as lf:
+            proc = subprocess.Popen(
+                cmd_parts,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+                cwd=PROJECT_ROOT,
+                start_new_session=True,
+            )
+        print(f"   PID: {proc.pid}")
+    else:
+        print(f"\nRunning: {cmd_str}\n")
         sys.exit(subprocess.call(cmd_parts, cwd=PROJECT_ROOT))
+
+
+def _resolve_input_dir(cfg, species, bg_type):
+    """Resolve the input directory for a given species and background type."""
+    input_paths = cfg.siamese_network.input_paths[species]
+    bg_key_map = {"green": "green_bg_input", "random": "random_bg_input", "original": "original_bg_input"}
+    return input_paths.get(bg_key_map[bg_type], "")
 
 
 def run_cleanup():
