@@ -85,7 +85,6 @@ siamese_network:
       type: "BinaryCrossentropy"
       from_logits: false
     train_val_split: 0.7
-    split_mode: "image_split" # "image_split" (per-bat image split) or "bat_split" (disjoint bat classes)
     pair_mode: "permutation" # "permutation" or "combination"
     max_samples_per_class: 35
     early_stopping:

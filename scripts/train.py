@@ -3,8 +3,8 @@
 Thin CLI wrapper for Siamese network training.
 
 Usage:
-    python scripts/train.py --bat-type r --data-source video --background random
-    python scripts/train.py --bat-type m --data-source video --background green
+    python scripts/train.py --bat-type r --data-source video --background random --split-mode image_split
+    python scripts/train.py --bat-type m --data-source video --background green --split-mode bat_split
 """
 
 import subprocess

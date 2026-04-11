@@ -73,6 +73,7 @@ class SiameseNetworkTrainer:
         augmented_data: bool,
         data_source: str,
         background: str,
+        split_mode: str,
         optimizer=tf.keras.optimizers.Adam(1e-4),
         loss_function=tf.losses.BinaryCrossentropy(),
         permute_labels: Optional[bool] = None,
@@ -95,7 +96,8 @@ class SiameseNetworkTrainer:
 
         self.permute_labels = permute_labels
         self.background = background
-        
+        self.split_mode = split_mode
+
         # Get bat-type-specific input paths
         bat_key = 'mauritius' if bat_type == 'm' else 'rousettus'
         input_paths = cfg.siamese_network.input_paths[bat_key]
@@ -203,14 +205,14 @@ class SiameseNetworkTrainer:
         print(f"🔧 TensorFlow GPU available: {tf.config.list_physical_devices('GPU')}")
         print(f"🔧 TensorFlow built with CUDA: {tf.test.is_built_with_cuda()}")
 
-        # Get training portion from config
+        # Get training portion from config (split_mode is a constructor argument)
         training_portion = sn_train.get("train_val_split", 0.7)
+        self.training_portion = training_portion
         pair_mode = sn_train.get("pair_mode", "permutation")
-        split_mode = sn_train.get("split_mode", "image_split")
-        
+
         self.data_splitter = SiameseNetworkTrainingDataSplitter(
             [self.input_dir], training_portion=training_portion, mode=pair_mode,
-            permute_labels=self.permute_labels, split_mode=split_mode,
+            permute_labels=self.permute_labels, split_mode=self.split_mode,
         )
         train_data = self.data_splitter.train_data
         test_data = self.data_splitter.test_data
@@ -470,9 +472,9 @@ class SiameseNetworkTrainer:
             "learning_rate": sn_train.get("learning_rate", 1e-4),
             "optimizer": sn_train.get("optimizer", {}).get("type", "Adam"),
             "loss": sn_train.get("loss", {}).get("type", "BinaryCrossentropy"),
-            "train_val_split": sn_train.get("train_val_split", 0.7),
+            "train_val_split": self.training_portion,
             "pair_mode": sn_train.get("pair_mode", "permutation"),
-            "split_mode": sn_train.get("split_mode", "image_split"),
+            "split_mode": self.split_mode,
             "max_samples_per_class": sn_train.get("max_samples_per_class", 0),
             "input_dir": self.input_dir,
             "output_dir": self.model_output_dir,

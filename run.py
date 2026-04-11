@@ -7,6 +7,9 @@ Always shows the underlying command so you can copy/paste it later.
 
 Usage:
     python run.py
+
+Training prompts for species, data source, augmentation, background, and train/test split mode
+(image_split vs bat_split), then launches train_siamese with matching flags.
 """
 
 import os
@@ -68,6 +71,15 @@ def run_training():
         ("Original", "original"),
     ])
 
+    split_mode = prompt_choice(
+        "\nTrain/test split:",
+        [
+            ("Per-image within each class (image_split) — same identities in train and test", "image_split"),
+            ("By bat identity (bat_split) — disjoint classes, no identity overlap", "bat_split"),
+        ],
+        default="image_split",
+    )
+
     run_in_bg = prompt_yn("\nRun in background (nohup)?", default=True)
 
     # Build command
@@ -76,6 +88,7 @@ def run_training():
         "--bat-type", bat_type,
         "--data-source", data_source,
         "--background", bg_type,
+        "--split-mode", split_mode,
     ]
     if augmented:
         cmd_parts.append("--augmented-data")
@@ -86,6 +99,7 @@ def run_training():
     print(f"  Source:     {data_source}")
     print(f"  Augmented:  {'Yes' if augmented else 'No'}")
     print(f"  Background: {bg_type}")
+    print(f"  Split mode: {split_mode}")
     print(f"  Nohup:      {'Yes' if run_in_bg else 'No'}")
 
     if not prompt_yn("\nProceed?", default=True):
