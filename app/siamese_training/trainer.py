@@ -38,6 +38,26 @@ from siamese_data.global_distribution import compute_global_class_distribution
 from config.loader import load_config
 
 
+class TeeStream:
+    """Writes to two streams simultaneously (tee for stdout capture)."""
+
+    def __init__(self, stream1, stream2):
+        self.stream1 = stream1
+        self.stream2 = stream2
+
+    def write(self, data):
+        self.stream1.write(data)
+        self.stream2.write(data)
+        self.stream2.flush()
+
+    def flush(self):
+        self.stream1.flush()
+        self.stream2.flush()
+
+    def fileno(self):
+        return self.stream1.fileno()
+
+
 class SiameseNetworkTrainer:
     def __init__(
         self,
@@ -47,8 +67,10 @@ class SiameseNetworkTrainer:
         optimizer=tf.keras.optimizers.Adam(1e-4),
         loss_function=tf.losses.BinaryCrossentropy(),
         permute_labels: Optional[bool] = None,
+        override_path: Optional[str] = None,
     ):
-        cfg = load_config()
+        cfg = load_config(override_path=override_path)
+        self._config = cfg
         sn_train = cfg.siamese_network.training
         
         # Use config value if not explicitly provided
@@ -130,11 +152,11 @@ class SiameseNetworkTrainer:
 
         # Model, optimizer, loss
         self.siamese_model = SiameseNetwork(L1Dist()).model
-        self.optimizer = optimizer
+        self._initial_lr = sn_train.get("learning_rate", 1e-4)
+        self.optimizer = None  # Will be created after batches are available
         
         # Wrap optimizer for mixed precision if enabled
-        if self.mixed_precision_enabled:
-            self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
+        self._needs_mixed_precision_wrap = self.mixed_precision_enabled
             
         # Use reduction='none' to get per-sample loss for weighted loss calculation
         self.loss_function = tf.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
@@ -234,6 +256,18 @@ class SiameseNetworkTrainer:
             for cls, count in sorted(train_dist.items()):
                 print(f"   {cls}: {count} samples")
 
+        # Create optimizer with per-epoch LR decay (paper: 0.99x per epoch)
+        steps_per_epoch = len(self.train_batches)
+        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=self._initial_lr,
+            decay_steps=steps_per_epoch,
+            decay_rate=0.99,
+            staircase=True,
+        )
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+        if self._needs_mixed_precision_wrap:
+            self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
+
         # TF checkpoint
         self.checkpoint = tf.train.Checkpoint(opt=self.optimizer, siamese_model=self.siamese_model)
 
@@ -316,13 +350,23 @@ class SiameseNetworkTrainer:
         # Create checkpoints directory
         self.checkpoint_dir = os.path.join(self.model_output_dir, "checkpoints")
         os.makedirs(self.checkpoint_dir, exist_ok=True)
-        
+
+        # Save config snapshot locally (and to MLflow later)
+        import yaml as _yaml
+        config_snapshot_path = os.path.join(self.model_output_dir, "config_snapshot.yml")
+        with open(config_snapshot_path, "w") as f:
+            _yaml.dump(self._config.get_full_config(), f, default_flow_style=False)
+
         print(f"📁 Created output directory: {self.model_output_dir}")
     
     def _start_parent_run(self, bat_type: str, augmented_data: bool, data_source: str):
         if not self.mlflow_enabled:
             # Create output directory even if MLflow is disabled
             self._create_output_directory()
+            # Start capturing stdout to training log file
+            self._log_file = open(os.path.join(self.model_output_dir, "training.log"), "w")
+            self._original_stdout = sys.stdout
+            sys.stdout = TeeStream(sys.stdout, self._log_file)
             return
         
         print(f"🔧 Starting MLflow run...")
@@ -339,17 +383,48 @@ class SiameseNetworkTrainer:
         
         print(f"📊 Run name: {run_name}")
         self.parent_run = mlflow.start_run(run_name=run_name)
-        
+
         # Create output directory now that we have run_id
         self._create_output_directory()
-        
+
+        # Set searchable tags for filtering in MLflow UI
+        mlflow.set_tag("bat_type", bat_type)
+        mlflow.set_tag("bat_species", bat_name)
+        mlflow.set_tag("data_source", data_source)
+        mlflow.set_tag("augmented", str(augmented_data))
+        mlflow.set_tag("model_output_dir", self.model_output_dir)
+        if self._config._experiment_file:
+            mlflow.set_tag("experiment_file", self._config._experiment_file)
+
+        # Log config snapshot as MLflow artifact
+        config_snapshot_path = os.path.join(self.model_output_dir, "config_snapshot.yml")
+        if os.path.exists(config_snapshot_path):
+            mlflow.log_artifact(config_snapshot_path, artifact_path="config")
+
+        # Start capturing stdout to training log file
+        self._log_file = open(os.path.join(self.model_output_dir, "training.log"), "w")
+        self._original_stdout = sys.stdout
+        sys.stdout = TeeStream(sys.stdout, self._log_file)
+
         self._log_hyperparameters(bat_type, augmented_data, data_source)
         self._log_class_balancing_to_mlflow()
 
     def _end_parent_run(self):
+        # Stop stdout capture and close log file
+        if hasattr(self, '_original_stdout') and self._original_stdout is not None:
+            sys.stdout = self._original_stdout
+            self._original_stdout = None
+        if hasattr(self, '_log_file') and self._log_file is not None:
+            self._log_file.close()
+            self._log_file = None
+
         if not self.mlflow_enabled:
             return
         if self.parent_run is not None:
+            # Log training log as artifact
+            log_path = os.path.join(self.model_output_dir, "training.log")
+            if os.path.exists(log_path):
+                mlflow.log_artifact(log_path, artifact_path="logs")
             mlflow.end_run()
             self.parent_run = None
 
@@ -389,8 +464,7 @@ class SiameseNetworkTrainer:
         if not self.mlflow_enabled:
             return
         
-        # Log metrics to parent run for step-wise tracking and easy comparison
-        # Parent run is already active from _start_parent_run, so log directly
+        # Log metrics to parent run with step=epoch for UI graphs
         mlflow.log_metrics(
             {
                 "train_loss": float(train["loss"]),
@@ -404,26 +478,6 @@ class SiameseNetworkTrainer:
             },
             step=epoch,
         )
-        
-        # Also log detailed metrics in nested run for this epoch
-        with mlflow.start_run(run_name=f"epoch_{epoch}", nested=True):
-            mlflow.log_param("epoch", int(epoch))
-            mlflow.log_metrics(
-                {
-                    "loss": float(train["loss"]),
-                    "recall": float(train["recall"]),
-                    "precision": float(train["precision"]),
-                    "f1": float(train["f1"]),
-                }
-            )
-            mlflow.log_metrics(
-                {
-                    "loss_test": float(test["loss"]),
-                    "recall_test": float(test["recall"]),
-                    "precision_test": float(test["precision"]),
-                    "f1_test": float(test["f1"]),
-                }
-            )
 
     def _update_metric_history(self, train: Dict[str, float], test: Dict[str, float]):
         self.metric_history["train_loss"].append(float(train["loss"]))
@@ -770,6 +824,8 @@ class SiameseNetworkTrainer:
 
             r = Recall()
             p = Precision()
+            total_train_loss = 0.0
+            num_train_batches = 0
             
             # Log weight statistics for the first batch if class balancing is enabled
             weight_stats_logged = False
@@ -781,20 +837,21 @@ class SiameseNetworkTrainer:
                     weight_stats_logged = True
                 
                 loss, yhat = self.train_step(batch)
+                total_train_loss += self._to_float(loss)
+                num_train_batches += 1
                 
                 # Log batch loss to MLflow every 100 batches (reduces GPU sync overhead)
                 if self.mlflow_enabled and (idx + 1) % 100 == 0:
                     step = (epoch - 1) * len(self.train_batches) + idx
                     mlflow.log_metric("batch_loss", float(loss), step=step)
                 
-                # Use raw probabilities for metrics (TensorFlow metrics can handle probabilities)
                 r.update_state(batch[2], yhat)
                 p.update_state(batch[2], yhat)
                 
                 # Update progress bar every 100 batches or at the end (reduces output in nohup)
                 if (idx + 1) % 100 == 0 or (idx + 1) == len(self.train_batches):
                     progbar.update(idx + 1)
-            train_loss = self._to_float(loss)
+            train_loss = total_train_loss / max(num_train_batches, 1)
             train_recall = self._to_float(r.result())
             train_precision = self._to_float(p.result())
             # Calculate F1 score
@@ -906,7 +963,7 @@ class SiameseNetworkTrainer:
         print(f"    Testing on {len(self.test_batches)} batches...")
         # Updated to unpack 4 values: (img1, img2, label, class_info)
         for batch_idx, (test_input, test_val, y_true, class_info) in enumerate(self.test_batches):
-            yhat = self.siamese_model.predict([test_input, test_val])
+            yhat = self.siamese_model([test_input, test_val], training=False)
             
             # Use raw probabilities for metrics (TensorFlow metrics can handle probabilities)
             r.update_state(y_true, yhat)
