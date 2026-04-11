@@ -514,6 +514,7 @@ class SiameseNetworkTrainer:
             # Weight balancing config
             "class_balancing_enabled": self.weight_calculator.enabled,
             "anchor_negative_balance": self.weight_calculator.anchor_negative_balance,
+            "anchor_target_ratio": self.weight_calculator.anchor_target_ratio,
             "per_class_balance": self.weight_calculator.per_class_balance,
             "weighting_scheme": self.weight_calculator.weighting_scheme,
             "ens_beta": self.weight_calculator.ens_beta,
@@ -771,7 +772,7 @@ class SiameseNetworkTrainer:
         Compute anchor/negative weights using pure TensorFlow ops.
         
         This replicates the logic from anchor_negative_weights.py but runs entirely on GPU.
-        Weights are computed so that anchor and negative samples contribute equally to loss.
+        Uses self.weight_calculator.anchor_target_ratio to control the contribution split.
         
         Args:
             labels: Tensor of labels (1.0 for anchors/positives, 0.0 for negatives)
@@ -779,13 +780,13 @@ class SiameseNetworkTrainer:
         Returns:
             Tensor of per-sample weights
         """
+        ratio = self.weight_calculator.anchor_target_ratio
         num_anchors = tf.reduce_sum(tf.cast(labels == 1.0, tf.float32))
         num_negatives = tf.reduce_sum(tf.cast(labels == 0.0, tf.float32))
         total = num_anchors + num_negatives
         
-        # Compute weights (avoid division by zero)
-        anchor_weight = 0.5 * total / tf.maximum(num_anchors, 1e-6)
-        negative_weight = 0.5 * total / tf.maximum(num_negatives, 1e-6)
+        anchor_weight = ratio * total / tf.maximum(num_anchors, 1e-6)
+        negative_weight = (1.0 - ratio) * total / tf.maximum(num_negatives, 1e-6)
         
         # Normalize so weights sum to 1
         total_weight = anchor_weight + negative_weight
