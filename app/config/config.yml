@@ -25,29 +25,18 @@ mlflow:
 # MODELS CONFIGURATION
 # =============================================================================
 models:
-  # Trained YOLO Segmentation Model
-  # unified: /Users/MAC/Documents/bat_face_rec/unified_segmentation/data/runs/weights/best.pt
-  # rousettus: /Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt
   segmentation:
-    # batwoman - rousettus
-    model_path: "/home/sagilevi1/bat_face_rec_project/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
-    # Local - rousettus
-    # model_path: "/Users/MAC/Documents/bat_face_rec/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
+    model_path: "/home/sagilevi1/bat_face_rec_project/legacy/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt"
     model_type: "yolo_segmentation"
     confidence_threshold: 0.5
-  
-  # Trained YOLO Pose Model
+
   pose:
-    # batwoman
-    model_path: "/home/sagilevi1/bat_face_rec_project/face_annotation_eyes_nose/runs/pose/augmented_train/weights/best.pt"
-    # Local - rousettus
-    # model_path: "/Users/MAC/Documents/bat_face_rec/face_annotation_eyes_nose/best.pt"
+    model_path: "/home/sagilevi1/bat_face_rec_project/legacy/face_annotation_eyes_nose/runs/pose/augmented_train/weights/best.pt"
     model_type: "yolo_pose"
     confidence_threshold: 0.5
-  
-  # Trained Siamese Network Model
+
   siamese:
-    model_path: "face_rec_rousettus_#1/runs/model/siamesemodelv2_v40"
+    model_path: "legacy/face_rec_rousettus_#1/runs/model/siamesemodelv2_v40"
     model_type: "siamese_network"
 
 # =============================================================================
@@ -56,7 +45,7 @@ models:
 siamese_network:
   # Model architecture
   model:
-    input_edge_length: 224
+    input_edge_length: 105
     embedding:
       output_size: 4096
       activation: "sigmoid"
@@ -66,12 +55,11 @@ siamese_network:
   
   # Training configuration
   training:
-    # Local
-    # output_dir: "/Users/MAC/Documents/bat_face_rec/models/siamese/rousettus/04-10-25_vid_cropped_no_aug_data_split_refactor"
-    # Batwoman
-    # Base path where output directories will be created (actual dir name: {date}_{experiment_id}_{run_id})
-    # Training input directory is taken from input_paths.random_bg_input
-    output_dir: "/home/sagilevi1/bat_face_rec_project/models/siamese/rousettus"
+    # Base path per species where output directories will be created (actual dir name: {date}_{experiment_id}_{run_id})
+    # Training input directory is selected by --background (green_bg_input / random_bg_input / original_bg_input)
+    output_dir:
+      mauritius: "/home/sagilevi1/bat_face_rec_project/models/siamese/mauritius"
+      rousettus: "/home/sagilevi1/bat_face_rec_project/models/siamese/rousettus"
     epochs: 80
     batch_size: 32
     learning_rate: 0.00005  # Reduced from 0.0001 to prevent overfitting
@@ -97,21 +85,32 @@ siamese_network:
       type: "BinaryCrossentropy"
       from_logits: false
     train_val_split: 0.7
+    split_mode: "image_split" # "image_split" (per-bat image split) or "bat_split" (disjoint bat classes)
     pair_mode: "permutation" # "permutation" or "combination"
-    permute_labels: false # Label permutation test mode
-    max_samples_per_class: 25
+    max_samples_per_class: 35
     early_stopping:
       enabled: true
       patience: 5  # Changed from 10 - detect overfitting faster
       min_delta: 0.001
       restore_best_weights: true
+
+    # On-disk SavedModels: only best test metrics (optional toggles). Symlinks dedupe same-epoch ties.
+    artifact_retention:
+      save_best_f1: true
+      save_best_recall: true
+      save_best_precision: true
+      save_best_loss: true
+      save_final_model: false   # if true, fit() also writes default siamesemodelv2 at end
+      save_tf_checkpoints: false  # if true, checkpoints/ with max_to_keep=1 for crash recovery only
+
+    # Legacy: not read by trainer (training used hardcoded periodic saves before artifact_retention).
     checkpoint:
       save_frequency: 10
       save_best_only: true
       max_checkpoints: 5
     # Training data preprocessing configuration (pipeline-specific)
     data_preprocessing:
-      target_size: 224
+      target_size: 105
       interpolation: "bilinear"
       normalize: true
       scale_factor: 255.0
@@ -132,13 +131,10 @@ siamese_network:
       
       # Augmentation settings
       augmentation:
-        enabled: false  # Re-enabled to work on fixing augmentation
+        enabled: false
         preset: "noise_color_only"
         count: 5
-        # batwoman
         config_file: "/home/sagilevi1/bat_face_rec_project/app/config/augmentation_noise_color.yml"
-        # Local 
-        # config_file: "/Users/MAC/Documents/bat_face_rec/app/config/augmentation_noise_color.yml"
         
         # Prediction transformation settings
         transform_predictions: true
@@ -178,6 +174,7 @@ siamese_network:
   saliency_maps:
     method: "integrated_gradients"  # Options: "standard", "integrated_gradients", "guided_gradients", "smoothed_gradients", "comparison", "mean_saliency"
     sample_size: 25
+    samples_per_bat: 3  # Max images per bat class for per-bat saliency (null = all)
     fast_mode: false
     integration_steps: null  # Optional custom steps (default: 20, or 10 in fast mode)
     smoothing_samples: null  # Optional custom samples (default: 10, or 5 in fast mode)
@@ -229,7 +226,7 @@ yolo_segmentation:
     default_patience: 50
     default_workers: 8
     default_confidence: 0.25
-    data_path: "/Users/MAC/Documents/bat_face_rec/unified_segmentation/data/data.yaml"
+    data_path: "/home/sagilevi1/bat_face_rec_project/legacy/unified_segmentation/data/data.yaml"
     name: "bat_face_seg"
   
   # Supported models
@@ -319,15 +316,15 @@ video_processing:
 # =============================================================================
 visualization:
   paths:
-    model_path: "/Users/MAC/Documents/bat_face_rec/output_siamese_20250406_014341/train/model/siamesemodelv2_v40"
-    input_dir: "/Users/MAC/Documents/bat_face_rec/face_recognition-with_bg_31_03_25/data/unseen"
-    output_dir: "/Users/MAC/Documents/bat_face_rec/output_siamese_20250406_014341"
+    model_path: null  # Set via --model-path CLI arg or experiment override
+    input_dir: null   # Set via --input-dir CLI arg or experiment override
+    output_dir: null  # Set via --output-dir CLI arg or experiment override
   display:
     nesting: "saliency"
     sample_size: 10
     figure_size: [15.0, 3.0]
     row_spacing: 0.5
-    image_size: [224, 224]
+    image_size: [105, 105]
   plots:
     dpi: 300
     save_format: "png"
@@ -386,7 +383,7 @@ statistical_tests:
     
     # Output directory for permutation test results
     # Will be created as: {output_dir}/{timestamp}/
-    output_dir: "evaluations/permutation_tests"
+    output_dir: "outputs/evaluations/permutation_tests"
     
     # Optimized mode settings for faster permutation test runs
     # Use --mode optimized to enable these settings

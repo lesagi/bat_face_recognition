@@ -66,8 +66,8 @@ def detect_model_input_size(model):
 
     except Exception as e:
         print(f"Warning: Could not auto-detect input size: {e}")
-        print("Defaulting to 224x224. Use --input_size to specify manually.")
-        return 224
+        print("Could not auto-detect input size. Use --input_size to specify manually.")
+        return None
 
 
 def load_model(model_path):

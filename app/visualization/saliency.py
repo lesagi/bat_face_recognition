@@ -20,10 +20,12 @@ class SiameseModelSaliencyMapCreator:
         nesting=None,
         sample_size=50,
         fast_mode=False,
-        input_size=224,
+        input_size=None,
         integration_steps=None,
         smoothing_samples=None,
     ):
+        if input_size is None:
+            raise ValueError("input_size is required — infer from the loaded model's input_shape")
         self.model = model
         self.sample_size = sample_size
         self.fast_mode = fast_mode
@@ -508,7 +510,7 @@ class SiameseModelSaliencyMapCreator:
         gradients = tape.gradient(output, image)
         return gradients
     
-    def generate_per_bat_saliency_images(self, method="integrated_gradients", smoothing=True):
+    def generate_per_bat_saliency_images(self, method="integrated_gradients", smoothing=True, samples_per_bat=None):
         """
         Generate separate saliency map images for each bat class.
         Each image shows original on left and saliency map on right.
@@ -516,6 +518,8 @@ class SiameseModelSaliencyMapCreator:
         Args:
             method (str): Saliency computation method
             smoothing (bool): Whether to apply Gaussian smoothing
+            samples_per_bat (int|None): Max images to process per bat class.
+                If None, process all images.
         
         Returns:
             list: List of output file paths
@@ -538,9 +542,10 @@ class SiameseModelSaliencyMapCreator:
         
         # Process each bat class
         for bat_class, img_paths in bat_classes.items():
+            if samples_per_bat is not None and len(img_paths) > samples_per_bat:
+                img_paths = random.sample(img_paths, samples_per_bat)
             print(f"Processing {len(img_paths)} images for bat class: {bat_class}")
             
-            # Process each image for this bat class
             for img_path in img_paths:
                 try:
                     # Load and preprocess image
@@ -630,11 +635,13 @@ class MeanSaliencyMapCreator:
         input_dir_path,
         output_dir_path=None,
         nesting=None,
-        input_size=224,
+        input_size=None,
         integration_steps=None,
         smoothing_samples=None,
         fast_mode=False,
     ):
+        if input_size is None:
+            raise ValueError("input_size is required — infer from the loaded model's input_shape")
         self.model = model
         self.input_dir_path = (
             input_dir_path if not nesting else os.path.join(input_dir_path, nesting)

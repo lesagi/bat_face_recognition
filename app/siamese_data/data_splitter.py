@@ -62,16 +62,20 @@ class SiameseNetworkTrainingDataSplitter:
     """
 
     def __init__(
-        self, images_dirs_paths_list, training_portion=0.7, mode="combination", skip_preprocessing=False, preprocess_fn=preprocess_twin_input_function, permute_labels=False, split_seed=None
+        self, images_dirs_paths_list, training_portion=0.7, mode="combination",
+        skip_preprocessing=False, preprocess_fn=preprocess_twin_input_function,
+        permute_labels=False, split_seed=None, split_mode="image_split",
     ):
         self.permute_labels = permute_labels
         self.split_seed = split_seed
+        self.split_mode = split_mode
         self.images_directories_collection = images_dirs_paths_list
         self.training_portion = training_portion
         self.mode = mode
         self.skip_preprocessing = skip_preprocessing
         self.preprocess_fn = preprocess_fn
         print(f"Mode: {mode}")
+        print(f"Split mode: {split_mode}")
         self.train_data = None
         self.test_data = None
         self.class_files = {}
@@ -106,8 +110,16 @@ class SiameseNetworkTrainingDataSplitter:
         for class_name, files in self.class_files.items():
             print(f"Class '{class_name}': {len(files)} files")
 
-        # Split individual images into train/test sets per class
-        self.__split_individual_images()
+        # Split data into train/test sets
+        if self.split_mode == "image_split":
+            self.__split_individual_images()
+        elif self.split_mode == "bat_split":
+            self.__split_by_bat()
+        else:
+            raise ValueError(
+                f"Unknown split_mode: '{self.split_mode}'. "
+                "Must be 'image_split' or 'bat_split'."
+            )
         
         # Create training pairs (only from training images)
         train_anchors, train_negatives = self.__create_training_pairs()
@@ -314,7 +326,8 @@ class SiameseNetworkTrainingDataSplitter:
 
     def __split_individual_images(self):
         """Split individual images into train/test sets per class to prevent data leakage.
-        We are considering all augemented images of specific image as a single image, not individual images."""
+        We are considering all augemented images of specific image as a single image, not individual images.
+        Every class appears in both train and test."""
         print("\n🔍 Splitting individual images into train/test sets...")
         
         rng = random.Random(self.split_seed) if self.split_seed is not None else random
@@ -343,6 +356,39 @@ class SiameseNetworkTrainingDataSplitter:
             self.test_class_files[class_name] = test_files
             
             print(f"  Class '{class_name}': {len(train_files)} train, {len(test_files)} test")
+
+    def __split_by_bat(self):
+        """Split entire bat classes into train vs test (no class overlap).
+        Train and test sets contain completely different bats, testing
+        whether the learned similarity metric generalises to unseen individuals."""
+        print("\n🔍 Splitting by bat class (disjoint classes)...")
+
+        rng = random.Random(self.split_seed) if self.split_seed is not None else random
+        class_names = list(self.class_files.keys())
+        rng.shuffle(class_names)
+
+        train_count = max(1, round(len(class_names) * self.training_portion))
+        train_classes = class_names[:train_count]
+        test_classes = class_names[train_count:]
+
+        for class_name in train_classes:
+            all_files = []
+            for id_files in self.class_files[class_name].values():
+                all_files.extend(id_files)
+            self.train_class_files[class_name] = all_files
+
+        for class_name in test_classes:
+            all_files = []
+            for id_files in self.class_files[class_name].values():
+                all_files.extend(id_files)
+            self.test_class_files[class_name] = all_files
+
+        print(f"  Train classes ({len(train_classes)}): {train_classes}")
+        for cn in train_classes:
+            print(f"    '{cn}': {len(self.train_class_files[cn])} files")
+        print(f"  Test classes ({len(test_classes)}): {test_classes}")
+        for cn in test_classes:
+            print(f"    '{cn}': {len(self.test_class_files[cn])} files")
 
     def __create_training_pairs(self):
         """Create training pairs only from training images. Returns (anchors_ds, negatives_ds) of file paths."""

@@ -4,7 +4,7 @@ from keras.layers import Layer, Conv2D, Dense, MaxPooling2D, Input, Flatten  # p
 from keras.regularizers import l2  # pyright: ignore[reportMissingTypeStubs]
 
 # Siamese network constants
-SIAMESE_INPUT_EDGE_LENGTH = 224
+SIAMESE_INPUT_EDGE_LENGTH = 105
 L2_REG = l2(1e-4)
 
 
@@ -57,15 +57,15 @@ class SiameseNetwork:
 
         # First block
         c1 = Conv2D(filters=64, kernel_size=(10, 10), activation="relu", kernel_regularizer=L2_REG)(inp)
-        m1 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(c1)
+        m1 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="valid")(c1)
 
         # Second block
         c2 = Conv2D(filters=128, kernel_size=(7, 7), activation="relu", kernel_regularizer=L2_REG)(m1)
-        m2 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(c2)
+        m2 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="valid")(c2)
 
         # Third block
         c3 = Conv2D(filters=128, kernel_size=(4, 4), activation="relu", kernel_regularizer=L2_REG)(m2)
-        m3 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(c3)
+        m3 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="valid")(c3)
 
         # Final embedding block
         c4 = Conv2D(filters=256, kernel_size=(4, 4), activation="relu", kernel_regularizer=L2_REG)(m3)

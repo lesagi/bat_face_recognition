@@ -38,17 +38,21 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from utils.image_utils import is_img_file
 
 
-def preprocess_siamese_input_flexible(file_path, target_size=224):
+def preprocess_siamese_input_flexible(file_path, target_size=None):
     """
     Preprocess a single image file path into a tensor with flexible target size.
 
     Args:
         file_path (str): Path to the image file
-        target_size (int): Target size for resizing (assumes square images)
+        target_size (int): Target size for resizing (assumes square images).
+            Must be provided — infer from model.input_shape at the call site.
 
     Returns:
         tf.Tensor: Preprocessed image tensor
     """
+    if target_size is None:
+        raise ValueError("target_size is required — infer from the loaded model's input_shape")
+
     # Import TensorFlow only when needed
     import tensorflow as tf
     

@@ -2,7 +2,9 @@
 Siamese network trainer module.
 """
 
+import json
 import os
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -31,7 +33,7 @@ if gpus:
 else:
     print("❌ No GPU found, using CPU")
 
-from siamese_core.network import SiameseNetwork, L1Dist
+from siamese_core.network import SiameseNetwork, L1Dist, SIAMESE_INPUT_EDGE_LENGTH
 from siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
 from siamese_data.class_weights import ClassWeightCalculator
 from siamese_data.global_distribution import compute_global_class_distribution
@@ -59,21 +61,26 @@ class TeeStream:
 
 
 class SiameseNetworkTrainer:
+    _BG_CONFIG_KEY = {
+        "green": "green_bg_input",
+        "random": "random_bg_input",
+        "original": "original_bg_input",
+    }
+
     def __init__(
         self,
         bat_type: str,
         augmented_data: bool,
         data_source: str,
+        background: str,
         optimizer=tf.keras.optimizers.Adam(1e-4),
         loss_function=tf.losses.BinaryCrossentropy(),
         permute_labels: Optional[bool] = None,
-        override_path: Optional[str] = None,
     ):
-        cfg = load_config(override_path=override_path)
+        cfg = load_config()
         self._config = cfg
         sn_train = cfg.siamese_network.training
         
-        # Use config value if not explicitly provided
         if permute_labels is None:
             permute_labels = sn_train.get("permute_labels", False)
         
@@ -87,26 +94,32 @@ class SiameseNetworkTrainer:
             print(f"   - Variable dtype: {policy.variable_dtype}")
 
         self.permute_labels = permute_labels
+        self.background = background
         
         # Get bat-type-specific input paths
         bat_key = 'mauritius' if bat_type == 'm' else 'rousettus'
         input_paths = cfg.siamese_network.input_paths[bat_key]
 
-        # Data dirs - always use random_bg_input from config for training
-        self.input_dir = input_paths.get("random_bg_input")
+        # Resolve input directory from --background choice
+        bg_key = self._BG_CONFIG_KEY[background]
+        self.input_dir = input_paths.get(bg_key)
         
         if not self.input_dir or not os.path.exists(self.input_dir):
-            raise ValueError(f"Invalid or missing training input_dir: {self.input_dir}. "
-                           f"Please set input_paths.{bat_key}.random_bg_input in config.yml")
+            raise ValueError(f"Invalid or missing training input_dir for background '{background}': "
+                           f"{self.input_dir}. "
+                           f"Please set input_paths.{bat_key}.{bg_key} in config.yml")
 
         # Training hyperparameters
         self.num_epochs = sn_train.get("epochs", 80)
         self.batch_size = sn_train.get("batch_size", 16)
 
-        # Output paths - base directory from config
-        base_output_dir = sn_train.get("output_dir")
+        # Output paths - per-species directory from config
+        output_dirs = sn_train.get("output_dir")
+        if not isinstance(output_dirs, dict) or bat_key not in output_dirs:
+            raise ValueError(f"Missing siamese_network.training.output_dir.{bat_key} in config")
+        base_output_dir = output_dirs[bat_key]
         if not base_output_dir:
-            raise ValueError("Missing siamese_network.training.output_dir in config")
+            raise ValueError(f"Empty siamese_network.training.output_dir.{bat_key} in config")
         
         # Store training parameters for post-training automation
         self.bat_type = bat_type
@@ -117,7 +130,23 @@ class SiameseNetworkTrainer:
         # We'll create the actual directory name after MLflow run starts (to get run_id)
         self.base_output_dir = base_output_dir
         self.model_output_dir = None  # Will be set in _create_output_directory()
-        self.checkpoint_dir = None  # Will be set in _create_output_directory()
+        self.checkpoint_dir = None  # Set only when save_tf_checkpoints is True
+        self._checkpoint_manager = None  # tf.train.CheckpointManager, optional
+
+        _default_retention: Dict[str, bool] = {
+            "save_best_f1": True,
+            "save_best_recall": True,
+            "save_best_precision": True,
+            "save_best_loss": True,
+            "save_final_model": False,
+            "save_tf_checkpoints": False,
+        }
+        self._artifact_retention: Dict[str, bool] = {
+            **_default_retention,
+            **(sn_train.get("artifact_retention") or {}),
+        }
+        # First SavedModel written at an epoch wins the physical directory; other roles symlink.
+        self._epoch_canonical_subdir: Dict[int, str] = {}
 
         # MLflow setup
         self.mlflow_enabled = cfg.mlflow.enabled
@@ -136,11 +165,15 @@ class SiameseNetworkTrainer:
         }
         self.current_epoch: int = 0
         
-        # Best model tracking
+        # Best model tracking (test set)
         self.best_loss_value: float = float('inf')
         self.best_loss_epoch: int = 0
         self.best_f1_value: float = 0.0
         self.best_f1_epoch: int = 0
+        self.best_recall_value: float = 0.0
+        self.best_recall_epoch: int = 0
+        self.best_precision_value: float = 0.0
+        self.best_precision_epoch: int = 0
         
         # Early stopping tracking
         self.early_stopping_enabled = sn_train.get("early_stopping", {}).get("enabled", False)
@@ -173,9 +206,11 @@ class SiameseNetworkTrainer:
         # Get training portion from config
         training_portion = sn_train.get("train_val_split", 0.7)
         pair_mode = sn_train.get("pair_mode", "permutation")
+        split_mode = sn_train.get("split_mode", "image_split")
         
         self.data_splitter = SiameseNetworkTrainingDataSplitter(
-            [self.input_dir], training_portion=training_portion, mode=pair_mode, permute_labels=self.permute_labels
+            [self.input_dir], training_portion=training_portion, mode=pair_mode,
+            permute_labels=self.permute_labels, split_mode=split_mode,
         )
         train_data = self.data_splitter.train_data
         test_data = self.data_splitter.test_data
@@ -308,21 +343,16 @@ class SiameseNetworkTrainer:
 
     def _build_experiment_name(self, bat_type: str, augmented_data: bool, data_source: str) -> str:
         """Build experiment name from template using provided arguments."""
-        # Validate inputs
         if bat_type not in ['m', 'r']:
             raise ValueError("bat_type must be 'm' (mauritius) or 'r' (rousettus)")
         if data_source not in ['video', 'still']:
             raise ValueError("data_source must be 'video' or 'still'")
         
-        # Map bat_type to full name
         bat_name = "mauritius" if bat_type == 'm' else "rousettus"
-        
-        # Map augmented_data to string
         aug_str = "augmented" if augmented_data else "no_aug"
+        bg_str = f"{self.background}_bg"
         
-        # Build experiment name from template
-        experiment_name = f"siamese_{bat_name}_{data_source}_{aug_str}"
-        return experiment_name
+        return f"siamese_{bat_name}_{data_source}_{aug_str}_{bg_str}"
 
     def _create_output_directory(self):
         """
@@ -346,10 +376,12 @@ class SiameseNetworkTrainer:
         dir_name = f"{date_str}_{experiment_id}_{run_id}"
         self.model_output_dir = os.path.join(self.base_output_dir, dir_name)
         os.makedirs(self.model_output_dir, exist_ok=True)
-        
-        # Create checkpoints directory
-        self.checkpoint_dir = os.path.join(self.model_output_dir, "checkpoints")
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+        if self._artifact_retention.get("save_tf_checkpoints"):
+            self.checkpoint_dir = os.path.join(self.model_output_dir, "checkpoints")
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
+        else:
+            self.checkpoint_dir = None
 
         # Save config snapshot locally (and to MLflow later)
         import yaml as _yaml
@@ -379,7 +411,7 @@ class SiameseNetworkTrainer:
         # Build descriptive run name from parameters
         bat_name = "mauritius" if bat_type == 'm' else "rousettus"
         aug_str = "augmented" if augmented_data else "no_aug"
-        run_name = f"training_{bat_name}_{data_source}_{aug_str}"
+        run_name = f"training_{bat_name}_{data_source}_{aug_str}_{self.background}_bg"
         
         print(f"📊 Run name: {run_name}")
         self.parent_run = mlflow.start_run(run_name=run_name)
@@ -392,9 +424,8 @@ class SiameseNetworkTrainer:
         mlflow.set_tag("bat_species", bat_name)
         mlflow.set_tag("data_source", data_source)
         mlflow.set_tag("augmented", str(augmented_data))
+        mlflow.set_tag("background", self.background)
         mlflow.set_tag("model_output_dir", self.model_output_dir)
-        if self._config._experiment_file:
-            mlflow.set_tag("experiment_file", self._config._experiment_file)
 
         # Log config snapshot as MLflow artifact
         config_snapshot_path = os.path.join(self.model_output_dir, "config_snapshot.yml")
@@ -441,12 +472,14 @@ class SiameseNetworkTrainer:
             "loss": sn_train.get("loss", {}).get("type", "BinaryCrossentropy"),
             "train_val_split": sn_train.get("train_val_split", 0.7),
             "pair_mode": sn_train.get("pair_mode", "permutation"),
+            "split_mode": sn_train.get("split_mode", "image_split"),
             "max_samples_per_class": sn_train.get("max_samples_per_class", 0),
             "input_dir": self.input_dir,
             "output_dir": self.model_output_dir,
             "bat_type": bat_type,
             "augmented_data": augmented_data,
             "data_source": data_source,
+            "background": self.background,
             "experiment_name": self.mlflow_experiment_name,
             # Weight balancing config
             "class_balancing_enabled": self.weight_calculator.enabled,
@@ -808,7 +841,8 @@ class SiameseNetworkTrainer:
         try:
             self.train()
             self.test()
-            self.save_model()
+            if self._artifact_retention.get("save_final_model"):
+                self.save_model()
         finally:
             self._end_parent_run()
 
@@ -817,6 +851,18 @@ class SiameseNetworkTrainer:
             raise ValueError(
                 "No siamese model available for training. Initialize trainer with a siamese_model."
             )
+        self._epoch_canonical_subdir = {}
+        if (
+            self.model_output_dir
+            and self._artifact_retention.get("save_tf_checkpoints")
+            and self.checkpoint_dir
+        ):
+            self._checkpoint_manager = tf.train.CheckpointManager(
+                self.checkpoint, self.checkpoint_dir, max_to_keep=1
+            )
+        else:
+            self._checkpoint_manager = None
+
         for epoch in range(1, self.num_epochs + 1):
             self.current_epoch = epoch
             print("\n Epoch {}/{}".format(epoch, self.num_epochs))
@@ -879,36 +925,50 @@ class SiameseNetworkTrainer:
                 print(f"📊 Experiment: {self.mlflow_experiment_name}")
                 print(f"📊 View at: http://localhost:5000")
 
-            # Track and save best model based on test_loss (lower is better)
+            # Track and save best models (SavedModel only; optional TF checkpoints via config)
             if test_loss < self.best_loss_value:
                 self.best_loss_value = test_loss
                 self.best_loss_epoch = epoch
                 print(f"✅ New best test_loss! Loss: {test_loss:.6f} at epoch {epoch}")
-                self.save_model(name="best_model_loss", save_format="tf")
-                self.checkpoint.save(file_prefix=os.path.join(self.checkpoint_dir, "best_loss"))
-                
-                # Log to MLflow
+                if self._artifact_retention.get("save_best_loss"):
+                    self._save_best_metric_artifact("best_model_loss", epoch, save_format="tf")
                 if self.mlflow_enabled:
                     mlflow.log_metric("best_loss_epoch", epoch)
                     mlflow.log_metric("best_test_loss", test_loss)
-            
-            # Track and save best model based on test_f1 (higher is better)
+
             if test_f1 > self.best_f1_value:
                 self.best_f1_value = test_f1
                 self.best_f1_epoch = epoch
                 print(f"✅ New best test_f1! F1: {test_f1:.6f} at epoch {epoch}")
-                self.save_model(name="best_model_f1", save_format="tf")
-                self.checkpoint.save(file_prefix=os.path.join(self.checkpoint_dir, "best_f1"))
-                
-                # Log to MLflow
+                if self._artifact_retention.get("save_best_f1"):
+                    self._save_best_metric_artifact("best_model_f1", epoch, save_format="tf")
                 if self.mlflow_enabled:
                     mlflow.log_metric("best_f1_epoch", epoch)
                     mlflow.log_metric("best_test_f1", test_f1)
-            
+
+            if test_recall > self.best_recall_value:
+                self.best_recall_value = test_recall
+                self.best_recall_epoch = epoch
+                print(f"✅ New best test_recall! Recall: {test_recall:.6f} at epoch {epoch}")
+                if self._artifact_retention.get("save_best_recall"):
+                    self._save_best_metric_artifact("best_model_recall", epoch, save_format="tf")
+                if self.mlflow_enabled:
+                    mlflow.log_metric("best_recall_epoch", epoch)
+                    mlflow.log_metric("best_test_recall", test_recall)
+
+            if test_precision > self.best_precision_value:
+                self.best_precision_value = test_precision
+                self.best_precision_epoch = epoch
+                print(f"✅ New best test_precision! Precision: {test_precision:.6f} at epoch {epoch}")
+                if self._artifact_retention.get("save_best_precision"):
+                    self._save_best_metric_artifact("best_model_precision", epoch, save_format="tf")
+                if self.mlflow_enabled:
+                    mlflow.log_metric("best_precision_epoch", epoch)
+                    mlflow.log_metric("best_test_precision", test_precision)
+
             # Check early stopping (after tracking best F1)
             if self._check_early_stopping(test_f1, epoch):
-                # Restore best weights if configured
-                if self.early_stopping_restore_best:
+                if self.early_stopping_restore_best and self._artifact_retention.get("save_best_f1"):
                     print(f"🔄 Restoring best model weights from epoch {self.best_f1_epoch}")
                     best_model_path = os.path.join(self.model_output_dir, "best_model_f1")
                     if os.path.exists(best_model_path):
@@ -917,13 +977,14 @@ class SiameseNetworkTrainer:
                             custom_objects={"L1Dist": L1Dist}
                         )
                         print(f"✅ Best weights restored (F1: {self.best_f1_value:.6f})")
+                    else:
+                        print(f"⚠️  best_model_f1 not on disk; skipping restore (save_best_f1 disabled?)")
+                elif self.early_stopping_restore_best and not self._artifact_retention.get("save_best_f1"):
+                    print("⚠️  restore_best_weights requested but save_best_f1 is false; skipping restore")
                 break  # Exit training loop
 
-            # Save periodic models (every 10 epochs)
-            if epoch % 10 == 0:
-                print(f"💾 Saving periodic model at epoch {epoch}")
-                self.save_model(version=epoch, save_format="tf")
-                self.checkpoint.save(file_prefix=os.path.join(self.checkpoint_dir, "periodic"))
+            if self._checkpoint_manager is not None:
+                self._checkpoint_manager.save()
         
         # Training completed - log final summary
         print(f"\n{'='*70}")
@@ -934,14 +995,22 @@ class SiameseNetworkTrainer:
         print(f"{'='*70}")
         print(f"🏆 Best test_loss: {self.best_loss_value:.6f} at epoch {self.best_loss_epoch}")
         print(f"🏆 Best test_f1: {self.best_f1_value:.6f} at epoch {self.best_f1_epoch}")
+        print(f"🏆 Best test_recall: {self.best_recall_value:.6f} at epoch {self.best_recall_epoch}")
+        print(f"🏆 Best test_precision: {self.best_precision_value:.6f} at epoch {self.best_precision_epoch}")
         print(f"{'='*70}\n")
-        
+
+        self._write_training_summary_json()
+
         # Log final best epochs to MLflow as parameters (persisted)
         if self.mlflow_enabled:
             mlflow.log_param("final_best_loss_epoch", self.best_loss_epoch)
             mlflow.log_param("final_best_loss_value", round(self.best_loss_value, 6))
             mlflow.log_param("final_best_f1_epoch", self.best_f1_epoch)
             mlflow.log_param("final_best_f1_value", round(self.best_f1_value, 6))
+            mlflow.log_param("final_best_recall_epoch", self.best_recall_epoch)
+            mlflow.log_param("final_best_recall_value", round(self.best_recall_value, 6))
+            mlflow.log_param("final_best_precision_epoch", self.best_precision_epoch)
+            mlflow.log_param("final_best_precision_value", round(self.best_precision_value, 6))
         
         # Post-training automation: generate predictions and saliency maps
         print(f"\n{'='*70}")
@@ -1002,6 +1071,80 @@ class SiameseNetworkTrainer:
         if precision + recall == 0:
             return 0.0
         return 2 * (precision * recall) / (precision + recall)
+
+    @staticmethod
+    def _remove_path_for_resave(path: str) -> None:
+        if not os.path.lexists(path):
+            return
+        if os.path.islink(path):
+            os.unlink(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+
+    def _save_best_metric_artifact(self, subdir_name: str, epoch: int, save_format: str = "tf") -> None:
+        """
+        Write a SavedModel under model_output_dir/subdir_name, or symlink to the first
+        physical save for this epoch when multiple metrics improve on the same epoch.
+        """
+        if self.model_output_dir is None:
+            raise RuntimeError("model_output_dir not set")
+        dest = os.path.join(self.model_output_dir, subdir_name)
+
+        if epoch not in self._epoch_canonical_subdir:
+            self._remove_path_for_resave(dest)
+            self.siamese_model.save(dest, save_format=save_format)
+            self._epoch_canonical_subdir[epoch] = subdir_name
+            return
+
+        canon_name = self._epoch_canonical_subdir[epoch]
+        if canon_name == subdir_name:
+            return
+        self._remove_path_for_resave(dest)
+        os.symlink(canon_name, dest, target_is_directory=True)
+
+    def _write_training_summary_json(self) -> None:
+        """Small manifest of best-metric epochs and on-disk layout (paths relative to run dir)."""
+        if self.model_output_dir is None:
+            return
+
+        def describe(subdir: str) -> Dict[str, Any]:
+            p = os.path.join(self.model_output_dir, subdir)
+            out: Dict[str, Any] = {"relative_path": subdir, "exists": os.path.lexists(p)}
+            if os.path.lexists(p):
+                out["is_symlink"] = os.path.islink(p)
+                if out["is_symlink"]:
+                    out["symlink_target"] = os.readlink(p)
+            return out
+
+        summary = {
+            "model_output_dir": self.model_output_dir,
+            "best_loss": {
+                "epoch": self.best_loss_epoch,
+                "value": self.best_loss_value,
+                **describe("best_model_loss"),
+            },
+            "best_f1": {
+                "epoch": self.best_f1_epoch,
+                "value": self.best_f1_value,
+                **describe("best_model_f1"),
+            },
+            "best_recall": {
+                "epoch": self.best_recall_epoch,
+                "value": self.best_recall_value,
+                **describe("best_model_recall"),
+            },
+            "best_precision": {
+                "epoch": self.best_precision_epoch,
+                "value": self.best_precision_value,
+                **describe("best_model_precision"),
+            },
+            "artifact_retention": dict(self._artifact_retention),
+        }
+        path = os.path.join(self.model_output_dir, "training_summary.json")
+        with open(path, "w") as f:
+            json.dump(summary, f, indent=2)
 
     def save_model(self, name="siamesemodelv2", version=None, save_format="tf"):
         if self.siamese_model is None:
@@ -1107,7 +1250,7 @@ class SiameseNetworkTrainer:
                 
                 # Detect input size
                 input_shape = model.input_shape[0]
-                input_size = input_shape[1] if len(input_shape) > 1 else 224
+                input_size = input_shape[1] if len(input_shape) > 1 else SIAMESE_INPUT_EDGE_LENGTH
                 
                 # Create saliency creator
                 saliency_creator = SiameseModelSaliencyMapCreator(
@@ -1125,11 +1268,15 @@ class SiameseNetworkTrainer:
                 # Generate per-bat saliency images
                 method = saliency_config.get("method", "integrated_gradients")
                 smoothing = True  # Default to smoothing unless explicitly disabled
+                samples_per_bat = saliency_config.get("samples_per_bat")
                 
                 print(f"   Using method: {method}")
+                if samples_per_bat is not None:
+                    print(f"   Sampling {samples_per_bat} images per bat class")
                 output_files = saliency_creator.generate_per_bat_saliency_images(
                     method=method,
                     smoothing=smoothing,
+                    samples_per_bat=samples_per_bat,
                 )
                 
                 print(f"✅ Generated {len(output_files)} saliency images in: {saliency_output_dir}")
