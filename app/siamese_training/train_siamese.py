@@ -14,7 +14,6 @@ app_dir = os.path.dirname(parent_dir)
 sys.path.insert(0, app_dir)
 
 from app.siamese_training.trainer import SiameseNetworkTrainer
-from app.config.loader import load_config
 
 
 def main():
@@ -25,18 +24,25 @@ def main():
                         help="Whether the data is augmented")
     parser.add_argument("--data-source", dest="data_source", type=str, required=True, choices=['video', 'still'],
                         help="Data source: 'video' or 'still'")
+    parser.add_argument("--background", dest="background", type=str, required=True,
+                        choices=["green", "random", "original"],
+                        help="Background type: 'green', 'random', or 'original'")
     parser.add_argument("--permute-labels", dest="permute_labels", action="store_true",
                         help="Enable label permutation test mode")
     args = parser.parse_args()
-    
+
     print("🚀 Starting Siamese Network Training")
-    print("📁 Input directory: Using random_bg_input from config")
+    print(f"📁 Background type: {args.background}")
     print()
 
     try:
         # Create and run the trainer
         print("🔧 Initializing trainer...")
-        trainer = SiameseNetworkTrainer(args.bat_type, args.augmented_data, args.data_source, permute_labels=args.permute_labels)
+        trainer = SiameseNetworkTrainer(
+            args.bat_type, args.augmented_data, args.data_source,
+            background=args.background,
+            permute_labels=args.permute_labels,
+        )
         
         print("✅ Trainer initialized successfully!")
         print(f"📊 Training pairs: {trainer.train_batches.cardinality().numpy()}")

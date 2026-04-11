@@ -63,7 +63,7 @@ def combine_class_weights(
         >>> # Two classes with different frequencies
         >>> weights = [0.2, 0.5]  # Class A rarer than Class B
         >>> combine_class_weights(weights, 'sum')
-        2.857...  # 2 / (0.2 + 0.5)
+        0.35  # (0.2 + 0.5) / 2
     """
     if not weights:
         raise ValueError("Weights list cannot be empty")
@@ -75,20 +75,19 @@ def combine_class_weights(
     combination = combination.lower()
     
     if combination == NegativePairCombination.SUM:
-        # w = N / (w_a + w_b + ...) - normalized to match single class scale
-        # This is the most stable approach, recommended by research
-        return len(weights) / sum(weights)
+        # Arithmetic mean of per-class weights keeps the scale consistent
+        # with single-class (positive pair) weights.
+        return sum(weights) / len(weights)
     
     elif combination == NegativePairCombination.GEOMETRIC_MEAN:
-        # w = 1 / (w_a * w_b * ...)^(1/N)
-        # Balanced approach - geometric mean of inverse weights
+        # Geometric mean of per-class weights -- slightly favours rare-class
+        # pairs over arithmetic mean while staying on the same scale.
         product = np.prod(weights)
-        return 1.0 / (product ** (1.0 / len(weights)))
+        return product ** (1.0 / len(weights))
     
     elif combination == NegativePairCombination.PRODUCT:
-        # w = 1 / (w_a * w_b * ...)
-        # Most aggressive - can create very large weights for rare pairs
-        return 1.0 / np.prod(weights)
+        # Product of per-class weights -- most aggressive towards rare pairs.
+        return np.prod(weights)
     
     else:
         valid_strategies = [e.value for e in NegativePairCombination]

@@ -245,17 +245,21 @@ def replace_green_background_to_bat_face_image(image_path, output_path):
     cv2.destroyAllWindows()
 
 
-def preprocess_siamese_input(image_path, target_size=(224, 224)):
+def preprocess_siamese_input(image_path, target_size=None):
     """
     Preprocess an image for input to the siamese network.
 
     Args:
         image_path (str): Path to the image file
-        target_size (tuple): Target size for the image (height, width)
+        target_size (tuple): Target size for the image (height, width).
+            Must be provided — infer from the loaded model's input_shape.
 
     Returns:
         numpy.ndarray: Preprocessed image
     """
+    if target_size is None:
+        raise ValueError("target_size is required — infer from the loaded model's input_shape")
+
     # Read the image
     img = cv2.imread(image_path)
     if img is None:

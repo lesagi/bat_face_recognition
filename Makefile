@@ -1,7 +1,7 @@
 # Makefile for Bat Face Recognition Project
 # Provides convenient commands for development workflow
 
-.PHONY: help install install-dev install-exact clean test lint format type-check security docs serve-docs build docker-build docker-run
+.PHONY: help install install-dev install-exact clean test lint format type-check security docs serve-docs build docker-build docker-run run train permutation-test cleanup-checkpoints
 
 # Default target
 help:
@@ -31,9 +31,15 @@ help:
 	@echo "  docker-build    Build Docker image"
 	@echo "  docker-run      Run Docker container"
 	@echo ""
+	@echo "Experiment Commands:"
+	@echo "  run             Interactive experiment launcher"
+	@echo "  train           Train Siamese model (BAT_TYPE=r DATA_SOURCE=video BACKGROUND=random)"
+	@echo "  permutation-test  Run permutation test (BAT_TYPE=r DATA_SOURCE=video)"
+	@echo "  cleanup-checkpoints  Preview checkpoint cleanup (dry-run)"
+	@echo ""
 	@echo "Data Commands:"
 	@echo "  augment-data    Run data augmentation script"
-	@echo "  train-model     Train Siamese network model"
+	@echo "  train-model     Train Siamese network model (legacy)"
 
 # Installation
 install:
@@ -73,8 +79,8 @@ lint: format type-check security
 	@echo "All linting checks completed!"
 
 format:
-	black app/ face_annotation_eyes_nose/ --line-length=88
-	isort app/ face_annotation_eyes_nose/ --profile=black
+	black app/ scripts/ --line-length=88
+	isort app/ scripts/ --profile=black
 
 type-check:
 	mypy app/ --ignore-missing-imports
@@ -101,15 +107,28 @@ docker-build:
 docker-run:
 	docker run -p 5000:5000 -v $(PWD):/workspace bat-face-recognition:latest
 
-# Project-specific commands
+# Experiment commands
+run:
+	python run.py
+
+train:
+	python -m app.siamese_training.train_siamese --bat-type $(BAT_TYPE) --data-source $(DATA_SOURCE) --background $(BACKGROUND)
+
+permutation-test:
+	python -m app.statistical_tests.run_permutation_test --bat-type $(BAT_TYPE) --data-source $(DATA_SOURCE)
+
+cleanup-checkpoints:
+	python scripts/cleanup_checkpoints.py --dry-run
+
+# Legacy project-specific commands
 augment-data:
-	cd app && python ../face_annotation_eyes_nose/create_augmented_dataset.py
+	cd app && python ../legacy/face_annotation_eyes_nose/create_augmented_dataset.py
 
 train-model:
-	cd app && python main.py
+	python -m app.siamese_training.train_siamese --bat-type r --data-source video
 
 predict:
-	cd app && python generate_predictions.py --help
+	python -m app.generate_predictions --help
 
 # Environment setup
 setup-env:
