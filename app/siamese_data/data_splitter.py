@@ -10,6 +10,9 @@ from itertools import combinations, permutations, product
 from config.loader import load_config
 from utils.filename_parser import group_files_by_class
 from siamese_data.pair_class_info import PairClassInfo
+from siamese_core.network import SIAMESE_INPUT_EDGE_LENGTH
+
+_preprocess_error_count = tf.Variable(0, dtype=tf.int32, trainable=False)
 
 
 def get_files_from_dir(directory):
@@ -23,38 +26,15 @@ def get_files_from_dir(directory):
 
 def preprocess_siamese_input(file_path):
     """Preprocess a single image file path into a tensor."""
-    try:
-        # Read in image from file path
-        byte_img = tf.io.read_file(file_path)
-        # Load in the image - try both PNG and JPEG
-        try:
-            img = tf.io.decode_png(byte_img)
-        except:
-            img = tf.io.decode_jpeg(byte_img)
+    byte_img = tf.io.read_file(file_path)
+    img = tf.io.decode_image(byte_img, channels=3, expand_animations=False)
+    img.set_shape([None, None, 3])
 
-        # Read input size from config locally
-        cfg = load_config()
-        input_edge = cfg.siamese_network.model.get("input_edge_length", 224)
+    img = tf.image.resize(img, (SIAMESE_INPUT_EDGE_LENGTH, SIAMESE_INPUT_EDGE_LENGTH))
+    img = img / 255.0
+    img = tf.cast(img, tf.float32)
 
-        # Preprocessing steps - resizing the image
-        img = tf.image.resize(img, (input_edge, input_edge))
-        # Scale image to be between 0 and 1
-        img = img / 255.0
-
-        # Ensure the image has 3 channels
-        img = tf.image.convert_image_dtype(img, tf.float32)
-        if tf.shape(img)[2] == 1:  # Grayscale
-            img = tf.repeat(img, 3, axis=2)
-        elif tf.shape(img)[2] == 4:  # RGBA
-            img = img[:, :, :3]
-
-        return img
-    except Exception as e:
-        tf.print(f"Error processing {file_path}: {e}")
-        # Return a black image as fallback (use local config)
-        cfg = load_config()
-        input_edge = cfg.siamese_network.model.get("input_edge_length", 224)
-        return tf.zeros((input_edge, input_edge, 3), dtype=tf.float32)
+    return img
 
 
 def preprocess_twin_input_function(input_img_path, validation_img_path, label, class_info):
@@ -104,6 +84,10 @@ class SiameseNetworkTrainingDataSplitter:
         # Track class distribution for weighting
         self.train_class_distribution = {}
         self.test_class_distribution = {}
+
+        # Cache config once for pair generation
+        cfg = load_config()
+        self._max_samples_per_class = cfg.siamese_network.training.get("max_samples_per_class")
 
         # Collect all files from all directories
         all_files = []
@@ -203,10 +187,7 @@ class SiameseNetworkTrainingDataSplitter:
             print(f"{class_name:<10}| {'Anchor size: ':<10}{anchor_class_size:<5}| {'Final count: ':<10}{0:<10}")
             return empty
         
-        # Get config for size limit
-        cfg = load_config()
-        max_limit = cfg.siamese_network.training.get("max_samples_per_class")
-        
+        max_limit = self._max_samples_per_class
         min_samples_count = min(anchor_class_size, max_limit) if max_limit is not None else anchor_class_size
         data = tf.data.Dataset.from_tensor_slices(anchor_images_list)
         buffer_size = max(1, anchor_class_size)
@@ -291,9 +272,7 @@ class SiameseNetworkTrainingDataSplitter:
         min_size_class = min(list_a_size, list_b_size)
         min_samples_per_class = min_size_class
         
-        # Get config for size limit
-        cfg = load_config()
-        max_samples_per_class = cfg.siamese_network.training.get("max_samples_per_class")
+        max_samples_per_class = self._max_samples_per_class
         if max_samples_per_class is not None:
             min_samples_per_class = min(min_size_class, max_samples_per_class)
         

@@ -1,9 +1,11 @@
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Layer, Conv2D, Dense, MaxPooling2D, Input, Flatten
 import tensorflow as tf
+from keras.models import Model  # pyright: ignore[reportMissingTypeStubs]
+from keras.layers import Layer, Conv2D, Dense, MaxPooling2D, Input, Flatten  # pyright: ignore[reportMissingTypeStubs]
+from keras.regularizers import l2  # pyright: ignore[reportMissingTypeStubs]
 
 # Siamese network constants
 SIAMESE_INPUT_EDGE_LENGTH = 224
+L2_REG = l2(1e-4)
 
 
 class L1Dist(Layer):
@@ -34,7 +36,7 @@ class SiameseNetwork:
             embedding_model(input_img), embedding_model(validation_img)
         )
 
-        classifier = Dense(1, activation="sigmoid", dtype='float32')(distances)
+        classifier = Dense(units=1, activation="sigmoid", dtype='float32')(distances)
 
         return Model(
             inputs=[input_img, validation_img],
@@ -54,21 +56,21 @@ class SiameseNetwork:
         )
 
         # First block
-        c1 = Conv2D(64, (10, 10), activation="relu")(inp)
-        m1 = MaxPooling2D(64, (2, 2), padding="same")(c1)
+        c1 = Conv2D(filters=64, kernel_size=(10, 10), activation="relu", kernel_regularizer=L2_REG)(inp)
+        m1 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(c1)
 
         # Second block
-        c2 = Conv2D(128, (7, 7), activation="relu")(m1)
-        m2 = MaxPooling2D(64, (2, 2), padding="same")(c2)
+        c2 = Conv2D(filters=128, kernel_size=(7, 7), activation="relu", kernel_regularizer=L2_REG)(m1)
+        m2 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(c2)
 
         # Third block
-        c3 = Conv2D(128, (4, 4), activation="relu")(m2)
-        m3 = MaxPooling2D(64, (2, 2), padding="same")(c3)
+        c3 = Conv2D(filters=128, kernel_size=(4, 4), activation="relu", kernel_regularizer=L2_REG)(m2)
+        m3 = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(c3)
 
         # Final embedding block
-        c4 = Conv2D(256, (4, 4), activation="relu")(m3)
+        c4 = Conv2D(filters=256, kernel_size=(4, 4), activation="relu", kernel_regularizer=L2_REG)(m3)
         f1 = Flatten()(c4)
-        d1 = Dense(4096, activation="sigmoid")(f1)
+        d1 = Dense(units=4096, activation="sigmoid", kernel_regularizer=L2_REG)(f1)
 
         return Model(inputs=[inp], outputs=[d1], name="embedding")
 
