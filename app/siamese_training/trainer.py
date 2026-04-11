@@ -37,6 +37,7 @@ from siamese_core.network import SiameseNetwork, L1Dist, SIAMESE_INPUT_EDGE_LENG
 from siamese_data.data_splitter import SiameseNetworkTrainingDataSplitter
 from siamese_data.class_weights import ClassWeightCalculator
 from siamese_data.global_distribution import compute_global_class_distribution
+from siamese_training.focal_loss import BinaryFocalLoss
 from config.loader import load_config
 
 
@@ -193,10 +194,34 @@ class SiameseNetworkTrainer:
         # Wrap optimizer for mixed precision if enabled
         self._needs_mixed_precision_wrap = self.mixed_precision_enabled
             
-        # Use reduction='none' to get per-sample loss for weighted loss calculation
-        self.loss_function = tf.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
-        # Separate loss for testing (unweighted, default reduction)
-        self.test_loss_function = tf.losses.BinaryCrossentropy()
+        # Loss function setup (configurable via config.yml)
+        loss_cfg = sn_train.get("loss", {})
+        loss_type = loss_cfg.get("type", "BinaryCrossentropy")
+        from_logits = loss_cfg.get("from_logits", False)
+
+        if loss_type == "BinaryFocalLoss":
+            focal_alpha = loss_cfg.get("focal_alpha", 0.75)
+            focal_gamma = loss_cfg.get("focal_gamma", 2.0)
+            self.loss_function = BinaryFocalLoss(
+                alpha=focal_alpha, gamma=focal_gamma,
+                from_logits=from_logits,
+                reduction=tf.keras.losses.Reduction.NONE,
+            )
+            self.test_loss_function = BinaryFocalLoss(
+                alpha=focal_alpha, gamma=focal_gamma,
+                from_logits=from_logits,
+                reduction=tf.keras.losses.Reduction.AUTO,
+            )
+            print(f"🔧 Loss: BinaryFocalLoss (alpha={focal_alpha}, gamma={focal_gamma})")
+        else:
+            self.loss_function = tf.losses.BinaryCrossentropy(
+                from_logits=from_logits,
+                reduction=tf.keras.losses.Reduction.NONE,
+            )
+            self.test_loss_function = tf.losses.BinaryCrossentropy(
+                from_logits=from_logits,
+            )
+            print(f"🔧 Loss: BinaryCrossentropy")
 
         # Data loading (must come BEFORE class balancing for global distribution)
         print(f"🔧 Loading data from: {self.input_dir}")
@@ -472,6 +497,9 @@ class SiameseNetworkTrainer:
             "learning_rate": sn_train.get("learning_rate", 1e-4),
             "optimizer": sn_train.get("optimizer", {}).get("type", "Adam"),
             "loss": sn_train.get("loss", {}).get("type", "BinaryCrossentropy"),
+            "loss_from_logits": sn_train.get("loss", {}).get("from_logits", False),
+            "focal_alpha": sn_train.get("loss", {}).get("focal_alpha", "N/A"),
+            "focal_gamma": sn_train.get("loss", {}).get("focal_gamma", "N/A"),
             "train_val_split": self.training_portion,
             "pair_mode": sn_train.get("pair_mode", "permutation"),
             "split_mode": self.split_mode,
@@ -976,7 +1004,10 @@ class SiameseNetworkTrainer:
                     if os.path.exists(best_model_path):
                         self.siamese_model = tf.keras.models.load_model(
                             best_model_path,
-                            custom_objects={"L1Dist": L1Dist}
+                            custom_objects={
+                                "L1Dist": L1Dist,
+                                "BinaryFocalLoss": BinaryFocalLoss,
+                            }
                         )
                         print(f"✅ Best weights restored (F1: {self.best_f1_value:.6f})")
                     else:
@@ -1242,11 +1273,13 @@ class SiameseNetworkTrainer:
                 from siamese_core.network import L1Dist
                 
                 # Load model for saliency
+                from siamese_training.focal_loss import BinaryFocalLoss as _BFL
                 model = tf.keras.models.load_model(
                     best_model_path,
                     custom_objects={
                         "L1Dist": L1Dist,
                         "BinaryCrossentropy": tf.losses.BinaryCrossentropy,
+                        "BinaryFocalLoss": _BFL,
                     },
                 )
                 

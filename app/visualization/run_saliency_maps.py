@@ -81,11 +81,13 @@ def load_model(model_path):
         tuple: (tf.keras.Model, int) - Loaded Siamese model and detected input size
     """
     try:
+        from siamese_training.focal_loss import BinaryFocalLoss
         model = tf.keras.models.load_model(
             model_path,
             custom_objects={
                 "L1Dist": L1Dist,
                 "BinaryCrossentropy": tf.losses.BinaryCrossentropy,
+                "BinaryFocalLoss": BinaryFocalLoss,
             },
         )
         print(f"Successfully loaded model from: {model_path}")

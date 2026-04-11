@@ -95,9 +95,10 @@ def load_siamese_model(model_path):
     Returns:
         tf.keras.Model: Loaded Siamese model
     """
-    # Import TensorFlow and L1Dist only when needed
+    # Import TensorFlow and custom layers/losses only when needed
     import tensorflow as tf
     from siamese_core.network import L1Dist
+    from siamese_training.focal_loss import BinaryFocalLoss
     
     try:
         model = tf.keras.models.load_model(
@@ -105,6 +106,7 @@ def load_siamese_model(model_path):
             custom_objects={
                 "L1Dist": L1Dist,
                 "BinaryCrossentropy": tf.losses.BinaryCrossentropy,
+                "BinaryFocalLoss": BinaryFocalLoss,
             },
         )
         print(f"✅ Successfully loaded model from: {model_path}")
