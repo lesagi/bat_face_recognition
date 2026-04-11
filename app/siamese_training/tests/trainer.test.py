@@ -75,7 +75,9 @@ def test_trainer_initialization():
                 trainer = SiameseNetworkTrainer(
                     bat_type='r',
                     augmented_data=False,
-                    data_source='video'
+                    data_source='video',
+                    background='random',
+                    split_mode='image_split',
                 )
             
             print("✅ Trainer initialized successfully")

@@ -27,12 +27,16 @@ def main():
     parser.add_argument("--background", dest="background", type=str, required=True,
                         choices=["green", "random", "original"],
                         help="Background type: 'green', 'random', or 'original'")
+    parser.add_argument("--split-mode", dest="split_mode", type=str, required=True,
+                        choices=["image_split", "bat_split"],
+                        help="Train/test split: 'image_split' (per-class images) or 'bat_split' (disjoint identities)")
     parser.add_argument("--permute-labels", dest="permute_labels", action="store_true",
                         help="Enable label permutation test mode")
     args = parser.parse_args()
 
     print("🚀 Starting Siamese Network Training")
     print(f"📁 Background type: {args.background}")
+    print(f"✂️  Train/test split mode: {args.split_mode}")
     print()
 
     try:
@@ -41,6 +45,7 @@ def main():
         trainer = SiameseNetworkTrainer(
             args.bat_type, args.augmented_data, args.data_source,
             background=args.background,
+            split_mode=args.split_mode,
             permute_labels=args.permute_labels,
         )
         

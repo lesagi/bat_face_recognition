@@ -3,6 +3,12 @@
 
 .PHONY: help install install-dev install-exact clean test lint format type-check security docs serve-docs build docker-build docker-run run train permutation-test cleanup-checkpoints
 
+# Defaults for make train / train-model (override: make train BAT_TYPE=m ...)
+BAT_TYPE ?= r
+DATA_SOURCE ?= video
+BACKGROUND ?= random
+SPLIT_MODE ?= image_split
+
 # Default target
 help:
 	@echo "Bat Face Recognition Project - Available Commands:"
@@ -33,7 +39,7 @@ help:
 	@echo ""
 	@echo "Experiment Commands:"
 	@echo "  run             Interactive experiment launcher"
-	@echo "  train           Train Siamese model (BAT_TYPE=r DATA_SOURCE=video BACKGROUND=random)"
+	@echo "  train           Train Siamese model (set BAT_TYPE DATA_SOURCE BACKGROUND SPLIT_MODE; SPLIT_MODE defaults via make if unset)"
 	@echo "  permutation-test  Run permutation test (BAT_TYPE=r DATA_SOURCE=video)"
 	@echo "  cleanup-checkpoints  Preview checkpoint cleanup (dry-run)"
 	@echo ""
@@ -112,7 +118,7 @@ run:
 	python run.py
 
 train:
-	python -m app.siamese_training.train_siamese --bat-type $(BAT_TYPE) --data-source $(DATA_SOURCE) --background $(BACKGROUND)
+	python -m app.siamese_training.train_siamese --bat-type $(BAT_TYPE) --data-source $(DATA_SOURCE) --background $(BACKGROUND) --split-mode $(SPLIT_MODE)
 
 permutation-test:
 	python -m app.statistical_tests.run_permutation_test --bat-type $(BAT_TYPE) --data-source $(DATA_SOURCE)
@@ -125,7 +131,7 @@ augment-data:
 	cd app && python ../legacy/face_annotation_eyes_nose/create_augmented_dataset.py
 
 train-model:
-	python -m app.siamese_training.train_siamese --bat-type r --data-source video
+	python -m app.siamese_training.train_siamese --bat-type r --data-source video --background random --split-mode image_split
 
 predict:
 	python -m app.generate_predictions --help
