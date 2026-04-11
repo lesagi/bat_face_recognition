@@ -312,6 +312,7 @@ def generate_predictions(
     include_subdirs=None,
     verbose=False,
     max_pairs=None,
+    threshold=0.5,
 ):
     """
     Generate predictions for all image pairs in the input directory.
@@ -538,8 +539,7 @@ def generate_predictions(
                     frame1 = "0"
                     frame2 = "0"
 
-                # Binary prediction based on threshold
-                prediction = 1 if y_hat[i][0] > 0.5 else 0
+                prediction = 1 if y_hat[i][0] > threshold else 0
                 success = 1 - abs(
                     float(batch_labels[i]) - prediction
                 )  # Accuracy for this pair
@@ -678,13 +678,13 @@ def generate_predictions_from_config(
     input_paths = cfg.siamese_network.input_paths[bat_key]
     
     # Get input directory based on background type
-    input_dir = input_paths.get("original_bg_input")
+    bg_key_map = {"green": "green_bg_input", "random": "random_bg_input", "original": "original_bg_input"}
+    bg_key = bg_key_map.get(background, "original_bg_input")
+    input_dir = input_paths.get(bg_key)
     
     if not input_dir or not os.path.exists(input_dir):
         raise ValueError(f"Input directory not found for background '{background}': {input_dir}")
     
-    # Get config values with fallback to function parameters
-    # model_version is required and should be passed from training (best_f1_epoch)
     if model_version is None:
         raise ValueError("model_version is required and should be the best_f1_epoch from training")
     
@@ -692,10 +692,23 @@ def generate_predictions_from_config(
     verbose = verbose if verbose is not None else pred_config.get("verbose", False)
     max_pairs = max_pairs if max_pairs is not None else pred_config.get("max_pairs")
     
+    # Auto-detect optimal threshold from training_summary.json if available
+    threshold = 0.5
+    summary_path = os.path.join(output_dir, "training_summary.json")
+    if os.path.exists(summary_path):
+        try:
+            import json
+            with open(summary_path) as f:
+                summary = json.load(f)
+            if "optimal_threshold" in summary:
+                threshold = summary["optimal_threshold"]["value"]
+                print(f"📊 Using optimal threshold from training: {threshold:.4f}")
+        except Exception:
+            pass
+    
     # Load the model
     model = load_siamese_model(model_path)
     
-    # Generate predictions
     result = generate_predictions(
         model=model,
         input_dir=input_dir,
@@ -707,6 +720,7 @@ def generate_predictions_from_config(
         include_subdirs=include_subdirs,
         verbose=verbose,
         max_pairs=max_pairs,
+        threshold=threshold,
     )
     
     return result
