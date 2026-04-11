@@ -186,6 +186,10 @@ class SiameseNetworkTrainer:
         self.early_stopping_counter = 0
         self.early_stopping_best_value = 0.0  # Track best F1 for early stopping
 
+        # Threshold optimization (populated post-training)
+        self._optimal_threshold = None
+        self._optimal_threshold_metrics = None
+
         # Model, optimizer, loss
         self.siamese_model = SiameseNetwork(L1Dist()).model
         self._initial_lr = sn_train.get("learning_rate", 1e-4)
@@ -1033,6 +1037,9 @@ class SiameseNetworkTrainer:
         print(f"🏆 Best test_precision: {self.best_precision_value:.6f} at epoch {self.best_precision_epoch}")
         print(f"{'='*70}\n")
 
+        # Threshold optimization on the test set
+        self._run_threshold_optimization()
+
         self._write_training_summary_json()
 
         # Log final best epochs to MLflow as parameters (persisted)
@@ -1138,6 +1145,45 @@ class SiameseNetworkTrainer:
         self._remove_path_for_resave(dest)
         os.symlink(canon_name, dest, target_is_directory=True)
 
+    def _run_threshold_optimization(self) -> None:
+        """Find the optimal decision threshold on the test set using Youden's J."""
+        if self.siamese_model is None or not self.test_batches:
+            return
+        print(f"\n📊 Running threshold optimization on test set...")
+        try:
+            from siamese_training.threshold_optimizer import find_optimal_threshold
+
+            all_y_true = []
+            all_y_pred = []
+            for batch in self.test_batches:
+                x = [batch[0], batch[1]]
+                y = batch[2]
+                yhat = self.siamese_model(x, training=False)
+                all_y_true.append(y.numpy().ravel())
+                all_y_pred.append(yhat.numpy().ravel())
+
+            y_true = np.concatenate(all_y_true)
+            y_pred = np.concatenate(all_y_pred)
+
+            threshold, metrics = find_optimal_threshold(y_true, y_pred)
+            self._optimal_threshold = threshold
+            self._optimal_threshold_metrics = metrics
+
+            print(f"   Optimal threshold: {threshold:.4f}")
+            print(f"   Sensitivity: {metrics['sensitivity']:.4f}")
+            print(f"   Specificity: {metrics['specificity']:.4f}")
+            print(f"   F1 at threshold: {metrics['f1']:.4f}")
+            print(f"   Youden's J: {metrics['youden_j']:.4f}")
+
+            if self.mlflow_enabled:
+                mlflow.log_metric("optimal_threshold", threshold)
+                mlflow.log_metric("optimal_threshold_f1", metrics["f1"])
+                mlflow.log_metric("optimal_threshold_youden_j", metrics["youden_j"])
+        except Exception as e:
+            print(f"⚠️  Threshold optimization failed: {e}")
+            self._optimal_threshold = None
+            self._optimal_threshold_metrics = None
+
     def _write_training_summary_json(self) -> None:
         """Small manifest of best-metric epochs and on-disk layout (paths relative to run dir)."""
         if self.model_output_dir is None:
@@ -1176,6 +1222,11 @@ class SiameseNetworkTrainer:
             },
             "artifact_retention": dict(self._artifact_retention),
         }
+        if self._optimal_threshold is not None:
+            summary["optimal_threshold"] = {
+                "value": self._optimal_threshold,
+                **(self._optimal_threshold_metrics or {}),
+            }
         path = os.path.join(self.model_output_dir, "training_summary.json")
         with open(path, "w") as f:
             json.dump(summary, f, indent=2)
