@@ -68,6 +68,7 @@ siamese_network:
     class_balancing:
       enabled: true
       anchor_negative_balance: true  # Balance positive vs negative pairs (per-batch adaptive)
+      anchor_target_ratio: 0.5  # Anchor contribution target: 0.5=equal, 0.7=70/30 favoring anchors
       per_class_balance: true  # Balance across different classes (globally computed)
       weighting_scheme: "isns"  # Changed to ISNS (gentler weighting than INS)
       ens_beta: 0.9  # Beta parameter for ENS scheme (0.9, 0.99, 0.999, 0.9999)

@@ -300,6 +300,7 @@ class ClassWeightCalculator:
         """
         self.enabled = config.get('enabled', False)
         self.anchor_negative_balance = config.get('anchor_negative_balance', True)
+        self.anchor_target_ratio = config.get('anchor_target_ratio', 0.5)
         self.per_class_balance = config.get('per_class_balance', True)
         self.weighting_scheme = config.get('weighting_scheme', 'ins')
         self.ens_beta = config.get('ens_beta', 0.9999)
@@ -450,7 +451,9 @@ class ClassWeightCalculator:
             # Empty batch (shouldn't happen)
             return 1.0, 1.0
         
-        return calculate_anchor_negative_weights(int(num_anchors), int(num_negatives))
+        return calculate_anchor_negative_weights(
+            int(num_anchors), int(num_negatives), self.anchor_target_ratio
+        )
     
     def _compute_class_weights(self) -> Dict[str, float]:
         """
