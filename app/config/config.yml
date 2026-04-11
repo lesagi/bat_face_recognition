@@ -82,8 +82,10 @@ siamese_network:
       beta_2: 0.999
       epsilon: 1e-07
     loss:
-      type: "BinaryCrossentropy"
+      type: "BinaryCrossentropy"  # Options: "BinaryCrossentropy", "BinaryFocalLoss"
       from_logits: false
+      focal_alpha: 0.75  # BinaryFocalLoss only: positive class weight (>0.5 favors positives/anchors)
+      focal_gamma: 2.0   # BinaryFocalLoss only: focusing parameter (0 = standard BCE, 2.0 recommended)
     train_val_split: 0.7
     pair_mode: "permutation" # "permutation" or "combination"
     max_samples_per_class: 35
