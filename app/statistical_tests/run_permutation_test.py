@@ -206,6 +206,13 @@ def parse_args():
         help='Background type for training images (default: random)'
     )
     train_group.add_argument(
+        '--split-mode',
+        type=str,
+        choices=['image_split', 'bat_split'],
+        default='image_split',
+        help='Train/test split strategy (default: image_split)'
+    )
+    train_group.add_argument(
         '--gpu',
         type=int,
         default=None,
@@ -472,6 +479,7 @@ def main():
     print(f"  Bat type: {bat_type}", flush=True)
     print(f"  Data source: {data_source}", flush=True)
     print(f"  Background: {args.background}", flush=True)
+    print(f"  Split mode: {args.split_mode}", flush=True)
     print(f"  Augmented: {augmented}", flush=True)
     if args.gpu is not None:
         print(f"  GPU: {args.gpu}", flush=True)
@@ -484,6 +492,7 @@ def main():
         augmented_data=augmented,
         data_source=data_source,
         background=args.background,
+        split_mode=args.split_mode,
         sample_fraction=defaults['sample_fraction'],
         shuffle_buffer_fraction=defaults['shuffle_buffer_fraction'],
         optimizer=defaults['optimizer'],

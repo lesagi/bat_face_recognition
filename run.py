@@ -154,6 +154,15 @@ def run_permutation_test():
         ("Original", "original"),
     ])
 
+    split_mode = prompt_choice(
+        "\nTrain/test split:",
+        [
+            ("Per-image within each class (image_split)", "image_split"),
+            ("By bat identity (bat_split)", "bat_split"),
+        ],
+        default="image_split",
+    )
+
     metrics_source = prompt_choice("\nObserved metrics source:", [
         ("JSON file", "json"),
         ("MLflow run ID", "mlflow"),
@@ -165,6 +174,7 @@ def run_permutation_test():
         "--bat-type", bat_type,
         "--data-source", data_source,
         "--background", bg_type,
+        "--split-mode", split_mode,
     ]
 
     if metrics_source == "json":

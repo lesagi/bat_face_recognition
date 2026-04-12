@@ -59,6 +59,7 @@ class PermutationTrainer:
         augmented_data: bool = False,
         data_source: str = 'video',
         background: str = 'random',
+        split_mode: str = 'image_split',
         permute_labels: bool = True,
         num_epochs: int = 10,
         mlflow_enabled: bool = False,
@@ -73,6 +74,7 @@ class PermutationTrainer:
         sn_train = cfg.siamese_network.training
         
         self.permute_labels = permute_labels
+        self.split_mode = split_mode
         self.num_epochs = num_epochs
         self.verbose = verbose
         self.mlflow_enabled = mlflow_enabled
@@ -152,7 +154,8 @@ class PermutationTrainer:
             training_portion=self.training_portion, 
             mode=self.pair_mode, 
             permute_labels=self.permute_labels,
-            split_seed=self.split_seed
+            split_seed=self.split_seed,
+            split_mode=self.split_mode,
         )
         
         train_data = self.data_splitter.train_data
@@ -419,6 +422,7 @@ def create_permutation_trainer(
     augmented_data: bool = False,
     data_source: str = 'video',
     background: str = 'random',
+    split_mode: str = 'image_split',
     permute_labels: bool = True,
     num_epochs: int = 10,
     mlflow_enabled: bool = False,
@@ -434,6 +438,7 @@ def create_permutation_trainer(
         augmented_data=augmented_data,
         data_source=data_source,
         background=background,
+        split_mode=split_mode,
         permute_labels=permute_labels,
         num_epochs=num_epochs,
         mlflow_enabled=mlflow_enabled,
