@@ -148,6 +148,12 @@ def run_permutation_test():
         ("Still images", "still"),
     ])
 
+    bg_type = prompt_choice("\nBackground photos:", [
+        ("Green", "green"),
+        ("Random", "random"),
+        ("Original", "original"),
+    ])
+
     metrics_source = prompt_choice("\nObserved metrics source:", [
         ("JSON file", "json"),
         ("MLflow run ID", "mlflow"),
@@ -158,6 +164,7 @@ def run_permutation_test():
         sys.executable, "-m", "app.statistical_tests.run_permutation_test",
         "--bat-type", bat_type,
         "--data-source", data_source,
+        "--background", bg_type,
     ]
 
     if metrics_source == "json":
@@ -181,7 +188,7 @@ def run_permutation_test():
     n_perms = input("\nNumber of permutations [100]: ").strip() or "100"
     cmd_parts.extend(["--n-permutations", n_perms])
 
-    background = prompt_yn("\nRun in background?", default=True)
+    run_in_bg = prompt_yn("\nRun in background?", default=True)
 
     cmd_str = " ".join(cmd_parts)
     print(f"\n--- Command ---")
@@ -191,7 +198,7 @@ def run_permutation_test():
         print("Aborted.")
         return
 
-    if background:
+    if run_in_bg:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_dir = os.path.join(PROJECT_ROOT, "logs", "permutation_tests")
         os.makedirs(log_dir, exist_ok=True)
