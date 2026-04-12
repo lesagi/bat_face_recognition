@@ -47,11 +47,18 @@ from config.loader import load_config
 
 
 class PermutationTrainer:
+    _BG_CONFIG_KEY = {
+        "green": "green_bg_input",
+        "random": "random_bg_input",
+        "original": "original_bg_input",
+    }
+
     def __init__(
         self,
         bat_type: str = 'r',
         augmented_data: bool = False,
         data_source: str = 'video',
+        background: str = 'random',
         permute_labels: bool = True,
         num_epochs: int = 10,
         mlflow_enabled: bool = False,
@@ -96,10 +103,15 @@ class PermutationTrainer:
         # Store config values needed for data setup (per-permutation)
         bat_key = 'mauritius' if bat_type == 'm' else 'rousettus'
         input_paths = cfg.siamese_network.input_paths[bat_key]
-        self.input_dir = input_paths.get("random_bg_input")
+        bg_key = self._BG_CONFIG_KEY[background]
+        self.input_dir = input_paths.get(bg_key)
         
         if not self.input_dir or not os.path.exists(self.input_dir):
-            raise ValueError(f"Invalid or missing training input_dir: {self.input_dir}")
+            raise ValueError(
+                f"Invalid or missing training input_dir for background '{background}': "
+                f"{self.input_dir}. "
+                f"Please set input_paths.{bat_key}.{bg_key} in config.yml"
+            )
         
         self.training_portion = sn_train.get("train_val_split", 0.7)
         self.pair_mode = sn_train.get("pair_mode", "permutation")
@@ -406,6 +418,7 @@ def create_permutation_trainer(
     bat_type: str = 'r',
     augmented_data: bool = False,
     data_source: str = 'video',
+    background: str = 'random',
     permute_labels: bool = True,
     num_epochs: int = 10,
     mlflow_enabled: bool = False,
@@ -420,6 +433,7 @@ def create_permutation_trainer(
         bat_type=bat_type,
         augmented_data=augmented_data,
         data_source=data_source,
+        background=background,
         permute_labels=permute_labels,
         num_epochs=num_epochs,
         mlflow_enabled=mlflow_enabled,

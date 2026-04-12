@@ -199,6 +199,13 @@ def parse_args():
         help='Data source type (default: video, or from MLflow run)'
     )
     train_group.add_argument(
+        '--background',
+        type=str,
+        choices=['random', 'green', 'original'],
+        default='random',
+        help='Background type for training images (default: random)'
+    )
+    train_group.add_argument(
         '--gpu',
         type=int,
         default=None,
@@ -464,6 +471,7 @@ def main():
         print(f"  Eval last only: {defaults['eval_last_only']}", flush=True)
     print(f"  Bat type: {bat_type}", flush=True)
     print(f"  Data source: {data_source}", flush=True)
+    print(f"  Background: {args.background}", flush=True)
     print(f"  Augmented: {augmented}", flush=True)
     if args.gpu is not None:
         print(f"  GPU: {args.gpu}", flush=True)
@@ -475,6 +483,7 @@ def main():
         bat_type=bat_type,
         augmented_data=augmented,
         data_source=data_source,
+        background=args.background,
         sample_fraction=defaults['sample_fraction'],
         shuffle_buffer_fraction=defaults['shuffle_buffer_fraction'],
         optimizer=defaults['optimizer'],
