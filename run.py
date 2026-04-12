@@ -14,6 +14,7 @@ Training prompts for species, data source, augmentation, background, and train/t
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -134,71 +135,177 @@ def run_training():
         sys.exit(subprocess.call(cmd_parts, cwd=PROJECT_ROOT))
 
 
+def _parse_experiment_params(dirname):
+    """Extract training params from the experiment directory name.
+
+    Expected format (from trainer._build_experiment_name + _create_output_directory):
+      {YYYYMMDD}_siamese_{species}_{data_source}_{aug_str}_{background}_bg_{run_id}
+
+    Returns dict with bat_type, data_source, augmented, background or None on failure.
+    """
+    m = re.match(
+        r"\d{8}_siamese_(?P<species>rousettus|mauritius)"
+        r"_(?P<source>video|still)"
+        r"_(?P<aug>augmented|no_aug)"
+        r"_(?P<bg>\w+)_bg_",
+        dirname,
+    )
+    if not m:
+        return None
+    species = m.group("species")
+    return {
+        "bat_type": "m" if species == "mauritius" else "r",
+        "species": species,
+        "data_source": m.group("source"),
+        "augmented": m.group("aug") == "augmented",
+        "background": m.group("bg"),
+    }
+
+
+def _choose_experiment(species):
+    """List experiment dirs for a species and let the user pick one.
+
+    Returns (experiment_path, experiment_dirname) or (None, None).
+    """
+    cfg = _load_config()
+    sn_train = cfg.siamese_network.training
+    output_dirs = sn_train.get("output_dir")
+    experiments_base = output_dirs[species]
+    if not os.path.isdir(experiments_base):
+        print(f"  No experiments directory found: {experiments_base}")
+        return None, None
+
+    experiment_dirs = sorted(
+        [d for d in os.listdir(experiments_base)
+         if os.path.isdir(os.path.join(experiments_base, d))],
+        reverse=True,
+    )
+    if not experiment_dirs:
+        print(f"  No experiments found in {experiments_base}")
+        return None, None
+
+    experiment_options = [(d, d) for d in experiment_dirs]
+    experiment = prompt_choice("\nChoose experiment:", experiment_options)
+    return os.path.join(experiments_base, experiment), experiment
+
+
+def _choose_model_checkpoint(experiment_path):
+    """List best_model_* dirs and let user pick. Returns (model_path, model_choice, epoch)."""
+    model_subdirs = sorted([
+        d for d in os.listdir(experiment_path)
+        if d.startswith("best_model_") and os.path.isdir(os.path.join(experiment_path, d))
+    ])
+    if not model_subdirs:
+        print(f"  No best_model_* directories found in {experiment_path}")
+        return None, None, 0
+
+    model_options = [(d, d) for d in model_subdirs]
+    model_options.append(("Enter custom model path", "__custom__"))
+    model_choice = prompt_choice("\nChoose model checkpoint:", model_options)
+
+    if model_choice == "__custom__":
+        model_path = input("  Full model path: ").strip()
+    else:
+        model_path = os.path.join(experiment_path, model_choice)
+
+    # Auto-resolve epoch from training_summary.json
+    model_version = 0
+    summary_path = os.path.join(experiment_path, "training_summary.json")
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path) as f:
+                summary = json.load(f)
+            metric_key = model_choice.replace("best_model_", "best_")
+            if metric_key in summary:
+                model_version = summary[metric_key]["epoch"]
+        except Exception:
+            pass
+    if model_version == 0:
+        raw = input("  Model version/epoch number [0]: ").strip()
+        model_version = int(raw) if raw else 0
+
+    return model_path, model_choice, model_version
+
+
 def run_permutation_test():
-    """Interactive permutation test flow."""
+    """Interactive permutation test flow -- experiment-centric.
+
+    All training parameters (bat_type, data_source, background, etc.) are
+    auto-loaded from the selected experiment directory so the permutation
+    test exactly matches the original training conditions.
+    """
     print("\n--- Permutation Test Configuration ---\n")
 
+    # Step 1: Species
+    species_map = {"m": "mauritius", "r": "rousettus"}
     bat_type = prompt_choice("Bat species:", [
         ("Mauritius (m)", "m"),
         ("Rousettus (r)", "r"),
     ])
+    species = species_map[bat_type]
 
-    data_source = prompt_choice("\nData source:", [
-        ("Video frames", "video"),
-        ("Still images", "still"),
+    # Step 2: Choose experiment
+    experiment_path, experiment_dirname = _choose_experiment(species)
+    if experiment_path is None:
+        return
+
+    # Step 3: Auto-extract training params from directory name
+    exp_params = _parse_experiment_params(experiment_dirname)
+    if exp_params is None:
+        print(f"  Warning: Could not parse training params from directory name: {experiment_dirname}")
+        print(f"  This experiment may use a legacy naming scheme.")
+        print(f"  Aborting -- please use the CLI directly for legacy experiments.")
+        return
+
+    print(f"\n--- Training config (from experiment) ---")
+    print(f"  Species:    {exp_params['species']}")
+    print(f"  Source:     {exp_params['data_source']}")
+    print(f"  Augmented:  {'Yes' if exp_params['augmented'] else 'No'}")
+    print(f"  Background: {exp_params['background']}")
+
+    # Step 4: Choose model checkpoint
+    model_path, model_choice, model_version = _choose_model_checkpoint(experiment_path)
+    if model_path is None:
+        return
+
+    # Step 5: Choose mode
+    mode = prompt_choice("\nPermutation test mode:", [
+        ("Inference-based (fast -- evaluate trained model on permuted test labels)", "inference"),
+        ("Retrain from scratch (classical -- retrain with permuted labels)", "retrain"),
     ])
 
-    bg_type = prompt_choice("\nBackground photos:", [
-        ("Green", "green"),
-        ("Random", "random"),
-        ("Original", "original"),
-    ])
+    # Step 6: Number of permutations
+    default_n = "1000" if mode == "inference" else "100"
+    n_perms = input(f"\nNumber of permutations [{default_n}]: ").strip() or default_n
 
-    split_mode = prompt_choice(
-        "\nTrain/test split:",
-        [
-            ("Per-image within each class (image_split)", "image_split"),
-            ("By bat identity (bat_split)", "bat_split"),
-        ],
-        default="image_split",
-    )
+    # Step 7: Degradation curve (inference mode only)
+    include_degradation = False
+    if mode == "inference":
+        include_degradation = prompt_yn("Include degradation curve (metric vs permutation fraction)?", default=True)
 
-    metrics_source = prompt_choice("\nObserved metrics source:", [
-        ("JSON file", "json"),
-        ("MLflow run ID", "mlflow"),
-        ("Manual entry", "manual"),
-    ])
+    # Step 8: Background execution
+    run_in_bg = prompt_yn("\nRun in background?", default=True)
 
+    # Build command
     cmd_parts = [
         sys.executable, "-m", "app.statistical_tests.run_permutation_test",
-        "--bat-type", bat_type,
-        "--data-source", data_source,
-        "--background", bg_type,
-        "--split-mode", split_mode,
+        "--experiment-dir", experiment_path,
+        "--model-path", model_path,
+        "--mode", mode,
+        "--n-permutations", n_perms,
     ]
+    if include_degradation:
+        cmd_parts.append("--degradation-curve")
 
-    if metrics_source == "json":
-        path = input("  JSON file path: ").strip()
-        cmd_parts.extend(["--observed-metrics", path])
-    elif metrics_source == "mlflow":
-        run_id = input("  MLflow run ID: ").strip()
-        cmd_parts.extend(["--mlflow-run-id", run_id])
-    else:
-        f1 = input("  Observed F1: ").strip()
-        acc = input("  Observed accuracy: ").strip()
-        prec = input("  Observed precision: ").strip()
-        rec = input("  Observed recall: ").strip()
-        cmd_parts.extend([
-            "--observed-f1", f1,
-            "--observed-accuracy", acc,
-            "--observed-precision", prec,
-            "--observed-recall", rec,
-        ])
-
-    n_perms = input("\nNumber of permutations [100]: ").strip() or "100"
-    cmd_parts.extend(["--n-permutations", n_perms])
-
-    run_in_bg = prompt_yn("\nRun in background?", default=True)
+    # Summary
+    print(f"\n--- Summary ---")
+    print(f"  Experiment:  {experiment_dirname}")
+    print(f"  Model:       {model_choice} (epoch {model_version})")
+    print(f"  Mode:        {mode}")
+    print(f"  Permutations: {n_perms}")
+    if mode == "inference":
+        print(f"  Degradation curve: {'Yes' if include_degradation else 'No'}")
+    print(f"  Nohup:       {'Yes' if run_in_bg else 'No'}")
 
     cmd_str = " ".join(cmd_parts)
     print(f"\n--- Command ---")
@@ -259,7 +366,6 @@ def run_evaluate():
     print("\n--- Evaluate Trained Experiment ---\n")
 
     cfg = _load_config()
-    sn_train = cfg.siamese_network.training
 
     # Step 1: Species
     species_map = {"m": "mauritius", "r": "rousettus"}
@@ -270,63 +376,14 @@ def run_evaluate():
     species = species_map[bat_type]
 
     # Step 2: Choose experiment
-    output_dirs = sn_train.get("output_dir")
-    experiments_base = output_dirs[species]
-    if not os.path.isdir(experiments_base):
-        print(f"  No experiments directory found: {experiments_base}")
+    experiment_path, experiment = _choose_experiment(species)
+    if experiment_path is None:
         return
-
-    experiment_dirs = sorted(
-        [d for d in os.listdir(experiments_base)
-         if os.path.isdir(os.path.join(experiments_base, d))],
-        reverse=True,
-    )
-    if not experiment_dirs:
-        print(f"  No experiments found in {experiments_base}")
-        return
-
-    experiment_options = [(d, d) for d in experiment_dirs]
-    experiment = prompt_choice("\nChoose experiment:", experiment_options)
-    experiment_path = os.path.join(experiments_base, experiment)
 
     # Step 3: Choose model (epoch)
-    model_subdirs = sorted([
-        d for d in os.listdir(experiment_path)
-        if d.startswith("best_model_") and os.path.isdir(os.path.join(experiment_path, d))
-    ])
-    if not model_subdirs:
-        print(f"  No best_model_* directories found in {experiment_path}")
+    model_path, model_choice, model_version = _choose_model_checkpoint(experiment_path)
+    if model_path is None:
         return
-
-    model_options = [(d, d) for d in model_subdirs]
-    model_options.append(("Enter custom model path", "__custom__"))
-    model_choice = prompt_choice("\nChoose model:", model_options)
-
-    if model_choice == "__custom__":
-        model_path = input("  Full model path: ").strip()
-    else:
-        model_path = os.path.join(experiment_path, model_choice)
-
-    # Read model_version from training_summary.json if available
-    model_version = 0
-    summary_path = os.path.join(experiment_path, "training_summary.json")
-    if os.path.exists(summary_path):
-        try:
-            with open(summary_path) as f:
-                summary = json.load(f)
-            if model_choice == "best_model_f1" and "best_f1" in summary:
-                model_version = summary["best_f1"]["epoch"]
-            elif model_choice == "best_model_loss" and "best_loss" in summary:
-                model_version = summary["best_loss"]["epoch"]
-            elif model_choice == "best_model_recall" and "best_recall" in summary:
-                model_version = summary["best_recall"]["epoch"]
-            elif model_choice == "best_model_precision" and "best_precision" in summary:
-                model_version = summary["best_precision"]["epoch"]
-        except Exception:
-            pass
-    if model_version == 0:
-        raw = input("  Model version/epoch number [0]: ").strip()
-        model_version = int(raw) if raw else 0
 
     # Step 4: Evaluation background
     bg_type = prompt_choice("\nEvaluation background:", [
