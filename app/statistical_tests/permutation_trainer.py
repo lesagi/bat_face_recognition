@@ -188,10 +188,10 @@ class PermutationTrainer:
             self.class_weight_table = None
         
         # Apply sampling if sample_fraction < 1.0
+        train_size = self.data_splitter.train_size
+        test_size = self.data_splitter.test_size
+        
         if self.sample_fraction < 1.0:
-            train_size = self.data_splitter.train_size if hasattr(self.data_splitter, 'train_size') else 89700
-            test_size = self.data_splitter.test_size if hasattr(self.data_splitter, 'test_size') else 61328
-            
             train_take = int(train_size * self.sample_fraction)
             test_take = int(test_size * self.sample_fraction)
             
@@ -202,10 +202,9 @@ class PermutationTrainer:
                 print(f"Sampled data: ~{train_take} train and ~{test_take} test pairs", flush=True)
         
         # Calculate shuffle buffer size
-        base_buffer_size = 89700
-        shuffle_buffer = int(base_buffer_size * self.shuffle_buffer_fraction)
+        shuffle_buffer = int(train_size * self.shuffle_buffer_fraction)
         if self.sample_fraction < 1.0:
-            shuffle_buffer = min(shuffle_buffer, int(89700 * self.sample_fraction * self.shuffle_buffer_fraction))
+            shuffle_buffer = min(shuffle_buffer, int(train_size * self.sample_fraction * self.shuffle_buffer_fraction))
         
         # Create data batches (no .cache() -- bottleneck is GPU, not I/O)
         self.train_batches = (
