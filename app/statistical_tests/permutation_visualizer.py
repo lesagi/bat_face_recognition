@@ -9,6 +9,7 @@ including:
 - Export to various formats (PNG, PDF, CSV, JSON)
 """
 
+import json
 import os
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -348,6 +349,65 @@ class PermutationVisualizer:
         
         return fig
     
+    def plot_degradation_curve(
+        self,
+        degradation_data: Dict[str, List[Tuple[float, float]]],
+        show: bool = True,
+        save: bool = True,
+        filename: str = 'degradation_curve.png'
+    ) -> Figure:
+        """Plot metric values vs fraction of permuted labels.
+
+        Args:
+            degradation_data: Dict mapping metric names to lists of
+                (fraction, mean_metric_value) tuples.
+            show: Whether to display the plot.
+            save: Whether to save the plot to file.
+            filename: Output filename.
+
+        Returns:
+            matplotlib Figure object.
+        """
+        fig, ax = plt.subplots(figsize=self.figsize)
+
+        colors = ['#e74c3c', '#2ecc71', '#3498db', '#f39c12']
+        for i, (metric, curve) in enumerate(sorted(degradation_data.items())):
+            fractions = [pt[0] for pt in curve]
+            values = [pt[1] for pt in curve]
+            color = colors[i % len(colors)]
+            ax.plot(fractions, values, 'o-', color=color, linewidth=2,
+                    markersize=5, label=metric.title())
+
+        ax.set_xlabel('Fraction of Labels Permuted', fontsize=12)
+        ax.set_ylabel('Metric Value', fontsize=12)
+        ax.set_title('Degradation Curve: Performance vs Label Permutation', fontsize=14)
+        ax.set_xlim(-0.02, 1.02)
+        ax.set_ylim(-0.02, 1.05)
+        ax.legend(loc='best', fontsize=10)
+        ax.grid(True, alpha=0.3)
+
+        textstr = (
+            'At 0% permutation: real performance\n'
+            'At 100% permutation: chance level'
+        )
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax.text(0.98, 0.02, textstr, transform=ax.transAxes, fontsize=9,
+                verticalalignment='bottom', horizontalalignment='right', bbox=props)
+
+        plt.tight_layout()
+
+        if save and self.output_dir:
+            filepath = os.path.join(self.output_dir, filename)
+            fig.savefig(filepath, dpi=self.dpi, bbox_inches='tight')
+            print(f"Saved: {filepath}")
+
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+
+        return fig
+
     def export_csv(self, filename: str = 'permutation_results.csv'):
         """Export results to CSV format."""
         if not self.output_dir:
@@ -377,7 +437,8 @@ class PermutationVisualizer:
         self,
         show: bool = False,
         export_csv: bool = True,
-        export_json: bool = True
+        export_json: bool = True,
+        degradation_data: Optional[Dict[str, List[Tuple[float, float]]]] = None,
     ):
         """
         Generate all visualizations and exports.
@@ -386,6 +447,8 @@ class PermutationVisualizer:
             show: Whether to display plots
             export_csv: Whether to export CSV
             export_json: Whether to export JSON
+            degradation_data: Optional degradation curve data from inference permutation test.
+                If None, tries to load from degradation_curve.json in output_dir.
         """
         if not self.output_dir:
             raise ValueError("output_dir must be set to generate report")
@@ -408,6 +471,25 @@ class PermutationVisualizer:
                 self.plot_null_distribution(metric, show=show, save=True)
             except ValueError as e:
                 print(f"Skipping {metric} distribution plot: {e}")
+        
+        # Degradation curve
+        if degradation_data is None:
+            deg_path = os.path.join(self.output_dir, 'degradation_curve.json')
+            if os.path.exists(deg_path):
+                try:
+                    with open(deg_path) as f:
+                        raw = json.load(f)
+                    degradation_data = {
+                        k: [tuple(pt) for pt in v] for k, v in raw.items()
+                    }
+                except Exception:
+                    pass
+
+        if degradation_data:
+            try:
+                self.plot_degradation_curve(degradation_data, show=show, save=True)
+            except Exception as e:
+                print(f"Skipping degradation curve plot: {e}")
         
         # Export data
         if export_csv:
