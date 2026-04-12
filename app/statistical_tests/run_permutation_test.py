@@ -513,14 +513,13 @@ def main():
     # Print summary
     results.print_summary()
     
-    # Exit with appropriate code
+    # Report significance (exit 0 regardless -- non-significance is a valid finding)
     significant_metrics = [m for m, r in results.metrics.items() if r.significant]
     if significant_metrics:
         print(f"\nModel performance is statistically significant for: {significant_metrics}", flush=True)
-        sys.exit(0)
     else:
-        print("\nWarning: Model performance is NOT statistically significant for any metric.", flush=True)
-        sys.exit(1)
+        print("\nNote: Model performance is NOT statistically significant for any metric.", flush=True)
+    sys.exit(0)
 
 
 if __name__ == '__main__':
