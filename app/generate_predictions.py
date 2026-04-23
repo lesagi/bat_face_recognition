@@ -838,6 +838,21 @@ Note: All outputs are saved to the 'evaluations/' directory in the project root.
         help="Output directory for predictions (default: evaluations/ in project root)",
     )
 
+    parser.add_argument(
+        "--mlflow-run-id",
+        default=None,
+        help=(
+            "Optional MLflow run id to log ROC-AUC metric + ROC PNG to. "
+            "Ignored when an MLflow run is already active (e.g. during training)."
+        ),
+    )
+
+    parser.add_argument(
+        "--no-mlflow-log",
+        action="store_true",
+        help="Disable MLflow logging of ROC-AUC entirely (files are still written to disk).",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -856,6 +871,8 @@ Note: All outputs are saved to the 'evaluations/' directory in the project root.
             include_subdirs=args.subdirs,
             verbose=args.verbose,
             max_pairs=args.max_pairs,
+            mlflow_run_id=args.mlflow_run_id,
+            mlflow_log=not args.no_mlflow_log,
         )
 
         # Handle return value (could be tuple or single path)
