@@ -313,6 +313,8 @@ def generate_predictions(
     verbose=False,
     max_pairs=None,
     threshold=0.5,
+    mlflow_run_id=None,
+    mlflow_log=True,
 ):
     """
     Generate predictions for all image pairs in the input directory.
@@ -629,11 +631,28 @@ def generate_predictions(
             background,
             title="Siamese Network Evaluation",
         )
-
-        return csv_path, plot_path
     else:
         print("⚠️  No confusion matrix data collected")
-        return csv_path, None
+        plot_path = None
+
+    try:
+        from siamese_training.auc_evaluator import evaluate_auc_for_run
+
+        roc_png_path = os.path.join(
+            output_dir,
+            f"roc_curve_v{model_version}_{bat_type}_{source}_{background}_{timestamp}.png",
+        )
+        evaluate_auc_for_run(
+            run_dir=output_dir,
+            csv_path=csv_path,
+            roc_png_path=roc_png_path,
+            mlflow_run_id=mlflow_run_id,
+            mlflow_log=mlflow_log,
+        )
+    except Exception as e:
+        print(f"⚠️  AUC evaluation failed: {e}")
+
+    return csv_path, plot_path
 
 
 def generate_predictions_from_config(
@@ -646,6 +665,8 @@ def generate_predictions_from_config(
     include_subdirs=None,
     verbose=None,
     max_pairs=None,
+    mlflow_run_id=None,
+    mlflow_log=True,
 ):
     """
     Generate predictions using configuration from config.yml.
@@ -721,6 +742,8 @@ def generate_predictions_from_config(
         verbose=verbose,
         max_pairs=max_pairs,
         threshold=threshold,
+        mlflow_run_id=mlflow_run_id,
+        mlflow_log=mlflow_log,
     )
     
     return result
