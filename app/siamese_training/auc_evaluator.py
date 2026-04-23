@@ -123,7 +123,7 @@ def plot_roc_curve(
     subtitle: Optional[str] = None,
 ) -> str:
     """Render the ROC curve to `output_path` and return that path."""
-    fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+    fig, ax = plt.subplots(1, 1, figsize=(7, 6.5))
 
     if np.isnan(auc):
         auc_label = "AUC: N/A (single-class labels)"
@@ -136,20 +136,16 @@ def plot_roc_curve(
     ax.set_ylim(0.0, 1.05)
     ax.set_xlabel("False Positive Rate", fontsize=11)
     ax.set_ylabel("True Positive Rate", fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight="bold")
     ax.legend(loc="lower right", fontsize=10)
     ax.grid(True, linestyle=":", alpha=0.5)
 
     if subtitle:
-        fig.text(
-            0.5, 0.92, subtitle,
-            ha="center", va="top",
-            fontsize=10, color="dimgray",
-        )
+        fig.suptitle(title, fontsize=13, fontweight="bold", y=0.98)
+        ax.set_title(subtitle, fontsize=10, color="dimgray", pad=6)
+    else:
+        ax.set_title(title, fontsize=13, fontweight="bold")
 
     plt.tight_layout()
-    if subtitle:
-        plt.subplots_adjust(top=0.88)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     plt.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
