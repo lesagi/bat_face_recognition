@@ -398,7 +398,12 @@ def run_evaluate():
         ("Still images", "still"),
     ])
 
-    # Step 6: Background execution
+    # Step 6: Optional MLflow run id for AUC logging
+    mlflow_run_id = input(
+        "\nLog ROC-AUC to an existing MLflow run? (enter run id or leave blank to skip): "
+    ).strip() or None
+
+    # Step 7: Background execution
     run_in_bg = prompt_yn("\nRun in background (nohup)?", default=True)
 
     # Build command
@@ -412,6 +417,10 @@ def run_evaluate():
         "--background", bg_type,
         "--output", experiment_path,
     ]
+    if mlflow_run_id:
+        cmd_parts.extend(["--mlflow-run-id", mlflow_run_id])
+    else:
+        cmd_parts.append("--no-mlflow-log")
 
     # Summary
     print(f"\n--- Summary ---")
@@ -422,6 +431,7 @@ def run_evaluate():
     print(f"  Background:   {bg_type}")
     print(f"  Data source:  {data_source}")
     print(f"  Output dir:   {experiment_path}")
+    print(f"  AUC -> MLflow:{' run ' + mlflow_run_id if mlflow_run_id else ' disabled'}")
     print(f"  Nohup:        {'Yes' if run_in_bg else 'No'}")
 
     if not prompt_yn("\nProceed?", default=True):
