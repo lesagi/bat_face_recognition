@@ -12,6 +12,7 @@ Training prompts for species, data source, augmentation, background, and train/t
 (image_split vs bat_split), then launches train_siamese with matching flags.
 """
 
+import glob
 import json
 import os
 import re
@@ -471,6 +472,211 @@ def _resolve_input_dir(cfg, species, bg_type):
     return input_paths.get(bg_key_map[bg_type], "")
 
 
+def _resolve_mlflow_tracking_uri(uri):
+    """Match `SiameseNetworkTrainer._resolve_mlflow_tracking_uri` without TF."""
+    if uri.startswith("file:///"):
+        return uri
+    if uri.startswith("file:./"):
+        uri = uri[5:]
+    if uri.startswith("./") or (
+        not uri.startswith("/") and not uri.startswith("file://")
+    ):
+        relative = uri[2:] if uri.startswith("./") else uri
+        return f"file://{os.path.join(PROJECT_ROOT, relative)}"
+    if not uri.startswith("file://"):
+        return f"file://{uri}"
+    return uri
+
+
+def _resolve_mlflow_run_id_from_dir(run_dir, tracking_uri=None):
+    """
+    Find the MLflow run id whose `model_output_dir` tag (or `output_dir` param
+    for legacy runs) matches `run_dir`.
+
+    Returns a list of matching `(run_id, experiment_id, start_time)` tuples,
+    or [] if MLflow isn't installed / no match is found.
+    """
+    try:
+        from mlflow.tracking import MlflowClient
+    except ImportError:
+        return []
+
+    if tracking_uri is None:
+        try:
+            tracking_uri = _load_config().mlflow.tracking_uri
+        except Exception:
+            tracking_uri = "file:./mlruns"
+
+    resolved = _resolve_mlflow_tracking_uri(tracking_uri)
+    client = MlflowClient(resolved)
+
+    run_dir_abs = os.path.abspath(run_dir)
+    run_dir_alt = run_dir_abs.rstrip(os.sep)
+
+    try:
+        exps = client.search_experiments()
+    except Exception:
+        return []
+    exp_ids = [e.experiment_id for e in exps]
+    if not exp_ids:
+        return []
+
+    filters = [
+        f"tags.model_output_dir = '{run_dir_abs}'",
+        f"tags.model_output_dir = '{run_dir_alt}'",
+        f"params.output_dir = '{run_dir_abs}'",
+        f"params.output_dir = '{run_dir_alt}'",
+    ]
+    for filt in filters:
+        try:
+            runs = client.search_runs(
+                experiment_ids=exp_ids, filter_string=filt, max_results=25
+            )
+        except Exception:
+            runs = []
+        if runs:
+            return [
+                (r.info.run_id, r.info.experiment_id, r.info.start_time)
+                for r in runs
+            ]
+    return []
+
+
+def _pick_eval_csv(experiment_path):
+    """Return the chosen evaluation_v*.csv path in `experiment_path`, or None."""
+    candidates = sorted(
+        glob.glob(os.path.join(experiment_path, "evaluation_v*.csv")),
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    if not candidates:
+        print(f"  No evaluation_v*.csv found in {experiment_path}")
+        print(f"  Run the 'Evaluate a trained model' menu first to generate one.")
+        return None
+
+    if len(candidates) == 1:
+        only = candidates[0]
+        print(f"\nUsing the only evaluation CSV in this experiment:")
+        print(f"  {os.path.basename(only)}")
+        return only
+
+    csv_options = [(os.path.basename(p), p) for p in candidates]
+    return prompt_choice("\nChoose evaluation CSV:", csv_options)
+
+
+def _pick_mlflow_run_id(experiment_path):
+    """
+    Prompt the user for the target MLflow run id to log AUC to.
+
+    Returns a run id string, or None if the user chose to skip MLflow logging.
+    """
+    matches = _resolve_mlflow_run_id_from_dir(experiment_path)
+
+    if len(matches) == 1:
+        run_id, _, _ = matches[0]
+        print(f"\nResolved MLflow run id from experiment dir: {run_id}")
+        if prompt_yn("  Use this run id?", default=True):
+            return run_id
+
+    elif len(matches) > 1:
+        print(f"\nFound {len(matches)} MLflow runs pointing at this experiment dir.")
+        options = []
+        for run_id, exp_id, start_time in matches:
+            try:
+                when = datetime.fromtimestamp(start_time / 1000).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            except Exception:
+                when = "unknown"
+            options.append(
+                (f"{run_id}  (exp {exp_id}, started {when})", run_id)
+            )
+        options.append(("Skip MLflow logging", None))
+        return prompt_choice("Choose MLflow run:", options)
+
+    manual = input(
+        "\n  Could not auto-detect MLflow run id. Paste run id (leave blank to skip MLflow log): "
+    ).strip()
+    return manual or None
+
+
+def run_auc():
+    """Interactive ROC-AUC computation for an existing training run."""
+    print("\n--- Compute ROC-AUC Configuration ---\n")
+
+    species_map = {"m": "mauritius", "r": "rousettus"}
+    bat_type = prompt_choice("Bat species:", [
+        ("Mauritius (m)", "m"),
+        ("Rousettus (r)", "r"),
+    ])
+    species = species_map[bat_type]
+
+    experiment_path, experiment_dirname = _choose_experiment(species)
+    if experiment_path is None:
+        return
+
+    selected_csv = _pick_eval_csv(experiment_path)
+    if selected_csv is None:
+        return
+
+    log_mlflow = prompt_yn("\nLog ROC-AUC to MLflow?", default=True)
+    mlflow_run_id = None
+    if log_mlflow:
+        mlflow_run_id = _pick_mlflow_run_id(experiment_path)
+        if mlflow_run_id is None:
+            print("  MLflow logging will be disabled for this run.")
+            log_mlflow = False
+
+    run_in_bg = prompt_yn("\nRun in background (nohup)?", default=False)
+
+    cmd_parts = [
+        sys.executable, "-m", "app.compute_auc_from_run",
+        "--run-dir", experiment_path,
+        "--csv-path", selected_csv,
+    ]
+    if mlflow_run_id:
+        cmd_parts.extend(["--mlflow-run-id", mlflow_run_id])
+    if not log_mlflow:
+        cmd_parts.append("--no-mlflow-log")
+
+    print(f"\n--- Summary ---")
+    print(f"  Experiment:     {experiment_dirname}")
+    print(f"  CSV:            {os.path.basename(selected_csv)}")
+    print(f"  MLflow run id:  {mlflow_run_id or '(none; logging disabled)'}")
+    print(f"  Nohup:          {'Yes' if run_in_bg else 'No'}")
+
+    cmd_str = " ".join(cmd_parts)
+    print(f"\n--- Command ---")
+    print(f"  {cmd_str}")
+
+    if not prompt_yn("\nProceed?", default=True):
+        print("Aborted.")
+        return
+
+    if run_in_bg:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_dir = os.path.join(PROJECT_ROOT, "logs", "auc")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"{timestamp}.log")
+
+        print(f"\nLaunching AUC computation...")
+        print(f"   {cmd_str}")
+        print(f"   Log: {log_file}")
+
+        with open(log_file, "w") as lf:
+            proc = subprocess.Popen(
+                cmd_parts,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+                cwd=PROJECT_ROOT,
+                start_new_session=True,
+            )
+        print(f"   PID: {proc.pid}")
+    else:
+        print(f"\nRunning: {cmd_str}\n")
+        sys.exit(subprocess.call(cmd_parts, cwd=PROJECT_ROOT))
+
+
 def run_cleanup():
     """Interactive checkpoint cleanup."""
     cmd_parts = [sys.executable, "scripts/cleanup_checkpoints.py", "--dry-run"]
@@ -494,6 +700,7 @@ def main():
         ("Run permutation test (null hypothesis)", "permutation"),
         ("Generate saliency maps", "saliency"),
         ("Evaluate a trained model", "evaluate"),
+        ("Compute ROC-AUC for an existing run", "auc"),
         ("Clean up old checkpoints", "cleanup"),
     ])
 
@@ -505,6 +712,8 @@ def main():
         run_saliency()
     elif action == "evaluate":
         run_evaluate()
+    elif action == "auc":
+        run_auc()
     elif action == "cleanup":
         run_cleanup()
 
