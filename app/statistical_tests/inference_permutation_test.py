@@ -211,25 +211,24 @@ def run_inference_permutation_test(
             f"Input directory not found for background '{exp_params['background']}': {input_dir}"
         )
 
-    training_portion = sn_train.get("train_val_split", 0.7)
     pair_mode = sn_train.get("pair_mode", "combination")
 
     splitter = SiameseNetworkTrainingDataSplitter(
         [input_dir],
-        training_portion=training_portion,
+        training_portion=1.0,
         mode=pair_mode,
         permute_labels=False,
-        split_mode="image_split",
+        skip_preprocessing=True,
     )
 
-    if splitter.test_data is None:
-        raise ValueError("Data splitter returned no test data")
+    if splitter.train_data is None:
+        raise ValueError("Data splitter returned no data")
 
     # ------------------------------------------------------------------
-    # 4. Run inference on all test pairs
+    # 4. Run inference on all pairs
     # ------------------------------------------------------------------
     if verbose:
-        print("Running inference on test set...", flush=True)
+        print("Running inference on all pairs...", flush=True)
 
     from generate_predictions import preprocess_siamese_input_flexible
 
@@ -238,7 +237,7 @@ def run_inference_permutation_test(
     batch_count = 0
     BATCH_SIZE = 128
 
-    test_batches = splitter.test_data.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    test_batches = splitter.train_data.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
     for batch in test_batches:
         img1_paths, img2_paths, labels, _class_info = batch
