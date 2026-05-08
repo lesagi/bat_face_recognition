@@ -1,20 +1,81 @@
 [project]
 name = "bat-face-rec-project"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Bat face recognition: PyTorch refactor (Siamese + ArcFace + AdaFace)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11,<3.13"
 dependencies = [
-    "click>=8.1.8",
-    "matplotlib>=3.9.4",
-    "mlflow>=3.1.4",
-    "opencv-python>=4.8.1.78",
-    "pillow>=11.3.0",
-    "pyyaml>=6.0.3",
-    "requests>=2.32.5",
-    "tensorflow[gpu]==2.15.0",
-    "tqdm>=4.67.1",
+    "bat-core",
+    "bat-data",
+    "bat-preprocessing",
+    "bat-models",
+    "bat-losses",
+    "bat-training",
+    "bat-evaluation",
+    "bat-interpretability",
+    "bat-stats",
+    "bat-tracking",
+    "bat-reporting",
+    "bat-sweeps",
+    "bat-cli",
 ]
 
+[project.scripts]
+bat-cli = "bat_cli.__main__:main"
+
 [dependency-groups]
-dev = []
+dev = [
+    "ruff>=0.5",
+    "black>=24.4",
+    "isort>=5.13",
+    "mypy>=1.10",
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+    "pre-commit>=3.7",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+bat-core = { workspace = true }
+bat-data = { workspace = true }
+bat-preprocessing = { workspace = true }
+bat-models = { workspace = true }
+bat-losses = { workspace = true }
+bat-training = { workspace = true }
+bat-evaluation = { workspace = true }
+bat-interpretability = { workspace = true }
+bat-stats = { workspace = true }
+bat-tracking = { workspace = true }
+bat-reporting = { workspace = true }
+bat-sweeps = { workspace = true }
+bat-cli = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["packages/bat_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages", "tests"]
+addopts = "-q"

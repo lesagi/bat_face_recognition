@@ -1,0 +1,18 @@
+[project]
+name = "bat-stats"
+version = "0.0.1"
+description = "Permutation tests (inference + retrain) + visualizer with experiment-aware naming"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "bat-core",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bat_stats"]

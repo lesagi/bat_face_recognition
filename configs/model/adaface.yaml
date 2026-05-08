@@ -1,0 +1,6 @@
+family: embedding
+arch: resnet50
+embedding_dim: 512
+input_edge_length: 112
+pretrained: imagenet
+head: adaface

@@ -1,0 +1,10 @@
+segmentation_weights: models/preprocessing/face_seg.pt
+pose_weights: models/preprocessing/face_pose.pt
+seg_confidence_threshold: 0.5
+pose_confidence_threshold: 0.5
+target_size: 105
+face_outer_margin_ratio: 0.1
+prediction_cache:
+  enabled: true
+  cache_dir: .cache/predictions
+  max_memory_mb: 512

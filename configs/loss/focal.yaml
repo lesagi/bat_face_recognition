@@ -1,0 +1,5 @@
+family: pair
+type: binary_focal
+alpha: 0.75
+gamma: 2.0
+from_logits: false
