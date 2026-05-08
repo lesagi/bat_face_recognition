@@ -48,6 +48,7 @@ cvat/
 .ipynb_checkpoints/
 .cursor/
 .vscode/
+.claude/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
