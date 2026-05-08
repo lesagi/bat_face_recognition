@@ -14,14 +14,13 @@ Default config:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
 from .prediction_structures import SegmentationPrediction
 
-
-DEFAULT_SEGMENTER_CONFIG: Dict[str, Any] = {
+DEFAULT_SEGMENTER_CONFIG: dict[str, Any] = {
     "weights": "models/preprocessing/face_seg.pt",
     "confidence_threshold": 0.3,
     "device": None,
@@ -33,7 +32,7 @@ class YOLOSegmenter:
 
     def __init__(
         self,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         *,
         model: Any = None,
     ) -> None:
@@ -73,8 +72,8 @@ class YOLOSegmenter:
     def predict(
         self,
         image: np.ndarray,
-        confidence_threshold: Optional[float] = None,
-    ) -> Optional[SegmentationPrediction]:
+        confidence_threshold: float | None = None,
+    ) -> SegmentationPrediction | None:
         """Run segmentation and return the highest-area mask.
 
         Args:
@@ -91,7 +90,7 @@ class YOLOSegmenter:
             else self.confidence_threshold
         )
 
-        kwargs: Dict[str, Any] = {"source": image, "conf": conf, "verbose": False, "save": False}
+        kwargs: dict[str, Any] = {"source": image, "conf": conf, "verbose": False, "save": False}
         if self.device is not None:
             kwargs["device"] = self.device
 
@@ -144,7 +143,7 @@ class YOLOSegmenter:
         )
 
     @staticmethod
-    def _masks_to_numpy(data: Any) -> Optional[np.ndarray]:
+    def _masks_to_numpy(data: Any) -> np.ndarray | None:
         """Coerce a YOLO masks tensor (torch.Tensor or np.ndarray) to numpy."""
         if data is None:
             return None

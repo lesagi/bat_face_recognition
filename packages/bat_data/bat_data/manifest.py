@@ -26,11 +26,10 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
-
 from bat_core import ImageRecord, Manifest
 from bat_core.exceptions import InvalidManifestError
 
@@ -135,9 +134,7 @@ def group_files_by_class(
     Mirrors ``app/utils/filename_parser.py:group_files_by_class`` but
     drops the warning print so it is safe to call from library code.
     """
-    class_files: dict[str, dict[str, list[str]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
+    class_files: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     for file_path in file_paths:
         path_str = os.fspath(file_path)
         parsed = parse_filename(os.path.basename(path_str))
@@ -306,9 +303,7 @@ _CSV_COLUMNS = [
 ]
 
 
-def manifest_to_csv(
-    manifest: Manifest, csv_path: str | os.PathLike[str]
-) -> Path:
+def manifest_to_csv(manifest: Manifest, csv_path: str | os.PathLike[str]) -> Path:
     """Persist ``manifest`` to ``csv_path`` (always writes the columns
     in the canonical order). The companion ``<csv>.hash`` sidecar holds
     the computed manifest hash so :func:`manifest_from_csv` can verify
@@ -346,9 +341,7 @@ def manifest_from_csv(csv_path: str | os.PathLike[str]) -> Manifest:
     df = pd.read_csv(csv_p)
     missing = [c for c in _CSV_COLUMNS if c not in df.columns]
     if missing:
-        raise InvalidManifestError(
-            f"manifest CSV missing columns: {missing}"
-        )
+        raise InvalidManifestError(f"manifest CSV missing columns: {missing}")
 
     records: list[ImageRecord] = []
     for row in df.itertuples(index=False):
@@ -384,16 +377,12 @@ def manifest_from_csv(csv_path: str | os.PathLike[str]) -> Manifest:
 # ---------------------------------------------------------------------------
 
 
-def _manifest_to_csv_method(
-    self: Manifest, path: str | os.PathLike[str]
-) -> Path:
+def _manifest_to_csv_method(self: Manifest, path: str | os.PathLike[str]) -> Path:
     """``Manifest.to_csv(path)`` shortcut."""
     return manifest_to_csv(self, path)
 
 
-def _manifest_from_csv_classmethod(
-    cls: type[Manifest], path: str | os.PathLike[str]
-) -> Manifest:
+def _manifest_from_csv_classmethod(cls: type[Manifest], path: str | os.PathLike[str]) -> Manifest:
     """``Manifest.from_csv(path)`` shortcut."""
     return manifest_from_csv(path)
 

@@ -15,10 +15,10 @@ forming all unordered pairs over the union of gallery and probe records,
 labelled 1 when the two records share an identity. Cosine similarity is the
 score function.
 """
+
 from __future__ import annotations
 
 import numpy as np
-
 from bat_core import (
     Embedding,
     EvalReport,
@@ -28,21 +28,14 @@ from bat_core import (
     Split,
     VerificationMetrics,
 )
-
 from bat_evaluation.gallery_probe import (
     EmbedFn,
     GalleryProbeSplit,
     materialize_embedding,
     split_manifest_for_identification,
 )
-from bat_evaluation.identification import (
-    cosine_similarity_matrix,
-    evaluate_identification,
-)
-from bat_evaluation.verification import (
-    evaluate_predictions,
-    predictions_from_embedding,
-)
+from bat_evaluation.identification import cosine_similarity_matrix, evaluate_identification
+from bat_evaluation.verification import evaluate_predictions, predictions_from_embedding
 
 
 def run_verification(embedding: Embedding) -> tuple[VerificationMetrics, Predictions]:

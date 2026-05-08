@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from bat_stats.trainer_hooks import TrainerProtocol, create_permutation_trainer
 
 

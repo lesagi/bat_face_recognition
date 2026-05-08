@@ -17,20 +17,14 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
-
-from bat_stats.naming import (
-    build_axis_label,
-    build_filename,
-    build_title_suffix,
-    experiment_name,
-)
+from bat_stats.naming import build_axis_label, build_filename, build_title_suffix, experiment_name
 from bat_stats.permutation_test import PermutationTestResults
+from matplotlib.figure import Figure
 
 
 class PermutationVisualizer:
@@ -95,9 +89,7 @@ class PermutationVisualizer:
             raise ValueError(f"Metric '{metric}' not found in results")
         result = self.results.metrics[metric]
         if not result.null_distribution:
-            raise ValueError(
-                f"No null distribution data available for metric '{metric}'"
-            )
+            raise ValueError(f"No null distribution data available for metric '{metric}'")
         null_dist = np.asarray(result.null_distribution, dtype=np.float64)
 
         fig, ax = plt.subplots(figsize=self.figsize)
@@ -191,9 +183,7 @@ class PermutationVisualizer:
     ) -> Figure:
         """Plot null distributions for all metrics in a single figure."""
 
-        metrics_with_data = [
-            m for m, r in self.results.metrics.items() if r.null_distribution
-        ]
+        metrics_with_data = [m for m, r in self.results.metrics.items() if r.null_distribution]
         if not metrics_with_data:
             raise ValueError("No metrics have null distribution data")
 
@@ -207,10 +197,7 @@ class PermutationVisualizer:
             figsize=(self.figsize[0] * n_cols * 0.6, self.figsize[1] * n_rows * 0.6),
         )
 
-        if n_metrics == 1:
-            axes = [raw_axes]
-        else:
-            axes = list(np.asarray(raw_axes).flatten())
+        axes = [raw_axes] if n_metrics == 1 else list(np.asarray(raw_axes).flatten())
 
         for i, metric in enumerate(metrics_with_data):
             ax = axes[i]
@@ -302,9 +289,7 @@ class PermutationVisualizer:
             ]
             cell_data.append(row)
             row_colors = (
-                ["lightgreen"] * len(columns)
-                if result.significant
-                else ["white"] * len(columns)
+                ["lightgreen"] * len(columns) if result.significant else ["white"] * len(columns)
             )
             cell_colors.append(row_colors)
 
@@ -366,14 +351,10 @@ class PermutationVisualizer:
                 label=metric.title(),
             )
 
-        ax.set_xlabel(
-            self._decorate_axis("Fraction of Labels Permuted"), fontsize=12
-        )
+        ax.set_xlabel(self._decorate_axis("Fraction of Labels Permuted"), fontsize=12)
         ax.set_ylabel(self._decorate_axis("Metric Value"), fontsize=12)
         ax.set_title(
-            self._decorate_title(
-                "Degradation Curve: Performance vs Label Permutation"
-            ),
+            self._decorate_title("Degradation Curve: Performance vs Label Permutation"),
             fontsize=13,
         )
         ax.set_xlim(-0.02, 1.02)
@@ -381,10 +362,7 @@ class PermutationVisualizer:
         ax.legend(loc="best", fontsize=10)
         ax.grid(True, alpha=0.3)
 
-        textstr = (
-            "At 0% permutation: real performance\n"
-            "At 100% permutation: chance level"
-        )
+        textstr = "At 0% permutation: real performance\n" "At 100% permutation: chance level"
         props = dict(boxstyle="round", facecolor="wheat", alpha=0.5)
         ax.text(
             0.98,
@@ -465,7 +443,7 @@ class PermutationVisualizer:
         show: bool = False,
         export_csv: bool = True,
         export_json: bool = True,
-        degradation_data: Optional[dict[str, list[tuple[float, float]]]] = None,
+        degradation_data: dict[str, list[tuple[float, float]]] | None = None,
     ) -> list[Path]:
         """Emit every plot + export.  Returns the list of files written."""
 
@@ -484,9 +462,7 @@ class PermutationVisualizer:
         try:
             fig = self.plot_all_distributions(show=show, save=True)
             plt.close(fig)
-            artifacts.append(
-                self.output_dir / self._filename("null_distributions_all")
-            )
+            artifacts.append(self.output_dir / self._filename("null_distributions_all"))
         except ValueError as e:
             print(f"Skipping combined distributions plot: {e}")
 
@@ -494,17 +470,14 @@ class PermutationVisualizer:
             try:
                 fig = self.plot_null_distribution(metric, show=show, save=True)
                 plt.close(fig)
-                artifacts.append(
-                    self.output_dir / self._filename(f"null_dist_{metric}")
-                )
+                artifacts.append(self.output_dir / self._filename(f"null_dist_{metric}"))
             except ValueError as e:
                 print(f"Skipping {metric} distribution plot: {e}")
 
         if degradation_data is None:
             # Look both for an experiment-aware name and a legacy generic one.
             candidates = [
-                self.output_dir
-                / self._filename("degradation_curve", suffix=".json"),
+                self.output_dir / self._filename("degradation_curve", suffix=".json"),
                 self.output_dir / "degradation_curve.json",
             ]
             for deg_path in candidates:
@@ -512,22 +485,16 @@ class PermutationVisualizer:
                     try:
                         with open(deg_path) as f:
                             raw = json.load(f)
-                        degradation_data = {
-                            k: [tuple(pt) for pt in v] for k, v in raw.items()
-                        }
+                        degradation_data = {k: [tuple(pt) for pt in v] for k, v in raw.items()}
                         break
                     except Exception:
                         pass
 
         if degradation_data:
             try:
-                fig = self.plot_degradation_curve(
-                    degradation_data, show=show, save=True
-                )
+                fig = self.plot_degradation_curve(degradation_data, show=show, save=True)
                 plt.close(fig)
-                artifacts.append(
-                    self.output_dir / self._filename("degradation_curve")
-                )
+                artifacts.append(self.output_dir / self._filename("degradation_curve"))
             except Exception as e:
                 print(f"Skipping degradation curve plot: {e}")
 
@@ -555,8 +522,7 @@ def assert_naming_is_experiment_aware(cfg: Any) -> str:
     missing = [f for f in EXPERIMENT_NAME_FIELDS if components[f] == "unknown"]
     if missing:
         raise ValueError(
-            "cfg is missing experiment-naming fields: "
-            f"{missing}; resolved={components}"
+            "cfg is missing experiment-naming fields: " f"{missing}; resolved={components}"
         )
     return experiment_name(cfg)
 

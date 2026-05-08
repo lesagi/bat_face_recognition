@@ -6,11 +6,7 @@ import pytest
 
 pytest.importorskip("pydantic")
 
-from bat_data.manifest import (  # noqa: E402
-    group_files_by_class,
-    is_augmented_file,
-    parse_filename,
-)
+from bat_data.manifest import group_files_by_class, is_augmented_file, parse_filename  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -40,11 +36,11 @@ def test_parse_known_patterns(
     "filename",
     [
         "no_separator.png",
-        "only-one--separator.png",          # only one ``--``
-        "r--W--00012--aug12.png",           # aug must be 3 digits
-        "r--W--00012--aug12345.png",        # aug must be 3 digits
-        "--W--00012.png",                   # missing type
-        "r----00012.png",                   # empty class
+        "only-one--separator.png",  # only one ``--``
+        "r--W--00012--aug12.png",  # aug must be 3 digits
+        "r--W--00012--aug12345.png",  # aug must be 3 digits
+        "--W--00012.png",  # missing type
+        "r----00012.png",  # empty class
         "",
     ],
 )

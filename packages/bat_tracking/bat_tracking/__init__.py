@@ -9,12 +9,7 @@ Public surface:
   :func:`filter_params` --- HP audit allowlist.
 """
 
-from bat_tracking.hp_audit import (
-    DROP_PREFIXES,
-    KEEP,
-    KEEP_PREFIXES,
-    filter_params,
-)
+from bat_tracking.hp_audit import DROP_PREFIXES, KEEP, KEEP_PREFIXES, filter_params
 from bat_tracking.mlflow_tracker import MLflowTracker
 from bat_tracking.registry import get_champion, register_model
 from bat_tracking.run_context import start_run

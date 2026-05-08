@@ -10,11 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import cv2
 import numpy as np
-
 from bat_core import ImageRecord
 from bat_core.types import Background, Source, Species, Split
 
@@ -29,10 +28,7 @@ def _laplacian_quality(image: np.ndarray) -> float:
     Quality value is normalised to ``[0, 1]`` via a soft cap at 1000 so the
     output fits :class:`bat_core.ImageRecord`'s ``quality >= 0`` constraint.
     """
-    if image.ndim == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     return float(min(var / 1000.0, 1.0))
 
@@ -56,7 +52,7 @@ class VideoExtractionConfig:
     frame_stride: int = 1
     """Process every Nth frame."""
 
-    max_frames: Optional[int] = None
+    max_frames: int | None = None
     """Stop after this many successfully extracted frames."""
 
     min_quality: float = 0.0
@@ -71,8 +67,8 @@ class VideoExtractionConfig:
     filename_prefix: str = ""
     """Prefix prepended to each output file name."""
 
-    segmenter_config: Dict[str, Any] = field(default_factory=dict)
-    pose_config: Dict[str, Any] = field(default_factory=dict)
+    segmenter_config: dict[str, Any] = field(default_factory=dict)
+    pose_config: dict[str, Any] = field(default_factory=dict)
 
 
 class VideoExtractor:
@@ -82,9 +78,9 @@ class VideoExtractor:
         self,
         config: VideoExtractionConfig,
         *,
-        segmenter: Optional[YOLOSegmenter] = None,
-        pose_estimator: Optional[YOLOPoseEstimator] = None,
-        aligner: Optional[FaceAligner] = None,
+        segmenter: YOLOSegmenter | None = None,
+        pose_estimator: YOLOPoseEstimator | None = None,
+        aligner: FaceAligner | None = None,
     ) -> None:
         self.config = config
         self._segmenter = segmenter
@@ -105,7 +101,7 @@ class VideoExtractor:
             self._pose = YOLOPoseEstimator(self.config.pose_config)
         return self._pose
 
-    def extract(self, video_path: Union[str, Path]) -> List[ImageRecord]:
+    def extract(self, video_path: str | Path) -> list[ImageRecord]:
         """Process ``video_path`` and write extracted frames to disk.
 
         Returns:
@@ -123,7 +119,7 @@ class VideoExtractor:
         if not cap.isOpened():
             raise RuntimeError(f"could not open video: {video_path}")
 
-        records: List[ImageRecord] = []
+        records: list[ImageRecord] = []
         frame_idx = 0
         kept = 0
         try:
@@ -142,10 +138,7 @@ class VideoExtractor:
 
                 records.append(record)
                 kept += 1
-                if (
-                    self.config.max_frames is not None
-                    and kept >= self.config.max_frames
-                ):
+                if self.config.max_frames is not None and kept >= self.config.max_frames:
                     break
         finally:
             cap.release()
@@ -157,7 +150,7 @@ class VideoExtractor:
         frame: np.ndarray,
         frame_idx: int,
         video_path: Path,
-    ) -> Optional[ImageRecord]:
+    ) -> ImageRecord | None:
         try:
             seg = self.segmenter.predict(frame)
         except Exception:

@@ -6,19 +6,15 @@ from typing import Any
 
 import numpy as np
 import pytest
-
 from bat_preprocessing.prediction_structures import SegmentationPrediction
-from bat_preprocessing.yolo_segmenter import (
-    DEFAULT_SEGMENTER_CONFIG,
-    YOLOSegmenter,
-)
+from bat_preprocessing.yolo_segmenter import DEFAULT_SEGMENTER_CONFIG, YOLOSegmenter
 
 
 class _StubMaskTensor:
     def __init__(self, arr: np.ndarray) -> None:
         self._arr = arr
 
-    def cpu(self) -> "_StubMaskTensor":
+    def cpu(self) -> _StubMaskTensor:
         return self
 
     def numpy(self) -> np.ndarray:

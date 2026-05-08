@@ -32,9 +32,7 @@ def test_build_manifest_walks_tree(tmp_path) -> None:
     # Hidden file should be skipped.
     _touch(root / "video" / "not_augmented" / "random_bg" / ".DS_Store")
 
-    manifest = build_manifest(
-        root, species="rousettus", compute_quality_fn=_stub_quality
-    )
+    manifest = build_manifest(root, species="rousettus", compute_quality_fn=_stub_quality)
 
     assert manifest.manifest_hash
     paths = sorted(str(r.path) for r in manifest.records)

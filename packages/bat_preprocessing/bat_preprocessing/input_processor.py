@@ -17,8 +17,10 @@ Pipeline (default):
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
 import cv2
 import numpy as np
@@ -32,11 +34,7 @@ from .background import (
 )
 from .face_aligner import FaceAligner
 from .prediction_cache import CacheConfig, CacheManager
-from .prediction_structures import (
-    PosePrediction,
-    PredictionBundle,
-    SegmentationPrediction,
-)
+from .prediction_structures import PosePrediction, PredictionBundle, SegmentationPrediction
 from .yolo_pose import YOLOPoseEstimator
 from .yolo_segmenter import YOLOSegmenter
 
@@ -63,9 +61,9 @@ class PreprocessingConfig:
 
     cache_enabled: bool = True
 
-    segmenter_config: Dict[str, Any] = field(default_factory=dict)
-    pose_config: Dict[str, Any] = field(default_factory=dict)
-    cache_config: Dict[str, Any] = field(default_factory=dict)
+    segmenter_config: dict[str, Any] = field(default_factory=dict)
+    pose_config: dict[str, Any] = field(default_factory=dict)
+    cache_config: dict[str, Any] = field(default_factory=dict)
 
 
 class PreprocessingPipeline:
@@ -73,12 +71,12 @@ class PreprocessingPipeline:
 
     def __init__(
         self,
-        config: Optional[Union[PreprocessingConfig, Dict[str, Any]]] = None,
+        config: PreprocessingConfig | dict[str, Any] | None = None,
         *,
-        segmenter: Optional[YOLOSegmenter] = None,
-        pose_estimator: Optional[YOLOPoseEstimator] = None,
-        aligner: Optional[FaceAligner] = None,
-        cache_manager: Optional[CacheManager] = None,
+        segmenter: YOLOSegmenter | None = None,
+        pose_estimator: YOLOPoseEstimator | None = None,
+        aligner: FaceAligner | None = None,
+        cache_manager: CacheManager | None = None,
     ) -> None:
         if isinstance(config, dict):
             config = PreprocessingConfig(**config)
@@ -92,14 +90,14 @@ class PreprocessingPipeline:
         )
 
         if self.config.background_enabled:
-            self.background_generator: Optional[Callable[..., np.ndarray]] = (
-                get_background_generator(self.config.background_type)
+            self.background_generator: Callable[..., np.ndarray] | None = get_background_generator(
+                self.config.background_type
             )
         else:
             self.background_generator = None
 
         if cache_manager is not None:
-            self.cache_manager: Optional[CacheManager] = cache_manager
+            self.cache_manager: CacheManager | None = cache_manager
         elif self.config.cache_enabled:
             self.cache_manager = CacheManager(CacheConfig(**self.config.cache_config))
         else:
@@ -121,7 +119,7 @@ class PreprocessingPipeline:
 
     # ---- cache helpers -------------------------------------------------
 
-    def _get_cached(self, key: Optional[str]) -> Optional[PredictionBundle]:
+    def _get_cached(self, key: str | None) -> PredictionBundle | None:
         if not key or self.cache_manager is None:
             return None
         try:
@@ -131,30 +129,26 @@ class PreprocessingPipeline:
 
     def _cache_predictions(
         self,
-        key: Optional[str],
-        seg: Optional[SegmentationPrediction],
-        pose: Optional[PosePrediction],
+        key: str | None,
+        seg: SegmentationPrediction | None,
+        pose: PosePrediction | None,
     ) -> None:
         if not key or self.cache_manager is None:
             return
         if seg is None and pose is None:
             return
-        bundle = PredictionBundle(
-            segmentation=seg, pose=pose, image_path=key
-        )
-        try:
+        bundle = PredictionBundle(segmentation=seg, pose=pose, image_path=key)
+        with suppress(Exception):
             self.cache_manager.cache_predictions(key, "both", bundle)
-        except Exception:
-            pass
 
     # ---- pipeline steps ------------------------------------------------
 
     def normalize_image(
         self,
         image: np.ndarray,
-        scale: Optional[float] = None,
-        mean_subtract: Optional[Union[float, List[float]]] = None,
-        std_divide: Optional[Union[float, List[float]]] = None,
+        scale: float | None = None,
+        mean_subtract: float | list[float] | None = None,
+        std_divide: float | list[float] | None = None,
     ) -> np.ndarray:
         """Normalise a uint8 image with optional mean/std adjustment.
 
@@ -164,13 +158,13 @@ class PreprocessingPipeline:
         scale = float(scale if scale is not None else self.config.scale_factor)
         out = image.astype(np.float32) / scale
         if mean_subtract is not None:
-            if isinstance(mean_subtract, (list, tuple)):
+            if isinstance(mean_subtract, list | tuple):
                 for i, m in enumerate(mean_subtract):
                     out[..., i] -= float(m)
             else:
                 out -= float(mean_subtract)
         if std_divide is not None:
-            if isinstance(std_divide, (list, tuple)):
+            if isinstance(std_divide, list | tuple):
                 for i, s in enumerate(std_divide):
                     out[..., i] /= float(s)
             else:
@@ -180,7 +174,7 @@ class PreprocessingPipeline:
     def resize_image(
         self,
         image: np.ndarray,
-        target_size: Optional[int] = None,
+        target_size: int | None = None,
         interpolation: str = "bilinear",
     ) -> np.ndarray:
         """Resize ``image`` to a square of ``target_size`` using PIL.
@@ -211,8 +205,8 @@ class PreprocessingPipeline:
     def preprocess_single_image(
         self,
         image: np.ndarray,
-        cache_key: Optional[str] = None,
-    ) -> Optional[np.ndarray]:
+        cache_key: str | None = None,
+    ) -> np.ndarray | None:
         """Run the full preprocessing pipeline on a single image.
 
         Returns the normalised float32 image of shape
@@ -261,9 +255,7 @@ class PreprocessingPipeline:
             except Exception:
                 aligned_seg = None
             if aligned_seg is not None:
-                aligned = replace_background(
-                    aligned, aligned_seg.mask, self.background_generator
-                )
+                aligned = replace_background(aligned, aligned_seg.mask, self.background_generator)
 
         # Step 5: resize to target size (the aligner already produced a square
         # at target_size, but we keep this step for parity).
@@ -272,9 +264,7 @@ class PreprocessingPipeline:
         # Step 6: normalise
         return self.normalize_image(resized)
 
-    def preprocess_single_image_from_path(
-        self, image_path: str
-    ) -> Optional[np.ndarray]:
+    def preprocess_single_image_from_path(self, image_path: str) -> np.ndarray | None:
         image = cv2.imread(image_path)
         if image is None:
             return None

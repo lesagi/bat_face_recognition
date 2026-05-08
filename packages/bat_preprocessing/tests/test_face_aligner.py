@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-
 from bat_preprocessing.face_aligner import FaceAligner
-from bat_preprocessing.prediction_structures import (
-    PosePrediction,
-    SegmentationPrediction,
-)
+from bat_preprocessing.prediction_structures import PosePrediction, SegmentationPrediction
 
 
 def _synthetic_image(size: int = 64) -> np.ndarray:

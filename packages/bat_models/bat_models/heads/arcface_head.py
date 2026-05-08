@@ -16,7 +16,7 @@ import math
 
 import torch
 from torch import nn
-from torch.nn import functional as F
+from torch.nn import functional
 
 
 class ArcFaceHead(nn.Module):
@@ -75,9 +75,9 @@ class ArcFaceHead(nn.Module):
         - Otherwise the plain cosine logits ``s * cos(theta)`` are returned.
         """
         # Cosine similarity between L2-normalised embeddings and class weights.
-        emb_norm = F.normalize(embeddings, p=2, dim=1)
-        w_norm = F.normalize(self.weight, p=2, dim=1)
-        cosine = F.linear(emb_norm, w_norm)
+        emb_norm = functional.normalize(embeddings, p=2, dim=1)
+        w_norm = functional.normalize(self.weight, p=2, dim=1)
+        cosine = functional.linear(emb_norm, w_norm)
         cosine = cosine.clamp(-1.0 + 1e-7, 1.0 - 1e-7)
 
         if labels is None or not self.training or self.margin == 0.0:
@@ -91,8 +91,6 @@ class ArcFaceHead(nn.Module):
         else:
             phi = torch.where(cosine > self._th, phi, cosine - self._mm)
 
-        one_hot = F.one_hot(labels.long(), num_classes=self.num_classes).to(
-            cosine.dtype
-        )
+        one_hot = functional.one_hot(labels.long(), num_classes=self.num_classes).to(cosine.dtype)
         logits = one_hot * phi + (1.0 - one_hot) * cosine
         return logits * self.scale

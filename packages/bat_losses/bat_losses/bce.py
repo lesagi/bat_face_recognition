@@ -49,9 +49,7 @@ class BCELoss(nn.Module):
                 y_pred, y_true, reduction="none"
             )
         else:
-            per_sample = nn.functional.binary_cross_entropy(
-                y_pred, y_true, reduction="none"
-            )
+            per_sample = nn.functional.binary_cross_entropy(y_pred, y_true, reduction="none")
 
         if sample_weights is not None:
             per_sample = per_sample * sample_weights.to(dtype=per_sample.dtype)

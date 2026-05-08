@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from bat_stats.permutation_test import (
     DEFAULT_METRICS,
     MetricResult,

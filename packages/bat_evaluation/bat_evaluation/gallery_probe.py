@@ -7,12 +7,13 @@ Default split policy: the first ``gallery_size`` images per identity (sorted
 by path for determinism) become the gallery; the rest are probes. Identities
 with too few samples are skipped (logged via a return-side ``skipped`` list).
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
 
 from bat_core import Embedding, ImageRecord, Manifest, Split
 

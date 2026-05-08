@@ -5,14 +5,8 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import torch
+    from bat_core.types import EvalReport, ImageRecord, RunArtifacts, SaliencyImage
     from torch import nn
-
-    from bat_core.types import (
-        EvalReport,
-        ImageRecord,
-        RunArtifacts,
-        SaliencyImage,
-    )
 
 ModelFamily = Literal["pair", "embedding"]
 TrackerSection = Literal["train", "val", "test"]
@@ -22,13 +16,11 @@ TrackerSection = Literal["train", "val", "test"]
 class FaceModel(Protocol):
     family: ModelFamily
 
-    def forward_embedding(self, x: "torch.Tensor") -> "torch.Tensor": ...
+    def forward_embedding(self, x: torch.Tensor) -> torch.Tensor: ...
 
-    def forward_train(
-        self, x: "torch.Tensor", labels: "torch.Tensor"
-    ) -> "torch.Tensor": ...
+    def forward_train(self, x: torch.Tensor, labels: torch.Tensor) -> torch.Tensor: ...
 
-    def export_for_inference(self) -> "nn.Module": ...
+    def export_for_inference(self) -> nn.Module: ...
 
 
 @runtime_checkable
@@ -37,26 +29,22 @@ class Loss(Protocol):
 
     def __call__(
         self,
-        model_output: "torch.Tensor",
-        labels: "torch.Tensor",
-        sample_weights: "torch.Tensor | None" = ...,
-    ) -> "torch.Tensor": ...
+        model_output: torch.Tensor,
+        labels: torch.Tensor,
+        sample_weights: torch.Tensor | None = ...,
+    ) -> torch.Tensor: ...
 
 
 @runtime_checkable
 class Trainer(Protocol):
-    def fit(
-        self, train_loader: Any, val_loader: Any
-    ) -> "RunArtifacts": ...
+    def fit(self, train_loader: Any, val_loader: Any) -> RunArtifacts: ...
 
-    def test(self, test_loader: Any) -> "EvalReport": ...
+    def test(self, test_loader: Any) -> EvalReport: ...
 
 
 @runtime_checkable
 class InterpretabilityAdapter(Protocol):
-    def explain(
-        self, model: FaceModel, samples: list["ImageRecord"]
-    ) -> list["SaliencyImage"]: ...
+    def explain(self, model: FaceModel, samples: list[ImageRecord]) -> list[SaliencyImage]: ...
 
 
 @runtime_checkable

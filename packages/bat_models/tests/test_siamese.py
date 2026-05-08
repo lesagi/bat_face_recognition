@@ -15,7 +15,7 @@ from bat_models.siamese import (  # noqa: E402
 )
 
 
-def _make_input(batch: int = 2) -> "torch.Tensor":
+def _make_input(batch: int = 2) -> torch.Tensor:
     return torch.randn(
         batch,
         SIAMESE_INPUT_CHANNELS,

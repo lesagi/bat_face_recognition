@@ -6,9 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 from bat_core.exceptions import InvalidManifestError
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Split = Literal["train", "val", "test"]
 Species = Literal["mauritius", "rousettus"]
@@ -57,9 +56,7 @@ class Manifest(BaseModel):
             }
             for r in records
         ]
-        digest = hashlib.sha256(
-            json.dumps(payload, sort_keys=True).encode("utf-8")
-        ).hexdigest()
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
         return cls(records=records, manifest_hash=digest)
 
     def filter_split(self, split: Split) -> list[ImageRecord]:
@@ -80,9 +77,7 @@ class Manifest(BaseModel):
         ]:
             overlap = a & b
             if overlap:
-                raise InvalidManifestError(
-                    f"identity overlap in {name}: {sorted(overlap)[:5]}..."
-                )
+                raise InvalidManifestError(f"identity overlap in {name}: {sorted(overlap)[:5]}...")
 
 
 @dataclass(frozen=True)
@@ -92,7 +87,7 @@ class Embedding:
     `tensor` is shape (N, D); `identities` length N.
     """
 
-    tensor: "object"  # torch.Tensor at runtime; typed loosely to keep bat_core import-light
+    tensor: object  # torch.Tensor at runtime; typed loosely to keep bat_core import-light
     identities: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -151,7 +146,7 @@ class EvalReport:
 class SaliencyImage:
     identity: str
     image_path: Path
-    saliency: "object"  # numpy.ndarray; loose typing
+    saliency: object  # numpy.ndarray; loose typing
     method: str
 
 

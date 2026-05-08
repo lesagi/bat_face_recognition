@@ -4,16 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
-from bat_preprocessing.prediction_cache import (
-    CacheConfig,
-    CacheManager,
-    PredictionCache,
-)
-from bat_preprocessing.prediction_structures import (
-    PredictionBundle,
-    SegmentationPrediction,
-)
+from bat_preprocessing.prediction_cache import CacheConfig, CacheManager, PredictionCache
+from bat_preprocessing.prediction_structures import PredictionBundle, SegmentationPrediction
 
 
 @pytest.fixture

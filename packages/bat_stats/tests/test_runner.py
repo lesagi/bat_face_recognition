@@ -10,14 +10,11 @@ matplotlib.use("Agg")  # noqa: E402
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
-
 from bat_stats.naming import experiment_name  # noqa: E402
 from bat_stats.runner import run_inference_test, run_retrain_test  # noqa: E402
 
 
-def test_run_inference_test_writes_experiment_aware_files(
-    tmp_path: Path, cfg
-) -> None:
+def test_run_inference_test_writes_experiment_aware_files(tmp_path: Path, cfg) -> None:
     rng = np.random.default_rng(0)
     n = 200
     labels = rng.integers(0, 2, size=n).astype(np.float32)

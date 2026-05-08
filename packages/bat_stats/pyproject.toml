@@ -7,7 +7,7 @@ dependencies = [
     "bat-core",
     "scikit-learn>=1.4",
     "matplotlib>=3.8",
-    "numpy>=1.26",
+    "numpy>=1.26,<2",
 ]
 
 [build-system]

@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
 from io import BytesIO
-from typing import Callable, Optional, Tuple, Union
 
 import cv2
 import numpy as np
 from PIL import Image
-
 
 # ---------------------------------------------------------------------------
 # Background generation utilities
@@ -68,13 +67,11 @@ def get_random_cropped_image(
     except ImportError as exc:  # pragma: no cover
         if fallback_to_generated:
             return _generate_fallback_background(height, width)
-        raise ImportError(
-            "requests is required to fetch Picsum images"
-        ) from exc
+        raise ImportError("requests is required to fetch Picsum images") from exc
 
     min_dim = max(height, width)
     url = f"https://picsum.photos/{min_dim}/{min_dim}"
-    last_exc: Optional[BaseException] = None
+    last_exc: BaseException | None = None
 
     for attempt in range(max_retries + 1):
         try:
@@ -86,9 +83,7 @@ def get_random_cropped_image(
                 top = (img_h - height) // 2
                 cropped = image.crop((left, top, left + width, top + height))
                 return cv2.cvtColor(np.array(cropped), cv2.COLOR_RGB2BGR)
-            raise RuntimeError(
-                f"HTTP {response.status_code}: failed to fetch image from Picsum"
-            )
+            raise RuntimeError(f"HTTP {response.status_code}: failed to fetch image from Picsum")
         except (RequestException, ConnectionError, Timeout) as exc:
             last_exc = exc
         except Exception as exc:
@@ -113,7 +108,7 @@ class BackgroundGenerator:
 
     @staticmethod
     def solid_color(
-        height: int, width: int, color: Tuple[int, int, int] = (0, 255, 0)
+        height: int, width: int, color: tuple[int, int, int] = (0, 255, 0)
     ) -> np.ndarray:
         background = np.zeros((height, width, 3), dtype=np.uint8)
         background[:] = color
@@ -135,16 +130,14 @@ class BackgroundGenerator:
         timeout: float = 30,
         fallback_to_generated: bool = True,
     ) -> np.ndarray:
-        return get_random_cropped_image(
-            height, width, max_retries, timeout, fallback_to_generated
-        )
+        return get_random_cropped_image(height, width, max_retries, timeout, fallback_to_generated)
 
     @staticmethod
     def gradient(
         height: int,
         width: int,
-        start_color: Tuple[int, int, int] = (0, 0, 0),
-        end_color: Tuple[int, int, int] = (255, 255, 255),
+        start_color: tuple[int, int, int] = (0, 0, 0),
+        end_color: tuple[int, int, int] = (255, 255, 255),
         direction: str = "vertical",
     ) -> np.ndarray:
         background = np.zeros((height, width, 3), dtype=np.uint8)
@@ -152,15 +145,13 @@ class BackgroundGenerator:
             for i in range(height):
                 ratio = i / max(height, 1)
                 background[i, :] = [
-                    int(start_color[j] + (end_color[j] - start_color[j]) * ratio)
-                    for j in range(3)
+                    int(start_color[j] + (end_color[j] - start_color[j]) * ratio) for j in range(3)
                 ]
         elif direction == "horizontal":
             for i in range(width):
                 ratio = i / max(width, 1)
                 background[:, i] = [
-                    int(start_color[j] + (end_color[j] - start_color[j]) * ratio)
-                    for j in range(3)
+                    int(start_color[j] + (end_color[j] - start_color[j]) * ratio) for j in range(3)
                 ]
         elif direction == "diagonal":
             for i in range(height):
@@ -198,18 +189,14 @@ def get_background_generator(name: str) -> Callable[..., np.ndarray]:
 # ---------------------------------------------------------------------------
 
 
-def _normalise_mask(
-    mask: np.ndarray, target_shape: Tuple[int, int]
-) -> np.ndarray:
+def _normalise_mask(mask: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
     """Coerce ``mask`` to a uint8 0/1 array matching ``target_shape``."""
     if mask.dtype != np.uint8:
         mask = mask.astype(np.uint8)
     if mask.max() > 1:
         mask = (mask > 127).astype(np.uint8)
     if mask.shape[:2] != target_shape:
-        mask = cv2.resize(
-            mask, (target_shape[1], target_shape[0]), interpolation=cv2.INTER_NEAREST
-        )
+        mask = cv2.resize(mask, (target_shape[1], target_shape[0]), interpolation=cv2.INTER_NEAREST)
         mask = (mask > 0).astype(np.uint8)
     return mask
 
@@ -217,7 +204,7 @@ def _normalise_mask(
 def replace_background(
     image: np.ndarray,
     mask: np.ndarray,
-    background: Union[np.ndarray, Callable[..., np.ndarray]],
+    background: np.ndarray | Callable[..., np.ndarray],
     **generator_kwargs,
 ) -> np.ndarray:
     """Replace the masked background of ``image``.
@@ -247,9 +234,7 @@ def replace_background(
             bg = cv2.resize(bg, (width, height), interpolation=cv2.INTER_LINEAR)
 
     if bg.shape != image.shape:
-        raise ValueError(
-            f"background shape {bg.shape} does not match image shape {image.shape}"
-        )
+        raise ValueError(f"background shape {bg.shape} does not match image shape {image.shape}")
 
     result = bg.copy()
     foreground = mask_3d > 0
@@ -259,7 +244,7 @@ def replace_background(
 
 def replace_green_background(
     image: np.ndarray,
-    background: Optional[Union[np.ndarray, Callable[..., np.ndarray]]] = None,
+    background: np.ndarray | Callable[..., np.ndarray] | None = None,
 ) -> np.ndarray:
     """Replace a green-screen (chroma-key) background.
 
@@ -288,16 +273,14 @@ def replace_green_background(
     object_mask = cv2.bitwise_not(green_mask)
 
     object_foreground = cv2.bitwise_and(image, image, mask=object_mask)
-    background_region = cv2.bitwise_and(
-        background_arr, background_arr, mask=green_mask
-    )
+    background_region = cv2.bitwise_and(background_arr, background_arr, mask=green_mask)
     return cv2.add(object_foreground, background_region)
 
 
 def replace_background_with_alpha(
     image: np.ndarray,
     mask: np.ndarray,
-    background: Union[np.ndarray, Callable[..., np.ndarray]],
+    background: np.ndarray | Callable[..., np.ndarray],
     **generator_kwargs,
 ) -> np.ndarray:
     """Background replacement that preserves an alpha channel.

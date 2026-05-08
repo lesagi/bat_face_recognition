@@ -9,16 +9,11 @@ preprocessing pipeline. Pure numpy + OpenCV — ported from
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
 
-from .prediction_structures import (
-    PosePrediction,
-    PredictionBundle,
-    SegmentationPrediction,
-)
+from .prediction_structures import PosePrediction, PredictionBundle, SegmentationPrediction
 
 
 @dataclass
@@ -30,11 +25,9 @@ class TransformationMatrix:
 
     def __post_init__(self) -> None:
         if self.matrix.shape not in [(2, 3), (3, 3)]:
-            raise ValueError(
-                f"Invalid matrix shape: {self.matrix.shape}. Expected (2,3) or (3,3)"
-            )
+            raise ValueError(f"Invalid matrix shape: {self.matrix.shape}. Expected (2,3) or (3,3)")
 
-    def transform_point(self, point: Tuple[float, float]) -> Tuple[float, float]:
+    def transform_point(self, point: tuple[float, float]) -> tuple[float, float]:
         if self.matrix.shape == (2, 3):
             x, y = point
             new_x = self.matrix[0, 0] * x + self.matrix[0, 1] * y + self.matrix[0, 2]
@@ -55,9 +48,7 @@ class TransformationMatrix:
             return np.array(self.transform_point(tuple(points)))
         if points.ndim == 2:
             if points.shape[1] == 2:
-                return np.array(
-                    [self.transform_point(tuple(p)) for p in points], dtype=np.float32
-                )
+                return np.array([self.transform_point(tuple(p)) for p in points], dtype=np.float32)
             if points.shape[1] == 3:
                 out = []
                 for p in points:
@@ -73,7 +64,7 @@ class MaskTransformer:
     @staticmethod
     def resize_mask(
         mask: np.ndarray,
-        target_size: Tuple[int, int],
+        target_size: tuple[int, int],
         interpolation: str = "nearest",
     ) -> np.ndarray:
         methods = {
@@ -89,9 +80,7 @@ class MaskTransformer:
         return resized
 
     @staticmethod
-    def crop_mask(
-        mask: np.ndarray, crop_region: Tuple[int, int, int, int]
-    ) -> np.ndarray:
+    def crop_mask(mask: np.ndarray, crop_region: tuple[int, int, int, int]) -> np.ndarray:
         x1, y1, x2, y2 = crop_region
         return mask[y1:y2, x1:x2]
 
@@ -99,16 +88,14 @@ class MaskTransformer:
     def rotate_mask(
         mask: np.ndarray,
         angle: float,
-        center: Optional[Tuple[float, float]] = None,
+        center: tuple[float, float] | None = None,
         scale: float = 1.0,
     ) -> np.ndarray:
         if center is None:
             h, w = mask.shape[:2]
             center = (w // 2, h // 2)
         rotation_matrix = cv2.getRotationMatrix2D(center, angle, scale)
-        rotated = cv2.warpAffine(
-            mask, rotation_matrix, (mask.shape[1], mask.shape[0])
-        )
+        rotated = cv2.warpAffine(mask, rotation_matrix, (mask.shape[1], mask.shape[0]))
         rotated = (rotated > 0.5).astype(np.uint8)
         return rotated
 
@@ -116,7 +103,7 @@ class MaskTransformer:
     def apply_affine_transform(
         mask: np.ndarray,
         transform_matrix: np.ndarray,
-        output_size: Optional[Tuple[int, int]] = None,
+        output_size: tuple[int, int] | None = None,
     ) -> np.ndarray:
         if output_size is None:
             output_size = (mask.shape[1], mask.shape[0])
@@ -126,8 +113,8 @@ class MaskTransformer:
     @staticmethod
     def transform_mask_for_crop(
         mask: np.ndarray,
-        crop_region: Tuple[int, int, int, int],
-        target_size: Optional[Tuple[int, int]] = None,
+        crop_region: tuple[int, int, int, int],
+        target_size: tuple[int, int] | None = None,
     ) -> np.ndarray:
         cropped = MaskTransformer.crop_mask(mask, crop_region)
         if target_size is not None:
@@ -141,8 +128,8 @@ class KeypointTransformer:
     @staticmethod
     def transform_keypoints_for_resize(
         keypoints: np.ndarray,
-        original_size: Tuple[int, int],
-        target_size: Tuple[int, int],
+        original_size: tuple[int, int],
+        target_size: tuple[int, int],
     ) -> np.ndarray:
         if keypoints.size == 0:
             return keypoints
@@ -156,7 +143,7 @@ class KeypointTransformer:
     @staticmethod
     def transform_keypoints_for_crop(
         keypoints: np.ndarray,
-        crop_region: Tuple[int, int, int, int],
+        crop_region: tuple[int, int, int, int],
     ) -> np.ndarray:
         if keypoints.size == 0:
             return keypoints
@@ -180,17 +167,15 @@ class KeypointTransformer:
         if keypoints.size == 0:
             return keypoints
         xy = keypoints[:, :2].astype(np.float32)
-        transformed_xy = cv2.transform(
-            xy.reshape(-1, 1, 2), transform_matrix
-        ).reshape(-1, 2)
+        transformed_xy = cv2.transform(xy.reshape(-1, 1, 2), transform_matrix).reshape(-1, 2)
         return np.column_stack([transformed_xy, keypoints[:, 2]])
 
     @staticmethod
     def transform_keypoints_for_rotation(
         keypoints: np.ndarray,
         angle: float,
-        center: Optional[Tuple[float, float]] = None,
-        image_size: Optional[Tuple[int, int]] = None,
+        center: tuple[float, float] | None = None,
+        image_size: tuple[int, int] | None = None,
     ) -> np.ndarray:
         if keypoints.size == 0:
             return keypoints
@@ -202,9 +187,7 @@ class KeypointTransformer:
         return KeypointTransformer.apply_affine_transform(keypoints, rotation_matrix)
 
     @staticmethod
-    def validate_keypoints(
-        keypoints: np.ndarray, image_size: Tuple[int, int]
-    ) -> np.ndarray:
+    def validate_keypoints(keypoints: np.ndarray, image_size: tuple[int, int]) -> np.ndarray:
         if keypoints.size == 0:
             return keypoints
         width, height = image_size
@@ -222,10 +205,10 @@ class BoundingBoxTransformer:
 
     @staticmethod
     def transform_bbox_for_resize(
-        bbox: Tuple[float, float, float, float],
-        original_size: Tuple[int, int],
-        target_size: Tuple[int, int],
-    ) -> Tuple[float, float, float, float]:
+        bbox: tuple[float, float, float, float],
+        original_size: tuple[int, int],
+        target_size: tuple[int, int],
+    ) -> tuple[float, float, float, float]:
         x1, y1, x2, y2 = bbox
         scale_x = target_size[0] / original_size[0]
         scale_y = target_size[1] / original_size[1]
@@ -233,9 +216,9 @@ class BoundingBoxTransformer:
 
     @staticmethod
     def transform_bbox_for_crop(
-        bbox: Tuple[float, float, float, float],
-        crop_region: Tuple[int, int, int, int],
-    ) -> Tuple[float, float, float, float]:
+        bbox: tuple[float, float, float, float],
+        crop_region: tuple[int, int, int, int],
+    ) -> tuple[float, float, float, float]:
         bx1, by1, bx2, by2 = bbox
         cx1, cy1, cx2, cy2 = crop_region
         nx1 = bx1 - cx1
@@ -250,23 +233,19 @@ class BoundingBoxTransformer:
 
     @staticmethod
     def transform_bbox_for_rotation(
-        bbox: Tuple[float, float, float, float],
+        bbox: tuple[float, float, float, float],
         angle: float,
-        center: Optional[Tuple[float, float]] = None,
-        image_size: Optional[Tuple[int, int]] = None,
-    ) -> Tuple[float, float, float, float]:
+        center: tuple[float, float] | None = None,
+        image_size: tuple[int, int] | None = None,
+    ) -> tuple[float, float, float, float]:
         if center is None and image_size is not None:
             center = (image_size[0] // 2, image_size[1] // 2)
         elif center is None:
             raise ValueError("Either center or image_size must be provided")
         rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
         x1, y1, x2, y2 = bbox
-        corners = np.array(
-            [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32
-        )
-        transformed = cv2.transform(corners.reshape(-1, 1, 2), rotation_matrix).reshape(
-            -1, 2
-        )
+        corners = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32)
+        transformed = cv2.transform(corners.reshape(-1, 1, 2), rotation_matrix).reshape(-1, 2)
         return (
             float(np.min(transformed[:, 0])),
             float(np.min(transformed[:, 1])),
@@ -276,9 +255,9 @@ class BoundingBoxTransformer:
 
     @staticmethod
     def validate_bbox(
-        bbox: Tuple[float, float, float, float],
-        image_size: Tuple[int, int],
-    ) -> Tuple[float, float, float, float]:
+        bbox: tuple[float, float, float, float],
+        image_size: tuple[int, int],
+    ) -> tuple[float, float, float, float]:
         x1, y1, x2, y2 = bbox
         width, height = image_size
         x1 = max(0, min(x1, width))
@@ -293,33 +272,27 @@ class CoordinateMapper:
 
     @staticmethod
     def create_resize_mapping(
-        original_size: Tuple[int, int], target_size: Tuple[int, int]
+        original_size: tuple[int, int], target_size: tuple[int, int]
     ) -> TransformationMatrix:
         scale_x = target_size[0] / original_size[0]
         scale_y = target_size[1] / original_size[1]
-        matrix = np.array(
-            [[scale_x, 0, 0], [0, scale_y, 0]], dtype=np.float32
-        )
+        matrix = np.array([[scale_x, 0, 0], [0, scale_y, 0]], dtype=np.float32)
         return TransformationMatrix(matrix, "affine")
 
     @staticmethod
-    def create_crop_mapping(
-        crop_region: Tuple[int, int, int, int]
-    ) -> TransformationMatrix:
+    def create_crop_mapping(crop_region: tuple[int, int, int, int]) -> TransformationMatrix:
         x1, y1, _, _ = crop_region
         matrix = np.array([[1, 0, -x1], [0, 1, -y1]], dtype=np.float32)
         return TransformationMatrix(matrix, "affine")
 
     @staticmethod
-    def create_rotation_mapping(
-        angle: float, center: Tuple[float, float]
-    ) -> TransformationMatrix:
+    def create_rotation_mapping(angle: float, center: tuple[float, float]) -> TransformationMatrix:
         matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
         return TransformationMatrix(matrix, "affine")
 
     @staticmethod
     def combine_transformations(
-        transformations: List[TransformationMatrix],
+        transformations: list[TransformationMatrix],
     ) -> TransformationMatrix:
         if not transformations:
             raise ValueError("No transformations provided")
@@ -333,10 +306,7 @@ class CoordinateMapper:
             else:
                 if combined.shape == (2, 3):
                     combined = np.vstack([combined, [0, 0, 1]])
-                if t.matrix.shape == (2, 3):
-                    t_3x3 = np.vstack([t.matrix, [0, 0, 1]])
-                else:
-                    t_3x3 = t.matrix
+                t_3x3 = np.vstack([t.matrix, [0, 0, 1]]) if t.matrix.shape == (2, 3) else t.matrix
                 combined = t_3x3 @ combined
 
         if combined.shape == (3, 3) and np.allclose(combined[2, :], [0, 0, 1]):
@@ -345,9 +315,9 @@ class CoordinateMapper:
 
     @staticmethod
     def map_coordinates(
-        coordinates: Union[Tuple[float, float], np.ndarray],
+        coordinates: tuple[float, float] | np.ndarray,
         transformation: TransformationMatrix,
-    ) -> Union[Tuple[float, float], np.ndarray]:
+    ) -> tuple[float, float] | np.ndarray:
         if isinstance(coordinates, tuple):
             return transformation.transform_point(coordinates)
         if isinstance(coordinates, np.ndarray):
@@ -362,7 +332,7 @@ class PredictionTransformer:
     def transform_segmentation_prediction(
         prediction: SegmentationPrediction,
         transformation: TransformationMatrix,
-        target_size: Optional[Tuple[int, int]] = None,
+        target_size: tuple[int, int] | None = None,
     ) -> SegmentationPrediction:
         if target_size is not None:
             transformed_mask = MaskTransformer.resize_mask(prediction.mask, target_size)
@@ -370,9 +340,7 @@ class PredictionTransformer:
             transformed_mask = prediction.mask
 
         original_image_shape_wh = (
-            prediction.original_image_shape[::-1]
-            if prediction.original_image_shape
-            else (1, 1)
+            prediction.original_image_shape[::-1] if prediction.original_image_shape else (1, 1)
         )
         transformed_bbox = BoundingBoxTransformer.transform_bbox_for_resize(
             prediction.bounding_box,
@@ -397,14 +365,12 @@ class PredictionTransformer:
     def transform_pose_prediction(
         prediction: PosePrediction,
         transformation: TransformationMatrix,
-        target_size: Optional[Tuple[int, int]] = None,
+        target_size: tuple[int, int] | None = None,
     ) -> PosePrediction:
         transformed_keypoints = transformation.transform_points(prediction.keypoints)
 
         original_image_shape_wh = (
-            prediction.original_image_shape[::-1]
-            if prediction.original_image_shape
-            else (1, 1)
+            prediction.original_image_shape[::-1] if prediction.original_image_shape else (1, 1)
         )
         transformed_bbox = BoundingBoxTransformer.transform_bbox_for_resize(
             prediction.bounding_box,
@@ -429,7 +395,7 @@ class PredictionTransformer:
     def transform_prediction_bundle(
         bundle: PredictionBundle,
         transformation: TransformationMatrix,
-        target_size: Optional[Tuple[int, int]] = None,
+        target_size: tuple[int, int] | None = None,
     ) -> PredictionBundle:
         transformed_seg = (
             PredictionTransformer.transform_segmentation_prediction(

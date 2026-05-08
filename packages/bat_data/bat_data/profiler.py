@@ -38,6 +38,7 @@ def _image_dim_stats(
         }
 
     if dim_reader is None:
+
         def dim_reader(p: Path) -> tuple[int, int] | None:
             import cv2
 
@@ -120,9 +121,7 @@ def profile(
     splits = Counter(r.split for r in records)
     identity_counts_per_split: dict[str, int] = {}
     for split in ("train", "val", "test"):
-        identity_counts_per_split[split] = len(
-            {r.identity for r in records if r.split == split}
-        )
+        identity_counts_per_split[split] = len({r.identity for r in records if r.split == split})
 
     paths = [Path(r.path) for r in records]
     qualities = [float(r.quality) for r in records]
@@ -147,9 +146,7 @@ def profile(
     }
 
 
-def save_profile(
-    profile_dict: dict[str, Any], path: str | os.PathLike[str]
-) -> Path:
+def save_profile(profile_dict: dict[str, Any], path: str | os.PathLike[str]) -> Path:
     """Persist a profile dict as JSON. Returns the written path."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)

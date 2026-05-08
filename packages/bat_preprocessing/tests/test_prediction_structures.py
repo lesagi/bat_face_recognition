@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from bat_preprocessing.prediction_structures import (
     PosePrediction,
     PredictionBundle,
@@ -24,9 +23,7 @@ def _make_seg(area: int = 25) -> SegmentationPrediction:
 
 
 def _make_pose() -> PosePrediction:
-    kpts = np.array(
-        [[1.0, 1.0, 0.9], [9.0, 1.0, 0.85], [5.0, 9.0, 0.8]], dtype=np.float32
-    )
+    kpts = np.array([[1.0, 1.0, 0.9], [9.0, 1.0, 0.85], [5.0, 9.0, 0.8]], dtype=np.float32)
     return PosePrediction(
         keypoints=kpts,
         bounding_box=(0.1, 0.1, 0.9, 0.9),

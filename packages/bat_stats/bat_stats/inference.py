@@ -18,12 +18,10 @@ stitches the two together.
 from __future__ import annotations
 
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
-
 from bat_core import Predictions
-
 from bat_stats.permutation_test import (
     DEFAULT_METRICS,
     MetricResult,
@@ -49,11 +47,7 @@ def compute_metrics(
     accuracy = (tp + tn) / total if total > 0 else 0.0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if (precision + recall) > 0
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     return {
         "f1": float(f1),
         "accuracy": float(accuracy),
@@ -146,9 +140,7 @@ def run_inference_permutation_test(
         ys = np.asarray(labels, dtype=np.float32)
 
     if scores.shape != ys.shape:
-        raise ValueError(
-            f"predictions/labels shape mismatch: {scores.shape} vs {ys.shape}"
-        )
+        raise ValueError(f"predictions/labels shape mismatch: {scores.shape} vs {ys.shape}")
 
     metrics_list = list(metrics_to_test) if metrics_to_test else list(DEFAULT_METRICS)
     start = time.time()
@@ -239,15 +231,11 @@ def run_inference_permutation_test(
                     if metric in m_vals:
                         frac_metrics[metric].append(m_vals[metric])
             for metric in metrics_list:
-                mean_val = (
-                    float(np.mean(frac_metrics[metric])) if frac_metrics[metric] else 0.0
-                )
+                mean_val = float(np.mean(frac_metrics[metric])) if frac_metrics[metric] else 0.0
                 degradation_data[metric].append((float(frac), mean_val))
             if verbose:
                 vals_str = ", ".join(
-                    f"{m}: {np.mean(frac_metrics[m]):.4f}"
-                    for m in metrics_list
-                    if frac_metrics[m]
+                    f"{m}: {np.mean(frac_metrics[m]):.4f}" for m in metrics_list if frac_metrics[m]
                 )
                 print(f"  fraction={frac:.2f}: {vals_str}", flush=True)
 

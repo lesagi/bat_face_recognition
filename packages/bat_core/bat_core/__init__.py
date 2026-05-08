@@ -1,8 +1,4 @@
-from bat_core.exceptions import (
-    BatCoreError,
-    InterfaceViolationError,
-    InvalidManifestError,
-)
+from bat_core.exceptions import BatCoreError, InterfaceViolationError, InvalidManifestError
 from bat_core.interfaces import (
     FaceModel,
     InterpretabilityAdapter,

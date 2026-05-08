@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from bat_preprocessing.background import (
     BackgroundGenerator,
     create_blur_image,

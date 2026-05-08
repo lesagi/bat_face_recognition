@@ -12,7 +12,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from bat_stats.naming import (
     EXPERIMENT_NAME_FIELDS,
     build_axis_label,

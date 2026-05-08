@@ -18,9 +18,10 @@ from __future__ import annotations
 import gc
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
@@ -73,7 +74,7 @@ class PermutationTestResults:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
-    def load(cls, path: str | Path) -> "PermutationTestResults":
+    def load(cls, path: str | Path) -> PermutationTestResults:
         with open(path) as f:
             data = json.load(f)
         metrics: dict[str, MetricResult] = {}
@@ -109,9 +110,7 @@ class PermutationTestResults:
             flush=True,
         )
         for name, result in self.metrics.items():
-            sig_str = (
-                f"Yes (p<{self.significance_level})" if result.significant else "No"
-            )
+            sig_str = f"Yes (p<{self.significance_level})" if result.significant else "No"
             print(
                 f"{name:<12} {result.observed:>10.4f} {result.null_mean:>12.4f} "
                 f"{result.null_std:>10.4f} {result.p_value:>10.4f} {sig_str:<12}",
@@ -151,9 +150,7 @@ class PermutationTest:
             metric: [] for metric in self.metrics_to_test
         }
 
-    def compute_p_value(
-        self, observed: float, null_distribution: np.ndarray
-    ) -> float:
+    def compute_p_value(self, observed: float, null_distribution: np.ndarray) -> float:
         """One-sided permutation p-value with continuity correction.
 
         ``p = (count(null >= observed) + 1) / (n + 1)``.
@@ -211,20 +208,15 @@ class PermutationTest:
 
             if self.verbose:
                 metrics_str = ", ".join(
-                    f"{k}: {v:.4f}"
-                    for k, v in metrics.items()
-                    if k in self.metrics_to_test
+                    f"{k}: {v:.4f}" for k, v in metrics.items() if k in self.metrics_to_test
                 )
                 print(
-                    f"   Permutation {i + 1} metrics: {metrics_str} "
-                    f"(took {perm_time:.1f}s)",
+                    f"   Permutation {i + 1} metrics: {metrics_str} " f"(took {perm_time:.1f}s)",
                     flush=True,
                 )
             gc.collect()
 
-        results = self.run_from_null_distributions(
-            observed_metrics, self.null_distributions
-        )
+        results = self.run_from_null_distributions(observed_metrics, self.null_distributions)
         # Patch the timing fields the inference path can't fill in.
         results = PermutationTestResults(
             n_permutations=self.n_permutations,
@@ -266,17 +258,11 @@ class PermutationTest:
                 p_value=p_value,
                 significant=p_value < self.significance_level,
                 null_distribution=(
-                    list(null_distributions[metric])
-                    if self.save_null_distribution
-                    else []
+                    list(null_distributions[metric]) if self.save_null_distribution else []
                 ),
             )
 
-        n_perms = (
-            len(next(iter(null_distributions.values())))
-            if null_distributions
-            else 0
-        )
+        n_perms = len(next(iter(null_distributions.values()))) if null_distributions else 0
         return PermutationTestResults(
             n_permutations=n_perms,
             significance_level=self.significance_level,
@@ -299,9 +285,7 @@ class PermutationTest:
         print(f"Metrics to test: {self.metrics_to_test}", flush=True)
         print(f"{bar}\n", flush=True)
 
-    def _print_perm_header(
-        self, i: int, start_time: float, permutation_times: list[float]
-    ) -> None:
+    def _print_perm_header(self, i: int, start_time: float, permutation_times: list[float]) -> None:
         if permutation_times:
             avg_time = sum(permutation_times) / len(permutation_times)
             remaining = avg_time * (self.n_permutations - i)

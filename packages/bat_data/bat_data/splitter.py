@@ -13,8 +13,8 @@ used, with the explicit ``Random(seed)`` instance — no global state).
 from __future__ import annotations
 
 import random
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from bat_core import ImageRecord, Manifest
 from bat_core.exceptions import InvalidManifestError
@@ -62,13 +62,9 @@ class IdentitySplitter:
         min_per_split: int = 1,
     ) -> None:
         if not 0.0 < val_fraction < 1.0:
-            raise ValueError(
-                f"val_fraction must be in (0, 1); got {val_fraction!r}"
-            )
+            raise ValueError(f"val_fraction must be in (0, 1); got {val_fraction!r}")
         if not 0.0 < test_fraction < 1.0:
-            raise ValueError(
-                f"test_fraction must be in (0, 1); got {test_fraction!r}"
-            )
+            raise ValueError(f"test_fraction must be in (0, 1); got {test_fraction!r}")
         if val_fraction + test_fraction >= 1.0:
             raise ValueError(
                 "val_fraction + test_fraction must be < 1; got "
@@ -118,9 +114,7 @@ class IdentitySplitter:
                 elif n_test > self.min_per_split:
                     n_test -= 1
                 else:  # pragma: no cover - guarded by len-check above
-                    raise InvalidManifestError(
-                        "cannot satisfy min_per_split constraints"
-                    )
+                    raise InvalidManifestError("cannot satisfy min_per_split constraints")
             n_train = n - n_val - n_test
 
         train = set(shuffled[:n_train])
@@ -129,13 +123,10 @@ class IdentitySplitter:
 
         # Defensive: assert disjointness.
         if train & val or train & test or val & test:
-            raise InvalidManifestError(
-                "identity-disjoint invariant violated during partition"
-            )
+            raise InvalidManifestError("identity-disjoint invariant violated during partition")
         if not (train and val and test):
             raise InvalidManifestError(
-                "one of train/val/test ended up empty; "
-                "check your fractions and identity count"
+                "one of train/val/test ended up empty; " "check your fractions and identity count"
             )
         return train, val, test
 
@@ -162,12 +153,8 @@ class IdentitySplitter:
             elif r.identity in test_ids:
                 split = "test"
             else:  # pragma: no cover - all identities accounted for
-                raise InvalidManifestError(
-                    f"identity {r.identity!r} not assigned to any split"
-                )
-            new_records.append(
-                r.model_copy(update={"split": split})  # type: ignore[arg-type]
-            )
+                raise InvalidManifestError(f"identity {r.identity!r} not assigned to any split")
+            new_records.append(r.model_copy(update={"split": split}))  # type: ignore[arg-type]
 
         new_manifest = Manifest.from_records(new_records)
         # Hard guard before returning.

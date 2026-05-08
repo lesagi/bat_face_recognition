@@ -12,14 +12,13 @@ Default config:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
 from .prediction_structures import PosePrediction
 
-
-DEFAULT_POSE_CONFIG: Dict[str, Any] = {
+DEFAULT_POSE_CONFIG: dict[str, Any] = {
     "weights": "models/preprocessing/face_pose.pt",
     "confidence_threshold": 0.3,
     "device": None,
@@ -31,7 +30,7 @@ class YOLOPoseEstimator:
 
     def __init__(
         self,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         *,
         model: Any = None,
     ) -> None:
@@ -71,8 +70,8 @@ class YOLOPoseEstimator:
     def predict(
         self,
         image: np.ndarray,
-        confidence_threshold: Optional[float] = None,
-    ) -> Optional[PosePrediction]:
+        confidence_threshold: float | None = None,
+    ) -> PosePrediction | None:
         """Run pose estimation and return the first detection.
 
         Args:
@@ -88,7 +87,7 @@ class YOLOPoseEstimator:
             else self.confidence_threshold
         )
 
-        kwargs: Dict[str, Any] = {"source": image, "conf": conf, "verbose": False, "save": False}
+        kwargs: dict[str, Any] = {"source": image, "conf": conf, "verbose": False, "save": False}
         if self.device is not None:
             kwargs["device"] = self.device
 
@@ -149,7 +148,7 @@ class YOLOPoseEstimator:
         )
 
     @staticmethod
-    def _to_numpy(data: Any) -> Optional[np.ndarray]:
+    def _to_numpy(data: Any) -> np.ndarray | None:
         if data is None:
             return None
         if isinstance(data, np.ndarray):

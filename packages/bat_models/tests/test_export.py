@@ -20,7 +20,7 @@ class _Tiny(torch.nn.Module):
         self.pool = torch.nn.AdaptiveAvgPool2d(1)
         self.fc = torch.nn.Linear(4, 8)
 
-    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv(x)
         x = self.pool(x).flatten(1)
         return self.fc(x)

@@ -1,10 +1,10 @@
 """Gallery / probe split tests."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-
 from bat_core import ImageRecord, Manifest
 from bat_evaluation import split_gallery_probe, split_manifest_for_identification
 

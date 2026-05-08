@@ -11,11 +11,7 @@ from bat_data.manifest import (
     manifest_to_csv,
     parse_filename,
 )
-from bat_data.miners import (
-    HardNegativeMiner,
-    MinedTriplets,
-    SemiHardMiner,
-)
+from bat_data.miners import HardNegativeMiner, MinedTriplets, SemiHardMiner
 from bat_data.profiler import profile, save_profile
 from bat_data.splitter import IdentitySplitter, SplitCounts
 

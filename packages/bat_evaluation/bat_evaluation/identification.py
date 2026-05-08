@@ -13,16 +13,15 @@ set (query embeddings with known identities), compute:
 
 The output is a :class:`bat_core.IdentificationMetrics` dataclass.
 """
+
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
-from numpy.typing import NDArray
-
 from bat_core import Embedding, IdentificationMetrics
-
 from bat_evaluation.verification import compute_roc, tar_at_far
+from numpy.typing import NDArray
 
 
 def _embedding_to_numpy(embedding: Embedding) -> NDArray[np.float64]:
@@ -62,8 +61,7 @@ def cosine_similarity_matrix(
         raise ValueError("probe and gallery embeddings must be 2-D")
     if p.shape[1] != g.shape[1]:
         raise ValueError(
-            f"probe and gallery have different embedding dim: "
-            f"{p.shape[1]} vs {g.shape[1]}"
+            f"probe and gallery have different embedding dim: " f"{p.shape[1]} vs {g.shape[1]}"
         )
     p = _l2_normalize(p)
     g = _l2_normalize(g)

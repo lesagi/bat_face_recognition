@@ -26,7 +26,7 @@ class _DummyBackbone(torch.nn.Module):
             torch.nn.Linear(3, 64),
         )
 
-    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
 
@@ -88,12 +88,8 @@ def test_arcface_head_margin_changes_gt_logit() -> None:
     baseline = head(emb, None)  # plain cosine logits
     # GT logits should differ; non-GT should match.
     for i, lbl in enumerate(labels.tolist()):
-        assert not math.isclose(
-            margin_logits[i, lbl].item(), baseline[i, lbl].item(), abs_tol=1e-4
-        )
+        assert not math.isclose(margin_logits[i, lbl].item(), baseline[i, lbl].item(), abs_tol=1e-4)
         for j in range(3):
             if j == lbl:
                 continue
-            assert math.isclose(
-                margin_logits[i, j].item(), baseline[i, j].item(), abs_tol=1e-4
-            )
+            assert math.isclose(margin_logits[i, j].item(), baseline[i, j].item(), abs_tol=1e-4)

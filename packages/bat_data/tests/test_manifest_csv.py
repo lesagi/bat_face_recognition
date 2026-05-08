@@ -61,7 +61,7 @@ def test_manifest_csv_round_trip(tmp_path) -> None:
     loaded = manifest_from_csv(csv_path)
     assert loaded.manifest_hash == m.manifest_hash
     assert len(loaded.records) == len(m.records)
-    for original, restored in zip(m.records, loaded.records):
+    for original, restored in zip(m.records, loaded.records, strict=False):
         assert restored.identity == original.identity
         assert restored.species == original.species
         assert restored.background == original.background

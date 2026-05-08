@@ -38,11 +38,11 @@ class MinedTriplets:
     distances at mining time (handy for diagnostics).
     """
 
-    anchor_idx: "torch.Tensor"
-    positive_idx: "torch.Tensor"
-    negative_idx: "torch.Tensor"
-    distances_ap: "torch.Tensor"
-    distances_an: "torch.Tensor"
+    anchor_idx: torch.Tensor
+    positive_idx: torch.Tensor
+    negative_idx: torch.Tensor
+    distances_ap: torch.Tensor
+    distances_an: torch.Tensor
 
     def __len__(self) -> int:
         return int(self.anchor_idx.numel())
@@ -57,7 +57,7 @@ class MinedTriplets:
 # ---------------------------------------------------------------------------
 
 
-def _pairwise_squared_distances(embeddings: "torch.Tensor") -> "torch.Tensor":
+def _pairwise_squared_distances(embeddings: torch.Tensor) -> torch.Tensor:
     """Return the (N, N) matrix of squared Euclidean distances.
 
     Numerically clamped to ``>= 0`` because of float-eps artifacts.
@@ -65,9 +65,7 @@ def _pairwise_squared_distances(embeddings: "torch.Tensor") -> "torch.Tensor":
     import torch
 
     if embeddings.dim() != 2:
-        raise ValueError(
-            f"embeddings must be 2-D, got shape {tuple(embeddings.shape)}"
-        )
+        raise ValueError(f"embeddings must be 2-D, got shape {tuple(embeddings.shape)}")
     # ||x - y||^2 = ||x||^2 + ||y||^2 - 2 x.y
     sq = (embeddings * embeddings).sum(dim=1, keepdim=True)
     dot = embeddings @ embeddings.t()
@@ -76,8 +74,8 @@ def _pairwise_squared_distances(embeddings: "torch.Tensor") -> "torch.Tensor":
 
 
 def _label_masks(
-    labels: "torch.Tensor",
-) -> tuple["torch.Tensor", "torch.Tensor"]:
+    labels: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Return ``(positive_mask, negative_mask)`` Boolean tensors.
 
     ``positive_mask[i, j] = labels[i] == labels[j] AND i != j``
@@ -86,9 +84,7 @@ def _label_masks(
     import torch
 
     if labels.dim() != 1:
-        raise ValueError(
-            f"labels must be 1-D, got shape {tuple(labels.shape)}"
-        )
+        raise ValueError(f"labels must be 1-D, got shape {tuple(labels.shape)}")
     eq = labels.unsqueeze(0) == labels.unsqueeze(1)
     eye = torch.eye(labels.size(0), dtype=torch.bool, device=labels.device)
     positive_mask = eq & ~eye
@@ -111,15 +107,13 @@ class HardNegativeMiner:
 
     def mine(
         self,
-        embeddings: "torch.Tensor",
-        labels: "torch.Tensor",
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
     ) -> MinedTriplets:
         import torch
 
         if embeddings.size(0) != labels.size(0):
-            raise ValueError(
-                "embeddings and labels must agree on batch size"
-            )
+            raise ValueError("embeddings and labels must agree on batch size")
 
         dist = _pairwise_squared_distances(embeddings)
         pos_mask, neg_mask = _label_masks(labels)
@@ -191,15 +185,13 @@ class SemiHardMiner:
 
     def mine(
         self,
-        embeddings: "torch.Tensor",
-        labels: "torch.Tensor",
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
     ) -> MinedTriplets:
         import torch
 
         if embeddings.size(0) != labels.size(0):
-            raise ValueError(
-                "embeddings and labels must agree on batch size"
-            )
+            raise ValueError("embeddings and labels must agree on batch size")
 
         dist = _pairwise_squared_distances(embeddings)
         pos_mask, neg_mask = _label_masks(labels)

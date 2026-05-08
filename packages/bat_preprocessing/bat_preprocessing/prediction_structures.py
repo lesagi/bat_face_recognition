@@ -15,7 +15,7 @@ import json
 import pickle
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -26,13 +26,13 @@ class SegmentationPrediction:
 
     mask: np.ndarray  # 2-D binary mask (0/1)
     confidence: float  # detection confidence in [0, 1]
-    bounding_box: Tuple[float, float, float, float]  # (x1, y1, x2, y2)
+    bounding_box: tuple[float, float, float, float]  # (x1, y1, x2, y2)
 
-    class_id: Optional[int] = None
-    class_name: Optional[str] = None
+    class_id: int | None = None
+    class_name: str | None = None
 
-    original_image_shape: Optional[Tuple[int, int]] = None  # (h, w)
-    model_resolution: Optional[Tuple[int, int]] = None  # (h, w)
+    original_image_shape: tuple[int, int] | None = None  # (h, w)
+    model_resolution: tuple[int, int] | None = None  # (h, w)
     timestamp: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self) -> None:
@@ -40,14 +40,10 @@ class SegmentationPrediction:
             self.mask = (self.mask > 127).astype(np.uint8)
 
         if not 0.0 <= float(self.confidence) <= 1.0:
-            raise ValueError(
-                f"Confidence must be between 0.0 and 1.0, got {self.confidence}"
-            )
+            raise ValueError(f"Confidence must be between 0.0 and 1.0, got {self.confidence}")
 
         if len(self.bounding_box) != 4:
-            raise ValueError(
-                f"Bounding box must have 4 values, got {len(self.bounding_box)}"
-            )
+            raise ValueError(f"Bounding box must have 4 values, got {len(self.bounding_box)}")
 
         if self.mask.ndim != 2:
             raise ValueError(f"Mask must be 2D, got {self.mask.ndim}D")
@@ -57,13 +53,13 @@ class SegmentationPrediction:
         return int(np.sum(self.mask))
 
     @property
-    def mask_center(self) -> Tuple[float, float]:
+    def mask_center(self) -> tuple[float, float]:
         if self.mask_area == 0:
             return (0.0, 0.0)
         ys, xs = np.where(self.mask > 0)
         return (float(np.mean(xs)), float(np.mean(ys)))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "mask": self.mask.tolist(),
             "confidence": self.confidence,
@@ -78,7 +74,7 @@ class SegmentationPrediction:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SegmentationPrediction":
+    def from_dict(cls, data: dict[str, Any]) -> SegmentationPrediction:
         mask = np.array(data["mask"], dtype=np.uint8)
         timestamp = datetime.fromisoformat(data["timestamp"])
         return cls(
@@ -105,31 +101,25 @@ class PosePrediction:
     """A single YOLO pose-estimation prediction."""
 
     keypoints: np.ndarray  # (N, 3) where columns are (x, y, conf)
-    bounding_box: Tuple[float, float, float, float]
+    bounding_box: tuple[float, float, float, float]
     confidence: float
 
-    class_id: Optional[int] = None
-    class_name: Optional[str] = None
+    class_id: int | None = None
+    class_name: str | None = None
 
-    original_image_shape: Optional[Tuple[int, int]] = None
-    model_resolution: Optional[Tuple[int, int]] = None
+    original_image_shape: tuple[int, int] | None = None
+    model_resolution: tuple[int, int] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self) -> None:
         if self.keypoints.ndim != 2 or self.keypoints.shape[1] != 3:
-            raise ValueError(
-                f"Keypoints must have shape (N, 3), got {self.keypoints.shape}"
-            )
+            raise ValueError(f"Keypoints must have shape (N, 3), got {self.keypoints.shape}")
 
         if not 0.0 <= float(self.confidence) <= 1.0:
-            raise ValueError(
-                f"Confidence must be between 0.0 and 1.0, got {self.confidence}"
-            )
+            raise ValueError(f"Confidence must be between 0.0 and 1.0, got {self.confidence}")
 
         if len(self.bounding_box) != 4:
-            raise ValueError(
-                f"Bounding box must have 4 values, got {len(self.bounding_box)}"
-            )
+            raise ValueError(f"Bounding box must have 4 values, got {len(self.bounding_box)}")
 
     @property
     def num_keypoints(self) -> int:
@@ -140,16 +130,16 @@ class PosePrediction:
         return self.keypoints[self.keypoints[:, 2] > 0.0]
 
     @property
-    def keypoint_centers(self) -> List[Tuple[float, float]]:
+    def keypoint_centers(self) -> list[tuple[float, float]]:
         return [(float(x), float(y)) for x, y, _ in self.valid_keypoints]
 
-    def get_keypoint(self, index: int) -> Optional[Tuple[float, float, float]]:
+    def get_keypoint(self, index: int) -> tuple[float, float, float] | None:
         if 0 <= index < len(self.keypoints):
             x, y, conf = self.keypoints[index]
             return (float(x), float(y), float(conf))
         return None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "keypoints": self.keypoints.tolist(),
             "bounding_box": self.bounding_box,
@@ -164,7 +154,7 @@ class PosePrediction:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PosePrediction":
+    def from_dict(cls, data: dict[str, Any]) -> PosePrediction:
         keypoints = np.array(data["keypoints"], dtype=np.float32)
         timestamp = datetime.fromisoformat(data["timestamp"])
         return cls(
@@ -189,15 +179,15 @@ class PosePrediction:
 class PredictionBundle:
     """Container for all predictions associated with a single image."""
 
-    segmentation: Optional[SegmentationPrediction] = None
-    pose: Optional[PosePrediction] = None
+    segmentation: SegmentationPrediction | None = None
+    pose: PosePrediction | None = None
 
-    image_path: Optional[str] = None
-    image_hash: Optional[str] = None
+    image_path: str | None = None
+    image_hash: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
-    processing_steps: List[str] = field(default_factory=list)
-    model_versions: Dict[str, str] = field(default_factory=dict)
+    processing_steps: list[str] = field(default_factory=list)
+    model_versions: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.image_path and not self.image_hash:
@@ -217,7 +207,7 @@ class PredictionBundle:
     def add_model_version(self, model_type: str, version: str) -> None:
         self.model_versions[model_type] = version
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "segmentation": self.segmentation.to_dict() if self.segmentation else None,
             "pose": self.pose.to_dict() if self.pose else None,
@@ -231,7 +221,7 @@ class PredictionBundle:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PredictionBundle":
+    def from_dict(cls, data: dict[str, Any]) -> PredictionBundle:
         seg = (
             SegmentationPrediction.from_dict(data["segmentation"])
             if data.get("segmentation")
@@ -260,9 +250,9 @@ class PredictionBundle:
             raise ValueError(f"Unsupported format: {format}. Use 'json' or 'pickle'")
 
     @classmethod
-    def load_from_file(cls, filepath: str, format: str = "json") -> "PredictionBundle":
+    def load_from_file(cls, filepath: str, format: str = "json") -> PredictionBundle:
         if format.lower() == "json":
-            with open(filepath, "r") as f:
+            with open(filepath) as f:
                 data = json.load(f)
             return cls.from_dict(data)
         if format.lower() == "pickle":
@@ -293,8 +283,8 @@ class PredictionMetadata:
     last_accessed: datetime = field(default_factory=datetime.now)
     access_count: int = 0
 
-    segmentation_model_version: Optional[str] = None
-    pose_model_version: Optional[str] = None
+    segmentation_model_version: str | None = None
+    pose_model_version: str | None = None
 
     cache_size_bytes: int = 0
     is_persistent: bool = False
@@ -310,7 +300,7 @@ class PredictionMetadata:
         age = self.get_age_seconds()
         return self.access_count / age if age > 0 else 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "prediction_id": self.prediction_id,
             "source_image_path": self.source_image_path,
@@ -326,7 +316,7 @@ class PredictionMetadata:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PredictionMetadata":
+    def from_dict(cls, data: dict[str, Any]) -> PredictionMetadata:
         return cls(
             prediction_id=data["prediction_id"],
             source_image_path=data["source_image_path"],

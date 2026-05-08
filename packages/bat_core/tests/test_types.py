@@ -1,14 +1,8 @@
 from pathlib import Path
 
 import pytest
+from bat_core import ImageRecord, InvalidManifestError, Manifest, Predictions
 from pydantic import ValidationError
-
-from bat_core import (
-    ImageRecord,
-    InvalidManifestError,
-    Manifest,
-    Predictions,
-)
 
 
 def _record(identity: str, split: str, path: str = "data/foo.png") -> ImageRecord:

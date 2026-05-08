@@ -10,8 +10,9 @@ without a second lookup.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING
 
 from bat_core import ImageRecord, Manifest
 
@@ -27,7 +28,7 @@ else:
 __all__ = ["BatDataset", "default_image_loader"]
 
 
-def default_image_loader(path: Path, image_size: int = 224) -> "torch.Tensor":
+def default_image_loader(path: Path, image_size: int = 224) -> torch.Tensor:
     """Load an image as a ``float32`` ``(3, H, W)`` tensor in ``[0, 1]``.
 
     Falls back gracefully if torchvision is missing — uses OpenCV +
@@ -81,14 +82,12 @@ class BatDataset(_DatasetBase):
         manifest: Manifest,
         split: str = "train",
         *,
-        loader: Callable[[Path], "torch.Tensor"] | None = None,
+        loader: Callable[[Path], torch.Tensor] | None = None,
         image_size: int = 224,
-        transform: Callable[["torch.Tensor"], "torch.Tensor"] | None = None,
+        transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
         if split not in ("train", "val", "test"):
-            raise ValueError(
-                f"split must be one of 'train'/'val'/'test'; got {split!r}"
-            )
+            raise ValueError(f"split must be one of 'train'/'val'/'test'; got {split!r}")
         self._records: tuple[ImageRecord, ...] = tuple(
             r for r in manifest.records if r.split == split
         )
@@ -105,9 +104,7 @@ class BatDataset(_DatasetBase):
 
         # Stable identity integer mapping (sorted for reproducibility).
         unique_ids = sorted({r.identity for r in self._records})
-        self._identity_to_int: dict[str, int] = {
-            ident: idx for idx, ident in enumerate(unique_ids)
-        }
+        self._identity_to_int: dict[str, int] = {ident: idx for idx, ident in enumerate(unique_ids)}
         self._int_to_identity: tuple[str, ...] = tuple(unique_ids)
 
     # -- introspection -------------------------------------------------
@@ -136,9 +133,7 @@ class BatDataset(_DatasetBase):
     def __len__(self) -> int:
         return len(self._records)
 
-    def __getitem__(
-        self, index: int
-    ) -> tuple["torch.Tensor", int, ImageRecord]:
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, int, ImageRecord]:
         record = self._records[index]
         tensor = self._loader(Path(record.path))
         if self._transform is not None:

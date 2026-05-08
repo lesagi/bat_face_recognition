@@ -6,12 +6,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from bat_losses import (  # noqa: E402
-    AdaFaceLoss,
-    ArcFaceLoss,
-    CosFaceLoss,
-    SubCenterArcFaceLoss,
-)
+from bat_losses import AdaFaceLoss, ArcFaceLoss, CosFaceLoss, SubCenterArcFaceLoss  # noqa: E402
 
 EMBEDDING_LOSS_CLASSES = [
     ArcFaceLoss,

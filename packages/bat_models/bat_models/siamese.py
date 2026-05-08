@@ -109,7 +109,8 @@ class SiameseModel(nn.Module):
         return self.embedding(x)
 
     def forward_train(
-        self, x_pair: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
+        self,
+        x_pair: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
         labels: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute pair similarity score in ``[0, 1]``.

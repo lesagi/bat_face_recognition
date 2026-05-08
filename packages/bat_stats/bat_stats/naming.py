@@ -15,7 +15,8 @@ any future plot emitter) **must** route every filename through
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 # Order matters: this is the human- and machine-readable signature.
 EXPERIMENT_NAME_FIELDS: tuple[str, ...] = (
@@ -34,7 +35,7 @@ def _coerce_value(value: Any) -> str:
         return "unknown"
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, (str, int, float)):
+    if isinstance(value, str | int | float):
         token = str(value).strip()
         return token or "unknown"
     # Hydra often nests ``model: {name: arcface, ...}`` -- prefer ``name`` if present.
@@ -178,10 +179,7 @@ def build_title_suffix(cfg: Any) -> str:
     """
 
     c = extract_components(cfg)
-    return (
-        f"[{c['species']}/{c['source']}/{c['background']} | "
-        f"{c['model']}/{c['loss']}]"
-    )
+    return f"[{c['species']}/{c['source']}/{c['background']} | " f"{c['model']}/{c['loss']}]"
 
 
 def build_axis_label(base: str, cfg: Any) -> str:

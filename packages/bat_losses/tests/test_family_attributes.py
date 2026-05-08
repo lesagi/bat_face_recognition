@@ -28,7 +28,5 @@ def test_pair_losses_declare_pair_family() -> None:
 
 def test_embedding_losses_declare_embedding_family() -> None:
     for cls in EMBEDDING_LOSSES:
-        assert cls.family == "embedding", (
-            f"{cls.__name__} should be family='embedding'"
-        )
+        assert cls.family == "embedding", f"{cls.__name__} should be family='embedding'"
         assert cls().family == "embedding"

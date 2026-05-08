@@ -11,14 +11,13 @@ import json
 import os
 import pickle
 import threading
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
-from .prediction_structures import (
-    PredictionBundle,
-    PredictionMetadata,
-)
+from .prediction_structures import PredictionBundle, PredictionMetadata
 
 
 @dataclass
@@ -80,14 +79,14 @@ class CacheEntry:
 class PredictionCache:
     """In-memory (optionally persistent) cache for prediction bundles."""
 
-    def __init__(self, config: Optional[CacheConfig] = None) -> None:
+    def __init__(self, config: CacheConfig | None = None) -> None:
         self.config = config or CacheConfig()
-        self._cache: Dict[str, CacheEntry] = {}
+        self._cache: dict[str, CacheEntry] = {}
         self._lock = threading.RLock()
-        self._cleanup_thread: Optional[threading.Thread] = None
+        self._cleanup_thread: threading.Thread | None = None
         self._stop_cleanup = threading.Event()
 
-        self._stats: Dict[str, int] = {
+        self._stats: dict[str, int] = {
             "hits": 0,
             "misses": 0,
             "evictions": 0,
@@ -102,7 +101,7 @@ class PredictionCache:
 
     # ---- context manager / lifecycle -----------------------------------
 
-    def __enter__(self) -> "PredictionCache":
+    def __enter__(self) -> PredictionCache:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -132,7 +131,7 @@ class PredictionCache:
     def _generate_cache_key(self, image_path: str, model_type: str) -> str:
         return hashlib.md5(f"{image_path}:{model_type}".encode()).hexdigest()
 
-    def get(self, image_path: str, model_type: str) -> Optional[PredictionBundle]:
+    def get(self, image_path: str, model_type: str) -> PredictionBundle | None:
         with self._lock:
             self._stats["total_requests"] += 1
             cache_key = self._generate_cache_key(image_path, model_type)
@@ -190,9 +189,7 @@ class PredictionCache:
     def _evict_oldest_entries(self, count: int) -> None:
         if not self._cache:
             return
-        sorted_entries = sorted(
-            self._cache.items(), key=lambda kv: kv[1].created_at
-        )
+        sorted_entries = sorted(self._cache.items(), key=lambda kv: kv[1].created_at)
         for key, _ in sorted_entries[: max(0, count)]:
             del self._cache[key]
             self._stats["evictions"] += 1
@@ -282,7 +279,7 @@ class PredictionCache:
                 filepath = os.path.join(cache_dir, filename)
                 try:
                     if self.config.persistence_format == "json":
-                        with open(filepath, "r") as f:
+                        with open(filepath) as f:
                             data = json.load(f)
                         predictions = PredictionBundle.from_dict(data)
                     elif self.config.persistence_format == "pickle":
@@ -298,10 +295,8 @@ class PredictionCache:
                     self._cache[key] = CacheEntry(key, predictions, metadata)
                 except Exception as exc:
                     print(f"Failed to load cache entry {filename}: {exc}")
-                    try:
+                    with suppress(Exception):
                         os.remove(filepath)
-                    except Exception:
-                        pass
         except Exception as exc:
             print(f"Failed to load cache from disk: {exc}")
 
@@ -320,21 +315,19 @@ class PredictionCache:
                 "total_requests": 0,
             }
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         with self._lock:
-            stats: Dict[str, Any] = dict(self._stats)
+            stats: dict[str, Any] = dict(self._stats)
             stats["cache_size"] = len(self._cache)
             stats["memory_usage_mb"] = self._get_cache_memory_mb()
             stats["hit_rate"] = (
-                stats["hits"] / stats["total_requests"]
-                if stats["total_requests"] > 0
-                else 0.0
+                stats["hits"] / stats["total_requests"] if stats["total_requests"] > 0 else 0.0
             )
             return stats
 
-    def get_cache_info(self) -> Dict[str, Any]:
+    def get_cache_info(self) -> dict[str, Any]:
         with self._lock:
-            info: Dict[str, Any] = {
+            info: dict[str, Any] = {
                 "config": {
                     "max_cache_size": self.config.max_cache_size,
                     "max_memory_mb": self.config.max_memory_mb,
@@ -364,15 +357,13 @@ class PredictionCache:
 class CacheManager:
     """High-level cache management interface for the preprocessing pipeline."""
 
-    def __init__(self, config: Optional[CacheConfig] = None) -> None:
+    def __init__(self, config: CacheConfig | None = None) -> None:
         self.config = config or CacheConfig()
         self._cache = PredictionCache(self.config)
         if self.config.enable_persistence:
             self._cache.load_from_disk()
 
-    def get_predictions(
-        self, image_path: str, model_type: str = "both"
-    ) -> Optional[PredictionBundle]:
+    def get_predictions(self, image_path: str, model_type: str = "both") -> PredictionBundle | None:
         return self._cache.get(image_path, model_type)
 
     def cache_predictions(
@@ -388,8 +379,8 @@ class CacheManager:
         self,
         image_path: str,
         model_type: str,
-        prediction_generator: Callable[[], Optional[PredictionBundle]],
-    ) -> Optional[PredictionBundle]:
+        prediction_generator: Callable[[], PredictionBundle | None],
+    ) -> PredictionBundle | None:
         cached = self.get_predictions(image_path, model_type)
         if cached is not None:
             return cached
@@ -405,16 +396,16 @@ class CacheManager:
     def clear_cache(self) -> None:
         self._cache.clear()
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         return self._cache.get_stats()
 
-    def get_cache_info(self) -> Dict[str, Any]:
+    def get_cache_info(self) -> dict[str, Any]:
         return self._cache.get_cache_info()
 
     def close(self) -> None:
         self._cache.close()
 
-    def __enter__(self) -> "CacheManager":
+    def __enter__(self) -> CacheManager:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:

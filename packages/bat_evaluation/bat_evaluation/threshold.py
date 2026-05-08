@@ -11,9 +11,10 @@ score distribution is concentrated away from a uniform 0..1 range) and is
 exactly what sklearn users would write -- so the test fixture can verify
 against sklearn directly.
 """
+
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 from numpy.typing import NDArray

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from bat_core import Predictions
-
 from bat_stats.inference import (
     compute_metrics,
     partial_permute_labels,

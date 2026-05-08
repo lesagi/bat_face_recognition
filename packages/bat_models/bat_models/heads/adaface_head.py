@@ -21,7 +21,7 @@ import math
 
 import torch
 from torch import nn
-from torch.nn import functional as F
+from torch.nn import functional
 
 
 class AdaFaceHead(nn.Module):
@@ -79,9 +79,9 @@ class AdaFaceHead(nn.Module):
         # Per-sample feature norm and L2-normalised direction.
         norms = torch.norm(embeddings, p=2, dim=1, keepdim=True).clamp(min=self.eps)
         emb_norm = embeddings / norms
-        w_norm = F.normalize(self.weight, p=2, dim=1)
+        w_norm = functional.normalize(self.weight, p=2, dim=1)
 
-        cosine = F.linear(emb_norm, w_norm).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
+        cosine = functional.linear(emb_norm, w_norm).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
 
         if labels is None or not self.training or self.margin == 0.0:
             return cosine * self.scale
@@ -91,9 +91,7 @@ class AdaFaceHead(nn.Module):
             mean_now = norms.mean().detach()
             std_now = norms.std().detach()
             self.batch_mean.mul_(1.0 - self.t_alpha).add_(self.t_alpha * mean_now)
-            self.batch_std.mul_(1.0 - self.t_alpha).add_(
-                self.t_alpha * std_now.clamp(min=self.eps)
-            )
+            self.batch_std.mul_(1.0 - self.t_alpha).add_(self.t_alpha * std_now.clamp(min=self.eps))
 
         # Standardised feature norm in [-1, 1] window of width ``h``.
         margin_scaler = (norms - self.batch_mean) / (self.batch_std + self.eps)
@@ -104,9 +102,7 @@ class AdaFaceHead(nn.Module):
         g_add = self.margin * margin_scaler  # shape (B, 1)
 
         # Apply margin only on the ground-truth class.
-        one_hot = F.one_hot(labels.long(), num_classes=self.num_classes).to(
-            cosine.dtype
-        )
+        one_hot = functional.one_hot(labels.long(), num_classes=self.num_classes).to(cosine.dtype)
 
         # cos(theta + g_angle) for the GT class, then subtract g_add.
         theta = torch.acos(cosine)

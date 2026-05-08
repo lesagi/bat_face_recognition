@@ -5,9 +5,8 @@ from __future__ import annotations
 from typing import Literal
 
 import torch
-from torch import nn
-
 from bat_models.heads.arcface_head import ArcFaceHead
+from torch import nn
 
 
 class ArcFaceModel(nn.Module):
@@ -80,9 +79,7 @@ class ArcFaceModel(nn.Module):
         emb = self.projection(feat)
         return torch.nn.functional.normalize(emb, p=2, dim=1)
 
-    def forward_train(
-        self, x: torch.Tensor, labels: torch.Tensor
-    ) -> torch.Tensor:
+    def forward_train(self, x: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """Forward producing margin-modified logits of shape ``(B, num_classes)``."""
         feat = self.backbone(x)
         emb = self.projection(feat)
@@ -95,9 +92,7 @@ class ArcFaceModel(nn.Module):
     # ------------------------------------------------------------------ #
     # nn.Module                                                          #
     # ------------------------------------------------------------------ #
-    def forward(
-        self, x: torch.Tensor, labels: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, labels: torch.Tensor | None = None) -> torch.Tensor:
         if labels is None:
             return self.forward_embedding(x)
         return self.forward_train(x, labels)

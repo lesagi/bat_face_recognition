@@ -11,18 +11,17 @@ Behaviour preserved from the legacy module:
 - TAR@FAR computed at FAR = 1e-3 and 1e-4 from the full ROC curve.
 - F1 / precision / recall / specificity at the optimal threshold.
 """
+
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
+from bat_core import Predictions, VerificationMetrics
+from bat_evaluation.threshold import optimize_youden_j
 from numpy.typing import NDArray
 from sklearn.metrics import roc_auc_score, roc_curve
-
-from bat_core import Predictions, VerificationMetrics
-
-from bat_evaluation.threshold import optimize_youden_j
 
 
 @dataclass(frozen=True)
@@ -125,11 +124,7 @@ def confusion_at_threshold(
     recall = tp / n_pos if n_pos > 0 else 0.0
     specificity = tn / n_neg if n_neg > 0 else 0.0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    f1 = (
-        2.0 * precision * recall / (precision + recall)
-        if (precision + recall) > 0
-        else 0.0
-    )
+    f1 = 2.0 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
 
     return ConfusionAtThreshold(
         threshold=float(threshold),
@@ -181,13 +176,10 @@ def predictions_from_embedding(
     the same identity, else 0.
     """
     import torch
-
     from bat_core import Embedding
 
     if not isinstance(embedding, Embedding):
-        raise TypeError(
-            f"expected bat_core.Embedding, got {type(embedding).__name__}"
-        )
+        raise TypeError(f"expected bat_core.Embedding, got {type(embedding).__name__}")
     tensor = embedding.tensor
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("Embedding.tensor must be a torch.Tensor")

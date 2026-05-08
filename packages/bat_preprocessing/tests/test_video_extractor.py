@@ -20,10 +20,7 @@ from bat_preprocessing.prediction_structures import (  # noqa: E402
     PosePrediction,
     SegmentationPrediction,
 )
-from bat_preprocessing.video_extractor import (  # noqa: E402
-    VideoExtractionConfig,
-    VideoExtractor,
-)
+from bat_preprocessing.video_extractor import VideoExtractionConfig, VideoExtractor  # noqa: E402
 
 
 class _StubSegmenter:
@@ -122,9 +119,7 @@ def test_video_extractor_validates_missing_video(tmp_path: Path) -> None:
         output_dir=tmp_path / "out",
         identity="Y",
     )
-    extractor = VideoExtractor(
-        cfg, segmenter=_StubSegmenter(), pose_estimator=_StubPose()
-    )
+    extractor = VideoExtractor(cfg, segmenter=_StubSegmenter(), pose_estimator=_StubPose())
     try:
         extractor.extract(tmp_path / "no_such.mp4")
     except FileNotFoundError:

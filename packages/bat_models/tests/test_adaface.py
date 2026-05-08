@@ -22,14 +22,12 @@ class _DummyBackbone(torch.nn.Module):
             torch.nn.Linear(3, 64),
         )
 
-    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
 
 def test_adaface_model_forward_embedding_shape() -> None:
-    model = AdaFaceModel(
-        backbone=_DummyBackbone(), embedding_dim=512, num_classes=10
-    ).eval()
+    model = AdaFaceModel(backbone=_DummyBackbone(), embedding_dim=512, num_classes=10).eval()
     x = torch.randn(4, 3, 112, 112)
     with torch.no_grad():
         emb = model.forward_embedding(x)
@@ -39,13 +37,9 @@ def test_adaface_model_forward_embedding_shape() -> None:
 def test_adaface_head_h_zero_collapses_margin_to_zero() -> None:
     """``h = 0`` zeros the norm-modulated margin -> baseline cosine logits."""
     torch.manual_seed(1)
-    head_no_h = AdaFaceHead(
-        embedding_dim=32, num_classes=5, margin=0.4, h=0.0, scale=10.0
-    )
+    head_no_h = AdaFaceHead(embedding_dim=32, num_classes=5, margin=0.4, h=0.0, scale=10.0)
     head_no_h.train()
-    head_baseline = AdaFaceHead(
-        embedding_dim=32, num_classes=5, margin=0.0, h=0.0, scale=10.0
-    )
+    head_baseline = AdaFaceHead(embedding_dim=32, num_classes=5, margin=0.0, h=0.0, scale=10.0)
     head_baseline.train()
     # Force the two heads to share weights so the cosine logits agree.
     head_baseline.weight.data.copy_(head_no_h.weight.data)
@@ -64,9 +58,7 @@ def test_adaface_head_larger_h_changes_logits() -> None:
 
     def _build(h: float) -> AdaFaceHead:
         torch.manual_seed(0)
-        head = AdaFaceHead(
-            embedding_dim=16, num_classes=5, margin=0.4, h=h, scale=10.0
-        )
+        head = AdaFaceHead(embedding_dim=16, num_classes=5, margin=0.4, h=h, scale=10.0)
         head.weight.data.copy_(weight)
         head.train()
         return head

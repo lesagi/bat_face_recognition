@@ -10,9 +10,8 @@ from __future__ import annotations
 from typing import Literal
 
 import torch
-from torch import nn
-
 from bat_models.heads.adaface_head import AdaFaceHead
+from torch import nn
 
 
 class AdaFaceModel(nn.Module):
@@ -72,9 +71,7 @@ class AdaFaceModel(nn.Module):
         emb = self.projection(feat)
         return torch.nn.functional.normalize(emb, p=2, dim=1)
 
-    def forward_train(
-        self, x: torch.Tensor, labels: torch.Tensor
-    ) -> torch.Tensor:
+    def forward_train(self, x: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """Forward producing margin-modified logits of shape ``(B, num_classes)``."""
         feat = self.backbone(x)
         # AdaFace uses unnormalised embeddings: the head pulls quality from
@@ -89,9 +86,7 @@ class AdaFaceModel(nn.Module):
     # ------------------------------------------------------------------ #
     # nn.Module                                                          #
     # ------------------------------------------------------------------ #
-    def forward(
-        self, x: torch.Tensor, labels: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, labels: torch.Tensor | None = None) -> torch.Tensor:
         if labels is None:
             return self.forward_embedding(x)
         return self.forward_train(x, labels)

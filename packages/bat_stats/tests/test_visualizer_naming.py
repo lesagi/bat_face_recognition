@@ -16,12 +16,8 @@ import matplotlib
 matplotlib.use("Agg")  # noqa: E402
 
 import numpy as np  # noqa: E402
-
 from bat_stats.naming import experiment_name  # noqa: E402
-from bat_stats.permutation_test import (  # noqa: E402
-    MetricResult,
-    PermutationTestResults,
-)
+from bat_stats.permutation_test import MetricResult, PermutationTestResults  # noqa: E402
 from bat_stats.visualizer import PermutationVisualizer  # noqa: E402
 
 EXPECTED_TOKENS = ("rousettus", "video", "random", "arcface")
@@ -59,13 +55,11 @@ def _assert_experiment_aware(filename: str, cfg: dict) -> None:
     """Every component of the experiment signature must be in the filename."""
 
     name = experiment_name(cfg)
-    assert name in filename, (
-        f"filename {filename!r} is missing the full experiment signature {name!r}"
-    )
+    assert (
+        name in filename
+    ), f"filename {filename!r} is missing the full experiment signature {name!r}"
     for token in EXPECTED_TOKENS:
-        assert token in filename, (
-            f"filename {filename!r} missing required token {token!r}"
-        )
+        assert token in filename, f"filename {filename!r} missing required token {token!r}"
 
 
 def test_individual_filenames_are_experiment_aware(tmp_path: Path, cfg) -> None:
@@ -128,9 +122,7 @@ def test_no_generic_names_leak(tmp_path: Path, cfg) -> None:
     }
     actual = {p.name for p in tmp_path.iterdir()}
     leaked = forbidden & actual
-    assert not leaked, (
-        f"generic filename(s) leaked: {leaked}; actual files={actual}"
-    )
+    assert not leaked, f"generic filename(s) leaked: {leaked}; actual files={actual}"
 
 
 def test_filenames_change_with_cfg(tmp_path: Path) -> None:

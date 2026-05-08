@@ -1,4 +1,5 @@
 """Identification-protocol tests: CMC, top-k, mAP, gallery/probe split."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -7,7 +8,6 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from bat_core import Embedding  # noqa: E402
-
 from bat_evaluation import (  # noqa: E402
     average_precision_per_probe,
     cmc_curve,

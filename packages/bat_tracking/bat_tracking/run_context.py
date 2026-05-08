@@ -11,7 +11,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import mlflow
-
 from bat_tracking.mlflow_tracker import MLflowTracker
 
 

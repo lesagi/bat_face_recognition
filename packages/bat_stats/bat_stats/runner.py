@@ -16,19 +16,14 @@ Two modes:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 import numpy as np
-
 from bat_core import Predictions
-
 from bat_stats.inference import run_inference_permutation_test
-from bat_stats.permutation_test import (
-    DEFAULT_METRICS,
-    PermutationTest,
-    PermutationTestResults,
-)
+from bat_stats.permutation_test import DEFAULT_METRICS, PermutationTest, PermutationTestResults
 from bat_stats.trainer_hooks import TrainerProtocol, create_permutation_trainer
 from bat_stats.visualizer import PermutationVisualizer
 

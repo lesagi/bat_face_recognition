@@ -22,9 +22,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import mlflow
 import yaml
-from mlflow.tracking import MlflowClient
-
 from bat_tracking.hp_audit import filter_params
+from mlflow.tracking import MlflowClient
 
 if TYPE_CHECKING:
     from bat_core.interfaces import TrackerSection

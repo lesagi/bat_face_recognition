@@ -1,12 +1,11 @@
 """Verification-protocol tests: ROC/AUC, TAR@FAR, threshold optimisation."""
+
 from __future__ import annotations
 
 import math
 
 import numpy as np
 import pytest
-from sklearn.metrics import roc_curve
-
 from bat_core import Predictions
 from bat_evaluation import (
     compute_roc,
@@ -15,6 +14,7 @@ from bat_evaluation import (
     optimize_youden_j,
     tar_at_far,
 )
+from sklearn.metrics import roc_curve
 
 
 def test_perfectly_separable_scores_give_auc_one():

@@ -12,6 +12,7 @@ Public surface:
 
 Outputs are always ``bat_core`` dataclasses; this package never writes CSVs.
 """
+
 from bat_evaluation.gallery_probe import (
     EmbedFn,
     GalleryProbeSplit,
@@ -27,11 +28,7 @@ from bat_evaluation.identification import (
     mean_average_precision,
     tar_at_far_from_gallery_probe,
 )
-from bat_evaluation.protocols import (
-    run_eval_protocol,
-    run_identification,
-    run_verification,
-)
+from bat_evaluation.protocols import run_eval_protocol, run_identification, run_verification
 from bat_evaluation.threshold import optimize_youden_j
 from bat_evaluation.verification import (
     ConfusionAtThreshold,

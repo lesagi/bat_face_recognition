@@ -17,8 +17,6 @@ This is a numpy / OpenCV-only implementation — no TensorFlow.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 import cv2
 import numpy as np
 
@@ -33,7 +31,7 @@ class FaceAligner:
         edge_length: int = 224,
         margin_ratio: float = 0.5,
         interpolation: str = "bilinear",
-        pad_color: Tuple[int, int, int] = (128, 128, 128),
+        pad_color: tuple[int, int, int] = (128, 128, 128),
     ) -> None:
         """Construct a :class:`FaceAligner`.
 
@@ -61,8 +59,8 @@ class FaceAligner:
         self,
         image: np.ndarray,
         segmentation: SegmentationPrediction,
-        pose: Optional[PosePrediction] = None,
-    ) -> Optional[np.ndarray]:
+        pose: PosePrediction | None = None,
+    ) -> np.ndarray | None:
         """Run the full align-and-crop pipeline.
 
         Args:
@@ -101,7 +99,7 @@ class FaceAligner:
     @staticmethod
     def _rotation_params(
         pose: PosePrediction,
-    ) -> Optional[Tuple[Tuple[float, float], float]]:
+    ) -> tuple[tuple[float, float], float] | None:
         """Compute (center, angle_degrees) from pose keypoints, or None."""
         kpts = pose.keypoints
         if kpts is None or kpts.size == 0:
@@ -115,11 +113,7 @@ class FaceAligner:
         left = valid[left_idx][:2]
         right = valid[right_idx][:2]
 
-        if (
-            np.any(np.isnan(left))
-            or np.any(np.isnan(right))
-            or np.allclose(left, right)
-        ):
+        if np.any(np.isnan(left)) or np.any(np.isnan(right)) or np.allclose(left, right):
             return None
 
         dy = float(right[1] - left[1])
@@ -131,9 +125,7 @@ class FaceAligner:
         )
         return center, angle
 
-    def _rotate_to_align(
-        self, image: np.ndarray, pose: PosePrediction
-    ) -> Optional[np.ndarray]:
+    def _rotate_to_align(self, image: np.ndarray, pose: PosePrediction) -> np.ndarray | None:
         params = self._rotation_params(pose)
         if params is None:
             return None
@@ -147,9 +139,7 @@ class FaceAligner:
             borderMode=cv2.BORDER_REFLECT,
         )
 
-    def _rotate_mask(
-        self, mask: np.ndarray, pose: PosePrediction
-    ) -> np.ndarray:
+    def _rotate_mask(self, mask: np.ndarray, pose: PosePrediction) -> np.ndarray:
         params = self._rotation_params(pose)
         if params is None:
             return mask
@@ -167,9 +157,7 @@ class FaceAligner:
 
     # ---- crop -----------------------------------------------------------
 
-    def _crop_square_around_mask(
-        self, image: np.ndarray, mask: np.ndarray
-    ) -> Optional[np.ndarray]:
+    def _crop_square_around_mask(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
         if mask.shape[:2] != image.shape[:2]:
             mask = cv2.resize(
                 mask,

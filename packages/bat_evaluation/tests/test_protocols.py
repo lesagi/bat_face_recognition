@@ -1,8 +1,9 @@
 """End-to-end protocol smoke test using a tiny synthetic embed_fn."""
+
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import pytest
@@ -10,7 +11,6 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from bat_core import ImageRecord, Manifest  # noqa: E402
-
 from bat_evaluation import run_eval_protocol  # noqa: E402
 
 

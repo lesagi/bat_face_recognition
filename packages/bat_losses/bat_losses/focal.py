@@ -54,10 +54,7 @@ class FocalLoss(nn.Module):
             y_pred = y_pred.squeeze(-1)
         y_true = labels.to(dtype=y_pred.dtype)
 
-        if self.from_logits:
-            p = torch.sigmoid(y_pred)
-        else:
-            p = y_pred
+        p = torch.sigmoid(y_pred) if self.from_logits else y_pred
 
         # Match Keras epsilon exactly (1e-7).
         eps = 1e-7

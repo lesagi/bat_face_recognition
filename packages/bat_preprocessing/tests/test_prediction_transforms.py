@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from bat_preprocessing.prediction_transforms import (
     BoundingBoxTransformer,
     CoordinateMapper,
@@ -29,9 +28,7 @@ def test_crop_mask_shape() -> None:
 
 
 def test_keypoint_resize_scales_coords() -> None:
-    kpts = np.array(
-        [[10.0, 10.0, 1.0], [20.0, 20.0, 0.5]], dtype=np.float32
-    )
+    kpts = np.array([[10.0, 10.0, 1.0], [20.0, 20.0, 0.5]], dtype=np.float32)
     out = KeypointTransformer.transform_keypoints_for_resize(
         kpts, original_size=(40, 40), target_size=(20, 20)
     )
@@ -40,9 +37,7 @@ def test_keypoint_resize_scales_coords() -> None:
 
 
 def test_keypoint_crop_filters_out_of_bounds() -> None:
-    kpts = np.array(
-        [[5.0, 5.0, 1.0], [15.0, 15.0, 1.0]], dtype=np.float32
-    )
+    kpts = np.array([[5.0, 5.0, 1.0], [15.0, 15.0, 1.0]], dtype=np.float32)
     out = KeypointTransformer.transform_keypoints_for_crop(kpts, (10, 10, 30, 30))
     # First kpt at (5,5) → (-5,-5) which is filtered out;
     # second at (15,15) → (5,5) which is inside the 20x20 crop window.

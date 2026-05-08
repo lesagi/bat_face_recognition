@@ -8,7 +8,6 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from bat_core.interfaces import FaceModel  # noqa: E402
-
 from bat_models.adaface import AdaFaceModel  # noqa: E402
 from bat_models.arcface import ArcFaceModel  # noqa: E402
 from bat_models.siamese import SiameseModel  # noqa: E402
@@ -21,7 +20,7 @@ class _DummyBackbone(torch.nn.Module):
         super().__init__()
         self.lin = torch.nn.Linear(3 * 8 * 8, 32)
 
-    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.lin(x.flatten(1))
 
 
@@ -32,16 +31,12 @@ def test_siamese_satisfies_face_model() -> None:
 
 
 def test_arcface_satisfies_face_model() -> None:
-    model = ArcFaceModel(
-        backbone=_DummyBackbone(), embedding_dim=16, num_classes=2
-    )
+    model = ArcFaceModel(backbone=_DummyBackbone(), embedding_dim=16, num_classes=2)
     assert isinstance(model, FaceModel)
     assert model.family == "embedding"
 
 
 def test_adaface_satisfies_face_model() -> None:
-    model = AdaFaceModel(
-        backbone=_DummyBackbone(), embedding_dim=16, num_classes=2
-    )
+    model = AdaFaceModel(backbone=_DummyBackbone(), embedding_dim=16, num_classes=2)
     assert isinstance(model, FaceModel)
     assert model.family == "embedding"

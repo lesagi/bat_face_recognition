@@ -1,13 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from bat_core import (
-    FaceModel,
-    InterpretabilityAdapter,
-    Loss,
-    Tracker,
-    Trainer,
-)
+from bat_core import FaceModel, InterpretabilityAdapter, Loss, Tracker, Trainer
 from bat_core.interfaces import ModelFamily
 
 
