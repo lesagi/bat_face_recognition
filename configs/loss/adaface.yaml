@@ -1,0 +1,5 @@
+family: embedding
+type: adaface
+margin: 0.4
+h: 0.333
+scale: 64.0

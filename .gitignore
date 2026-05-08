@@ -36,6 +36,7 @@ requirements*.txt
 !docs/**/*.md
 models/*
 !app/models/
+!models/preprocessing/
 predicions*.csv
 batwoman*
 cvat/

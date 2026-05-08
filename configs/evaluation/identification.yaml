@@ -1,0 +1,4 @@
+protocol: identification
+gallery_per_identity: 1
+probe_per_identity: 1
+cmc_top_k: 10

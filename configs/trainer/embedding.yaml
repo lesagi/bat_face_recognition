@@ -1,0 +1,21 @@
+family: embedding
+optimizer: sgd
+lr: 0.1
+weight_decay: 5.0e-4
+momentum: 0.9
+epochs: 40
+gradient_accumulation_steps: 1
+mixed_precision: bf16
+ema_decay: 0.999
+warmup_epochs: 1
+lr_schedule: cosine
+early_stop:
+  enabled: true
+  patience: 7
+  min_delta: 1.0e-3
+  monitor: val/roc_auc
+artifact_retention:
+  save_best_roc_auc: true
+  save_best_top1: true
+  save_final_model: false
+deterministic: false

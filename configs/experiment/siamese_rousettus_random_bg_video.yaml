@@ -1,0 +1,12 @@
+# Composed experiment: PyTorch Siamese baseline (parity check vs legacy TF run).
+defaults:
+  - override /data: manifest_rousettus
+  - override /model: siamese
+  - override /loss: focal
+  - override /trainer: pair
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: random
+  source: video

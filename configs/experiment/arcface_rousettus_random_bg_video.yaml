@@ -1,0 +1,13 @@
+# Composed experiment: ArcFace on rousettus video frames with random backgrounds.
+# Run via:  bat-cli train --hydra +experiment=arcface_rousettus_random_bg_video
+defaults:
+  - override /data: manifest_rousettus
+  - override /model: arcface
+  - override /loss: arcface
+  - override /trainer: embedding
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: random
+  source: video

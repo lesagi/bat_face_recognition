@@ -1,0 +1,24 @@
+family: pair
+optimizer: adam
+lr: 5.0e-5
+weight_decay: 0.0
+beta_1: 0.9
+beta_2: 0.999
+epochs: 80
+gradient_accumulation_steps: 1
+mixed_precision: bf16
+ema_decay: 0.0
+warmup_epochs: 0
+lr_schedule: constant
+early_stop:
+  enabled: true
+  patience: 5
+  min_delta: 1.0e-3
+  monitor: val/f1
+artifact_retention:
+  save_best_f1: true
+  save_best_recall: true
+  save_best_precision: true
+  save_best_loss: true
+  save_final_model: false
+deterministic: false

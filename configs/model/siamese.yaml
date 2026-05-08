@@ -1,0 +1,5 @@
+family: pair
+arch: siamese_4conv
+input_edge_length: 105
+embedding_dim: 4096
+distance: l1

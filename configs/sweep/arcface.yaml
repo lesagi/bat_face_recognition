@@ -1,0 +1,10 @@
+study_name: arcface_search
+n_trials: 20
+direction: maximize
+target_metric: val/roc_auc
+pruner: median
+storage: sqlite:///optuna_studies.db
+search_space:
+  loss.margin: { type: float, low: 0.3, high: 0.6 }
+  loss.scale: { type: float, low: 32.0, high: 96.0 }
+  trainer.lr: { type: loguniform, low: 1.0e-3, high: 3.0e-1 }

@@ -1,7 +1,0 @@
-path: /Users/MAC/Documents/bat_face_rec/data/augmented
-train: train/images
-val: validation/images
-test: test/images
-
-names:
-    0: bat

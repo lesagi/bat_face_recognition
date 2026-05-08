@@ -1,0 +1,13 @@
+# Top-level Hydra config. Composes one entry from each group.
+# Override on the CLI:  bat-cli train --hydra model=arcface loss=arcface
+defaults:
+  - data: manifest_rousettus
+  - model: siamese
+  - loss: bce
+  - trainer: pair
+  - evaluation: verification
+  - preprocessing: yolo
+  - _self_
+
+seed: 42
+output_root: outputs/runs

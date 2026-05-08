@@ -1,0 +1,4 @@
+family: embedding
+type: arcface
+margin: 0.5
+scale: 64.0
