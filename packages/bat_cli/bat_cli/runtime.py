@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bat_core import EvalReport, Manifest
+from bat_core import EvalReport, Manifest, Predictions
 from bat_training import make_trainer
 from bat_training._common import TrainerConfig
 
@@ -49,6 +49,17 @@ class TrainResult:
     report_path: Path | None
     warnings: list[str]
     eval_report: EvalReport | None = None
+    permutation_dir: Path | None = None
+
+
+@dataclass
+class PermutationResult:
+    """Summary returned after a permutation-test command."""
+
+    output_dir: Path
+    n_permutations: int
+    metrics_tested: tuple[str, ...]
+    p_values: dict[str, float]
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -366,6 +377,9 @@ def run_training(
     run_name: str | None = None,
     use_mlflow: bool = True,
     promote: bool = False,
+    run_permutation: bool = True,
+    permutation_n: int = 1000,
+    permutation_seed: int = 42,
 ) -> TrainResult:
     """Train, evaluate, render a PDF, and optionally log to MLflow."""
 
@@ -428,6 +442,31 @@ def run_training(
                 warnings,
                 lambda: tracker.log_artifact(report_path, "reports"),
             )
+
+        permutation_dir: Path | None = None
+        if run_permutation and eval_report is not None and eval_report.predictions is not None:
+            permutation_result = _safe(
+                "permutation test",
+                warnings,
+                lambda: run_permutation_test(
+                    bundle.cfg,
+                    predictions=eval_report.predictions,
+                    root=repo,
+                    output_dir=resolved_output / "permutation",
+                    n_permutations=permutation_n,
+                    seed=permutation_seed,
+                    verbose=False,
+                ),
+            )
+            if permutation_result is not None:
+                permutation_dir = permutation_result.output_dir
+                if tracker is not None:
+                    _safe(
+                        "MLflow permutation upload",
+                        warnings,
+                        lambda: tracker.log_artifact(permutation_dir, "permutation"),
+                    )
+
         if promote and tracker is not None and run_id:
             _safe(
                 "champion promotion",
@@ -441,6 +480,7 @@ def run_training(
         report_path=report_path,
         warnings=warnings,
         eval_report=eval_report,
+        permutation_dir=permutation_dir,
     )
 
 
@@ -464,6 +504,66 @@ def run_evaluation(
     if checkpoint is not None:
         trainer.load(checkpoint)
     return _run_test(trainer, bundle)
+
+
+def run_permutation_test(
+    cfg: Mapping[str, Any],
+    *,
+    predictions: Predictions | None = None,
+    checkpoint: Path | None = None,
+    root: Path | None = None,
+    output_dir: Path | None = None,
+    n_permutations: int = 1000,
+    significance_level: float = 0.05,
+    seed: int = 42,
+    threshold: float = 0.5,
+    metrics_to_test: Sequence[str] | None = None,
+    degradation: bool = False,
+    verbose: bool = False,
+) -> PermutationResult:
+    """Run the inference-mode permutation test on a configured run.
+
+    If ``predictions`` is supplied (e.g. from an in-flight train pipeline),
+    we skip re-evaluation and feed them straight to ``bat_stats``. Otherwise
+    we recompose the cfg, optionally restore a checkpoint, run test eval,
+    and use the resulting ``EvalReport.predictions``.
+    """
+
+    from bat_stats import run_inference_test
+
+    repo = find_project_root(root)
+    resolved_output = output_dir or (default_output_dir(cfg, root=repo) / "permutation")
+    resolved_output.mkdir(parents=True, exist_ok=True)
+
+    if predictions is None:
+        report = run_evaluation(cfg, checkpoint=checkpoint, root=repo, output_dir=resolved_output)
+        predictions = report.predictions
+    if predictions is None:
+        raise CliRuntimeError(
+            "evaluation produced no predictions; permutation test needs a Predictions dataclass"
+        )
+
+    results = run_inference_test(
+        cfg,
+        predictions,
+        threshold=threshold,
+        n_permutations=n_permutations,
+        significance_level=significance_level,
+        metrics_to_test=metrics_to_test,
+        degradation=degradation,
+        seed=seed,
+        output_dir=resolved_output,
+        generate_report=True,
+        verbose=verbose,
+    )
+
+    p_values = {name: float(metric.p_value) for name, metric in results.metrics.items()}
+    return PermutationResult(
+        output_dir=resolved_output,
+        n_permutations=int(results.n_permutations),
+        metrics_tested=tuple(p_values),
+        p_values=p_values,
+    )
 
 
 def build_manifest_csv(
