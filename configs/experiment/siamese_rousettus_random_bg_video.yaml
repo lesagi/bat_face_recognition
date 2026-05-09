@@ -1,3 +1,4 @@
+# @package _global_
 # Composed experiment: PyTorch Siamese baseline (parity check vs legacy TF run).
 defaults:
   - override /data: manifest_rousettus

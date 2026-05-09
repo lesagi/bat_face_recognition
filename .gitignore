@@ -59,4 +59,6 @@ cvat/
 .ruff_cache/
 .mypy_cache/
 **/data/*
+!configs/data/
+!configs/data/*.yaml
 **/chosen_model/

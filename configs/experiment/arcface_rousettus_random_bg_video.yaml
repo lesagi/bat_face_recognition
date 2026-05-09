@@ -1,3 +1,4 @@
+# @package _global_
 # Composed experiment: ArcFace on rousettus video frames with random backgrounds.
 # Run via:  bat-cli train --hydra +experiment=arcface_rousettus_random_bg_video
 defaults:

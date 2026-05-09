@@ -1,0 +1,705 @@
+"""Runtime helpers behind the ``bat-cli`` command surface.
+
+The CLI intentionally stays thin: this module owns Hydra composition,
+component construction, and the small amount of orchestration needed to
+connect the workspace packages.
+"""
+
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from bat_core import EvalReport, Manifest
+from bat_training import make_trainer
+from bat_training._common import TrainerConfig
+
+
+class CliRuntimeError(RuntimeError):
+    """Raised when CLI inputs cannot be resolved into a runnable experiment."""
+
+
+@dataclass
+class TrainingBundle:
+    """Resolved runtime objects used by train/evaluate/sweep commands."""
+
+    cfg: dict[str, Any]
+    manifest: Manifest
+    model: Any
+    loss: Any
+    trainer_cfg: TrainerConfig
+    train_loader: Any
+    val_loader: Any | None
+    test_loader: Any | None
+    trainer_kwargs: dict[str, Any]
+
+
+@dataclass
+class TrainResult:
+    """Summary returned after a train command."""
+
+    run_id: str
+    output_dir: Path
+    report_path: Path | None
+    warnings: list[str]
+    eval_report: EvalReport | None = None
+
+
+def find_project_root(start: Path | None = None) -> Path:
+    """Find the repository root by walking upward from *start*."""
+
+    here = (start or Path.cwd()).resolve()
+    candidates = (here, *here.parents)
+    for candidate in candidates:
+        if (candidate / "configs" / "config.yaml").exists() and (
+            candidate / "pyproject.toml"
+        ).exists():
+            return candidate
+    raise CliRuntimeError(
+        f"could not find repo root from {here}; expected configs/config.yaml and pyproject.toml"
+    )
+
+
+def compose_config(
+    *,
+    config_name: str = "config",
+    experiment: str | None = None,
+    overrides: Sequence[str] = (),
+    root: Path | None = None,
+) -> dict[str, Any]:
+    """Compose a Hydra config into a plain Python dictionary."""
+
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    repo = find_project_root(root)
+    config_dir = repo / "configs"
+    hydra_overrides: list[str] = []
+    if experiment:
+        hydra_overrides.append(f"+experiment={experiment}")
+    hydra_overrides.extend(overrides)
+
+    with initialize_config_dir(config_dir=str(config_dir), version_base=None):
+        cfg = compose(config_name=config_name, overrides=hydra_overrides)
+    OmegaConf.resolve(cfg)
+    plain = OmegaConf.to_container(cfg, resolve=True)
+    if not isinstance(plain, dict):
+        raise CliRuntimeError("Hydra composition did not produce a mapping")
+    return plain
+
+
+def default_output_dir(cfg: Mapping[str, Any], root: Path | None = None) -> Path:
+    """Return the default timestamped output directory for a composed config."""
+
+    repo = find_project_root(root)
+    base = Path(str(cfg.get("output_root", "outputs/runs")))
+    if not base.is_absolute():
+        base = repo / base
+    model = _mapping(cfg.get("model")).get("arch", "model")
+    loss = _mapping(cfg.get("loss")).get("type", _mapping(cfg.get("model")).get("head", "loss"))
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return base / f"{stamp}_{model}_{loss}"
+
+
+def build_bundle(
+    cfg: Mapping[str, Any],
+    *,
+    root: Path | None = None,
+    output_dir: Path | None = None,
+) -> TrainingBundle:
+    """Resolve manifest, model, loss, trainer config, and data loaders."""
+
+    repo = find_project_root(root)
+    cfg_dict = dict(cfg)
+    manifest = load_manifest(cfg_dict, root=repo)
+    family = _model_family(cfg_dict)
+    image_size = int(_mapping(cfg_dict.get("model")).get("input_edge_length", 224))
+    batch_size = int(
+        _trainer_value(cfg_dict, "batch_size", _data_value(cfg_dict, "batch_size", 32))
+    )
+    num_workers = int(
+        _trainer_value(cfg_dict, "num_workers", _data_value(cfg_dict, "num_workers", 0))
+    )
+
+    if family == "pair":
+        train_ds = ManifestPairDataset(manifest, "train", image_size=image_size)
+        val_ds = _optional_pair_dataset(manifest, "val", image_size=image_size)
+        test_ds = _optional_pair_dataset(manifest, "test", image_size=image_size)
+        train_loader = _loader(
+            train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers
+        )
+        val_loader = (
+            _loader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+            if val_ds is not None
+            else None
+        )
+        test_loader = (
+            _loader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+            if test_ds is not None
+            else None
+        )
+        num_classes = 1
+        trainer_kwargs: dict[str, Any] = {}
+    else:
+        from bat_data import BatDataset
+
+        train_ds = BatDataset(manifest, split="train", image_size=image_size)
+        val_ds = _optional_embedding_dataset(manifest, "val", image_size=image_size)
+        test_ds = _optional_embedding_dataset(manifest, "test", image_size=image_size)
+        train_loader = _loader(
+            train_ds,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            collate_fn=_embedding_collate,
+        )
+        val_loader = (
+            _loader(
+                val_ds,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                collate_fn=_embedding_collate,
+            )
+            if val_ds is not None
+            else None
+        )
+        test_loader = (
+            _loader(
+                test_ds,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                collate_fn=_embedding_collate,
+            )
+            if test_ds is not None
+            else None
+        )
+        num_classes = train_ds.num_classes
+        trainer_kwargs = {"eval_manifest": manifest, "eval_split": "test"}
+
+    resolved_output = output_dir or default_output_dir(cfg_dict, root=repo)
+    trainer_cfg = build_trainer_config(cfg_dict, output_dir=resolved_output)
+    trainer_cfg.warmup_steps = _warmup_steps(cfg_dict, trainer_cfg, train_loader)
+
+    return TrainingBundle(
+        cfg=cfg_dict,
+        manifest=manifest,
+        model=build_model(cfg_dict, num_classes=num_classes),
+        loss=build_loss(cfg_dict),
+        trainer_cfg=trainer_cfg,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        trainer_kwargs=trainer_kwargs,
+    )
+
+
+def load_manifest(cfg: Mapping[str, Any], *, root: Path | None = None) -> Manifest:
+    """Load the manifest configured by ``data.manifest_path``."""
+
+    from bat_data import manifest_from_csv
+
+    repo = find_project_root(root)
+    data_cfg = _mapping(cfg.get("data"))
+    manifest_path = data_cfg.get("manifest_path")
+    if manifest_path is None:
+        raise CliRuntimeError("data.manifest_path is required")
+    path = Path(str(manifest_path))
+    if not path.is_absolute():
+        path = repo / path
+    if not path.exists():
+        raise CliRuntimeError(f"manifest CSV does not exist: {path}")
+    return manifest_from_csv(path)
+
+
+def build_trainer_config(cfg: Mapping[str, Any], *, output_dir: Path) -> TrainerConfig:
+    """Map Hydra trainer config into :class:`bat_training.TrainerConfig`."""
+
+    trainer = _mapping(cfg.get("trainer"))
+    early = _mapping(trainer.get("early_stop"))
+    monitor = str(early.get("monitor", "val/f1"))
+    bare_monitor = monitor.split("/", 1)[1] if "/" in monitor else monitor
+    early_enabled = bool(early.get("enabled", False))
+    mode = str(early.get("mode", "min" if bare_monitor == "loss" else "max"))
+
+    return TrainerConfig(
+        epochs=int(trainer.get("epochs", 1)),
+        optimizer=str(trainer.get("optimizer", "adam")),
+        lr=float(trainer.get("lr", 1e-4)),
+        weight_decay=float(trainer.get("weight_decay", 0.0)),
+        momentum=float(trainer.get("momentum", trainer.get("beta_1", 0.9))),
+        warmup_steps=int(trainer.get("warmup_steps", 0)),
+        min_lr_ratio=float(trainer.get("min_lr_ratio", 0.0)),
+        gradient_accumulation_steps=int(trainer.get("gradient_accumulation_steps", 1)),
+        mixed_precision=str(trainer.get("mixed_precision", "no")),
+        ema_decay=float(trainer.get("ema_decay", 0.0)),
+        early_stopping_patience=int(early.get("patience", 0)) if early_enabled else 0,
+        early_stopping_min_delta=float(early.get("min_delta", 1e-3)),
+        early_stopping_monitor=bare_monitor,
+        early_stopping_mode=mode,
+        deterministic=bool(trainer.get("deterministic", False)),
+        seed=int(cfg.get("seed", 0)),
+        output_dir=Path(output_dir),
+        artifact_retention=dict(_mapping(trainer.get("artifact_retention"))),
+        log_every_n_steps=int(trainer.get("log_every_n_steps", 50)),
+    )
+
+
+def build_model(cfg: Mapping[str, Any], *, num_classes: int) -> Any:
+    """Build a model from the composed config."""
+
+    model_cfg = _mapping(cfg.get("model"))
+    loss_cfg = _mapping(cfg.get("loss"))
+    family = str(model_cfg.get("family", loss_cfg.get("family", "")))
+    arch = str(model_cfg.get("arch", "")).lower()
+
+    if family == "pair" or arch.startswith("siamese"):
+        from bat_models import SiameseModel
+
+        return SiameseModel()
+
+    from bat_models import AdaFaceModel, ArcFaceModel
+    from bat_models.backbones import resnet50_backbone
+
+    if arch and arch != "resnet50":
+        raise CliRuntimeError(f"unsupported embedding model arch: {arch!r}")
+
+    backbone = resnet50_backbone(pretrained=_is_pretrained(model_cfg.get("pretrained", True)))
+    head = str(model_cfg.get("head", loss_cfg.get("type", "arcface"))).lower()
+    embedding_dim = int(model_cfg.get("embedding_dim", 512))
+    margin = float(loss_cfg.get("margin", 0.5 if head == "arcface" else 0.4))
+    scale = float(loss_cfg.get("scale", 64.0))
+
+    if head == "arcface":
+        return ArcFaceModel(
+            backbone=backbone,
+            embedding_dim=embedding_dim,
+            num_classes=num_classes,
+            margin=margin,
+            scale=scale,
+        )
+    if head == "adaface":
+        return AdaFaceModel(
+            backbone=backbone,
+            embedding_dim=embedding_dim,
+            num_classes=num_classes,
+            margin=margin,
+            h=float(loss_cfg.get("h", 0.333)),
+            scale=scale,
+        )
+    raise CliRuntimeError(f"unsupported embedding head: {head!r}")
+
+
+def build_loss(cfg: Mapping[str, Any]) -> Any:
+    """Build a loss from the composed config."""
+
+    loss_cfg = _mapping(cfg.get("loss"))
+    loss_type = str(loss_cfg.get("type", loss_cfg.get("head", ""))).lower()
+    reduction = str(loss_cfg.get("reduction", "mean"))
+
+    if loss_type == "bce":
+        from bat_losses import BCELoss
+
+        return BCELoss(from_logits=bool(loss_cfg.get("from_logits", False)), reduction=reduction)
+    if loss_type in {"binary_focal", "focal"}:
+        from bat_losses import FocalLoss
+
+        return FocalLoss(
+            alpha=float(loss_cfg.get("alpha", 0.75)),
+            gamma=float(loss_cfg.get("gamma", 2.0)),
+            from_logits=bool(loss_cfg.get("from_logits", False)),
+            reduction=reduction,
+        )
+    if loss_type == "triplet":
+        from bat_losses import TripletLoss
+
+        return TripletLoss(
+            margin=float(loss_cfg.get("margin", 0.2)),
+            p=int(loss_cfg.get("p", 2)),
+            reduction=reduction,
+        )
+    if loss_type == "arcface":
+        from bat_losses import ArcFaceLoss
+
+        return ArcFaceLoss(
+            label_smoothing=float(loss_cfg.get("label_smoothing", 0.0)),
+            reduction=reduction,
+        )
+    if loss_type == "adaface":
+        from bat_losses import AdaFaceLoss
+
+        return AdaFaceLoss(
+            label_smoothing=float(loss_cfg.get("label_smoothing", 0.0)),
+            reduction=reduction,
+        )
+    if loss_type == "cosface":
+        from bat_losses import CosFaceLoss
+
+        return CosFaceLoss(
+            label_smoothing=float(loss_cfg.get("label_smoothing", 0.0)),
+            reduction=reduction,
+        )
+    if loss_type in {"subcenter", "subcenter_arcface", "subcenter-arcface"}:
+        from bat_losses import SubCenterArcFaceLoss
+
+        return SubCenterArcFaceLoss(
+            label_smoothing=float(loss_cfg.get("label_smoothing", 0.0)),
+            reduction=reduction,
+        )
+    raise CliRuntimeError(f"unsupported loss type: {loss_type!r}")
+
+
+def run_training(
+    cfg: Mapping[str, Any],
+    *,
+    root: Path | None = None,
+    output_dir: Path | None = None,
+    mlflow_experiment: str = "bat-face-recognition",
+    tracking_uri: str | None = None,
+    run_name: str | None = None,
+    use_mlflow: bool = True,
+    promote: bool = False,
+) -> TrainResult:
+    """Train, evaluate, render a PDF, and optionally log to MLflow."""
+
+    from bat_reporting import ReportData, build_unified_pdf
+    from bat_tracking import start_run
+
+    repo = find_project_root(root)
+    resolved_output = output_dir or default_output_dir(cfg, root=repo)
+    bundle = build_bundle(cfg, root=repo, output_dir=resolved_output)
+    warnings: list[str] = []
+
+    context = (
+        start_run(
+            experiment_name=mlflow_experiment,
+            run_name=run_name,
+            tags={"entrypoint": "bat-cli"},
+            tracking_uri=tracking_uri,
+        )
+        if use_mlflow
+        else nullcontext(None)
+    )
+
+    with context as tracker:
+        run_id = _tracker_run_id(tracker)
+        if tracker is not None:
+            tracker.log_config(bundle.cfg)
+            tracker.log_params(_flatten_params(bundle.cfg))
+
+        trainer_kwargs = dict(bundle.trainer_kwargs)
+        trainer_kwargs["tracker"] = tracker
+        trainer_kwargs["run_id"] = run_id
+        trainer = make_trainer(
+            cfg=bundle.trainer_cfg,
+            model=bundle.model,
+            loss=bundle.loss,
+            **trainer_kwargs,
+        )
+        artifacts = trainer.fit(bundle.train_loader, bundle.val_loader)
+
+        eval_report = _safe("test evaluation", warnings, lambda: _run_test(trainer, bundle))
+        report_path = _safe(
+            "PDF report",
+            warnings,
+            lambda: build_unified_pdf(
+                ReportData(
+                    cfg=bundle.cfg,
+                    run_id=run_id or artifacts.run_id or "local",
+                    manifest_hash=bundle.manifest.manifest_hash,
+                    timestamp=datetime.now().isoformat(timespec="seconds"),
+                    eval_report=eval_report,
+                    extra={"best_metrics": artifacts.best_metrics},
+                ),
+                resolved_output / "post_training_report.pdf",
+            ),
+        )
+
+        if tracker is not None and report_path is not None:
+            _safe(
+                "MLflow report upload",
+                warnings,
+                lambda: tracker.log_artifact(report_path, "reports"),
+            )
+        if promote and tracker is not None and run_id:
+            _safe(
+                "champion promotion",
+                warnings,
+                lambda: tracker.promote_to_champion(run_id, "test/roc_auc"),
+            )
+
+    return TrainResult(
+        run_id=run_id,
+        output_dir=resolved_output,
+        report_path=report_path,
+        warnings=warnings,
+        eval_report=eval_report,
+    )
+
+
+def run_evaluation(
+    cfg: Mapping[str, Any],
+    *,
+    checkpoint: Path | None = None,
+    root: Path | None = None,
+    output_dir: Path | None = None,
+) -> EvalReport:
+    """Load a configured model/trainer and evaluate the test split."""
+
+    resolved_output = output_dir or default_output_dir(cfg, root=root)
+    bundle = build_bundle(cfg, root=root, output_dir=resolved_output)
+    trainer = make_trainer(
+        cfg=bundle.trainer_cfg,
+        model=bundle.model,
+        loss=bundle.loss,
+        **bundle.trainer_kwargs,
+    )
+    if checkpoint is not None:
+        trainer.load(checkpoint)
+    return _run_test(trainer, bundle)
+
+
+def build_manifest_csv(
+    *,
+    input_dir: Path,
+    output_csv: Path,
+    species: str,
+    val_fraction: float,
+    test_fraction: float,
+    seed: int,
+    skip_unparseable: bool = True,
+) -> tuple[Path, Any]:
+    """Build and split a manifest CSV from an image directory."""
+
+    from bat_data import IdentitySplitter, build_manifest, manifest_to_csv
+
+    manifest = build_manifest(
+        input_dir,
+        species=species,
+        skip_unparseable=skip_unparseable,
+        default_split="train",
+    )
+    splitter = IdentitySplitter(
+        val_fraction=val_fraction,
+        test_fraction=test_fraction,
+        seed=seed,
+    )
+    split_manifest = splitter.split(manifest)
+    path = manifest_to_csv(split_manifest, output_csv)
+    return path, splitter.counts(split_manifest)
+
+
+def eval_report_to_dict(report: EvalReport) -> dict[str, Any]:
+    """Convert an EvalReport to a JSON-friendly dictionary."""
+
+    verification = report.verification
+    payload: dict[str, Any] = {
+        "verification": {
+            "roc_auc": verification.roc_auc,
+            "youden_j": verification.youden_j,
+            "optimal_threshold": verification.optimal_threshold,
+            "tar_at_far_1e3": verification.tar_at_far_1e3,
+            "tar_at_far_1e4": verification.tar_at_far_1e4,
+        }
+    }
+    if report.identification is not None:
+        payload["identification"] = {
+            "top1": report.identification.top1,
+            "top5": report.identification.top5,
+            "map": report.identification.map,
+            "cmc": list(report.identification.cmc),
+        }
+    return payload
+
+
+def format_json(payload: Mapping[str, Any]) -> str:
+    """Pretty JSON formatter used by CLI output."""
+
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+class ManifestPairDataset:
+    """Simple deterministic pair dataset over a manifest split."""
+
+    def __init__(self, manifest: Manifest, split: str, *, image_size: int = 105) -> None:
+        from bat_data import default_image_loader
+
+        self.records = tuple(r for r in manifest.records if r.split == split)
+        if not self.records:
+            raise ValueError(f"no records found for split {split!r}")
+        self.image_size = int(image_size)
+        self.loader = lambda p: default_image_loader(Path(p), self.image_size)
+        by_identity: dict[str, list[Any]] = defaultdict(list)
+        for record in self.records:
+            by_identity[record.identity].append(record)
+        if len(by_identity) < 2:
+            raise ValueError(f"pair dataset split {split!r} needs at least two identities")
+        self.by_identity = {k: tuple(v) for k, v in by_identity.items()}
+        self.identities = tuple(sorted(self.by_identity))
+        self._position = {id(record): idx for idx, record in enumerate(self.records)}
+
+    def __len__(self) -> int:
+        return len(self.records) * 2
+
+    def __getitem__(self, index: int) -> tuple[Any, Any, Any]:
+        import torch
+
+        anchor = self.records[index % len(self.records)]
+        positive = index % 2 == 0
+        if positive:
+            candidates = self.by_identity[anchor.identity]
+            pos = self._position[id(anchor)] % len(candidates)
+            other = candidates[(pos + 1) % len(candidates)]
+            label = 1.0
+        else:
+            current_idx = self.identities.index(anchor.identity)
+            neg_identity = self.identities[(current_idx + 1 + index) % len(self.identities)]
+            if neg_identity == anchor.identity:
+                neg_identity = self.identities[(current_idx + 1) % len(self.identities)]
+            candidates = self.by_identity[neg_identity]
+            other = candidates[index % len(candidates)]
+            label = 0.0
+        return (
+            self.loader(anchor.path),
+            self.loader(other.path),
+            torch.tensor(label, dtype=torch.float32),
+        )
+
+
+def _run_test(trainer: Any, bundle: TrainingBundle) -> EvalReport:
+    if _model_family(bundle.cfg) == "embedding":
+        return trainer.test(manifest=bundle.manifest, split="test")
+    if bundle.test_loader is None:
+        raise CliRuntimeError("test split is unavailable for pair evaluation")
+    return trainer.test(bundle.test_loader)
+
+
+def _optional_embedding_dataset(manifest: Manifest, split: str, *, image_size: int) -> Any | None:
+    from bat_data import BatDataset
+
+    try:
+        return BatDataset(manifest, split=split, image_size=image_size)
+    except ValueError:
+        return None
+
+
+def _optional_pair_dataset(manifest: Manifest, split: str, *, image_size: int) -> Any | None:
+    try:
+        return ManifestPairDataset(manifest, split=split, image_size=image_size)
+    except ValueError:
+        return None
+
+
+def _loader(
+    dataset: Any,
+    *,
+    batch_size: int,
+    shuffle: bool,
+    num_workers: int,
+    collate_fn: Any | None = None,
+) -> Any:
+    from torch.utils.data import DataLoader
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+    )
+
+
+def _embedding_collate(batch: Sequence[Any]) -> tuple[Any, Any]:
+    import torch
+
+    images = [item[0] for item in batch]
+    labels = [int(item[1]) for item in batch]
+    return torch.stack(images, dim=0), torch.tensor(labels, dtype=torch.long)
+
+
+def _model_family(cfg: Mapping[str, Any]) -> str:
+    model_cfg = _mapping(cfg.get("model"))
+    loss_cfg = _mapping(cfg.get("loss"))
+    family = str(model_cfg.get("family", loss_cfg.get("family", "")))
+    if family not in {"pair", "embedding"}:
+        raise CliRuntimeError(f"model.family must be 'pair' or 'embedding'; got {family!r}")
+    return family
+
+
+def _warmup_steps(cfg: Mapping[str, Any], trainer_cfg: TrainerConfig, train_loader: Any) -> int:
+    trainer = _mapping(cfg.get("trainer"))
+    if "warmup_steps" in trainer:
+        return int(trainer["warmup_steps"])
+    warmup_epochs = int(trainer.get("warmup_epochs", 0))
+    if warmup_epochs <= 0:
+        return trainer_cfg.warmup_steps
+    steps_per_epoch = max(1, len(train_loader))
+    opt_steps = max(
+        1,
+        (steps_per_epoch + trainer_cfg.gradient_accumulation_steps - 1)
+        // trainer_cfg.gradient_accumulation_steps,
+    )
+    return warmup_epochs * opt_steps
+
+
+def _is_pretrained(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.lower() not in {"false", "none", "null", "random", "no", "0"}
+    return bool(value)
+
+
+def _safe(label: str, warnings: list[str], fn: Any) -> Any:
+    try:
+        return fn()
+    except Exception as exc:  # pragma: no cover - exercised by real pipeline failures
+        warnings.append(f"{label} failed: {exc}")
+        return None
+
+
+def _tracker_run_id(tracker: Any | None) -> str:
+    if tracker is None:
+        return ""
+    resolver = getattr(tracker, "_resolve_run_id", None)
+    if resolver is None:
+        return ""
+    return str(resolver())
+
+
+def _flatten_params(cfg: Mapping[str, Any]) -> dict[str, Any]:
+    flat: dict[str, Any] = {}
+
+    def _walk(prefix: str, value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                child_prefix = f"{prefix}.{key}" if prefix else str(key)
+                _walk(child_prefix, child)
+        elif isinstance(value, list | tuple):
+            flat[prefix] = ",".join(str(v) for v in value)
+        else:
+            flat[prefix] = value
+
+    _walk("", cfg)
+    return flat
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _data_value(cfg: Mapping[str, Any], key: str, default: Any) -> Any:
+    return _mapping(cfg.get("data")).get(key, default)
+
+
+def _trainer_value(cfg: Mapping[str, Any], key: str, default: Any) -> Any:
+    return _mapping(cfg.get("trainer")).get(key, default)
