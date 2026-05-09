@@ -19,9 +19,9 @@ target metric. If the trial should be pruned the wrapper raises
 responsible for catching.
 
 A standalone :class:`OptunaPruningCallback` is also exported with a
-``on_validation_end(epoch, metrics)`` API in case ``bat_training`` ever
-exposes a callback list (TODO(phase-2.1)) -- the wrapper delegates to the
-callback so the two stay in lockstep.
+``on_validation_end(epoch, metrics)`` API in case ``bat_training`` later
+exposes a callback list -- the wrapper delegates to the callback so the two
+stay in lockstep.
 """
 
 from __future__ import annotations

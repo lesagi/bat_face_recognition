@@ -9,7 +9,6 @@ import pytest
 pytest.importorskip("optuna")
 
 import optuna  # noqa: E402
-
 from bat_sweeps.pruning_callback import OptunaPruningCallback, OptunaPruningTracker  # noqa: E402
 
 

@@ -7,7 +7,6 @@ import pytest
 pytest.importorskip("optuna")
 
 import optuna  # noqa: E402
-
 from bat_sweeps.search_space import apply_overrides, parse_search_space  # noqa: E402
 
 

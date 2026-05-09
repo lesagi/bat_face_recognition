@@ -14,12 +14,7 @@ Public surface:
 from __future__ import annotations
 
 from bat_reporting.compare import RunComparisonInputs, compare_runs
-from bat_reporting.data import (
-    EmbeddingProjection,
-    PermutationSummary,
-    ReportData,
-    TrainingHistory,
-)
+from bat_reporting.data import EmbeddingProjection, PermutationSummary, ReportData, TrainingHistory
 from bat_reporting.pdf_report import DEFAULT_SECTION_ORDER, build_unified_pdf
 
 __all__ = [

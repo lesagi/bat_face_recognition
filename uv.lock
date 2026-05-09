@@ -421,6 +421,7 @@ dependencies = [
     { name = "bat-tracking" },
     { name = "jinja2" },
     { name = "matplotlib" },
+    { name = "pyyaml" },
     { name = "reportlab" },
 ]
 
@@ -433,6 +434,7 @@ requires-dist = [
     { name = "bat-tracking", editable = "packages/bat_tracking" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "matplotlib", specifier = ">=3.8" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "reportlab", specifier = ">=4.0" },
 ]
 

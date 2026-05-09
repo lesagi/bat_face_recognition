@@ -7,7 +7,6 @@ import pytest
 pytest.importorskip("optuna")
 
 import optuna  # noqa: E402
-
 from bat_sweeps.study import DEFAULT_STORAGE, make_study  # noqa: E402
 
 

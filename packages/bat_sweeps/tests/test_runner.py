@@ -10,7 +10,6 @@ import pytest
 pytest.importorskip("optuna")
 
 import optuna  # noqa: E402
-
 from bat_sweeps import run_sweep  # noqa: E402
 from bat_sweeps.objective import TrialComponents  # noqa: E402
 

@@ -5,10 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:  # pragma: no cover
-    pass
+from typing import Any
 
 # A4 page width minus margins, in points (used to scale embedded images).
 DEFAULT_PAGE_USABLE_WIDTH_PT: float = 6.5 * 72.0  # 6.5" usable on letter / A4-ish.
@@ -63,7 +60,7 @@ def add_image(
     try:
         with PILImage.open(str(image_path)) as im:
             iw, ih = im.size
-    except Exception:
+    except (OSError, ValueError):
         iw, ih = (1, 1)
     scale = target_width / max(1, iw)
     target_height = ih * scale
@@ -127,7 +124,7 @@ def cfg_to_mapping(cfg: Any) -> Mapping[str, Any]:
         from omegaconf import OmegaConf  # type: ignore[import-not-found]
 
         return OmegaConf.to_container(cfg, resolve=True)  # type: ignore[no-any-return]
-    except Exception:
+    except (ImportError, AttributeError, TypeError, ValueError):
         pass
     if hasattr(cfg, "__dict__"):
         return dict(cfg.__dict__)

@@ -5,12 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from bat_reporting.sections.common import (
-    SectionContext,
-    add_heading,
-    add_paragraph,
-    cfg_to_mapping,
-)
+from bat_reporting.sections.common import SectionContext, add_heading, add_paragraph, cfg_to_mapping
 from bat_stats.naming import experiment_name
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -50,7 +45,7 @@ def _safe_yaml_dump(payload: Any) -> str:
 
     try:
         return yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)
-    except Exception:
+    except (TypeError, ValueError, yaml.YAMLError):
         return str(payload)
 
 

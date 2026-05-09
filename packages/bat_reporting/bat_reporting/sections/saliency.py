@@ -9,12 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from bat_interpretability.composite import composite_from_saliency_images
-from bat_reporting.sections.common import (
-    SectionContext,
-    add_heading,
-    add_image,
-    add_placeholder,
-)
+from bat_reporting.sections.common import SectionContext, add_heading, add_image, add_placeholder
 from bat_stats.naming import build_filename, build_title_suffix
 
 if TYPE_CHECKING:  # pragma: no cover

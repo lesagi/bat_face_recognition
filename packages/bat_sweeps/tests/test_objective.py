@@ -16,9 +16,7 @@ import pytest
 pytest.importorskip("optuna")
 
 import optuna  # noqa: E402
-
 from bat_sweeps.objective import TrialComponents, build_objective  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Test doubles

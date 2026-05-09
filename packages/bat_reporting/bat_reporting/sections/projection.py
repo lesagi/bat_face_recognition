@@ -4,12 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from bat_reporting.sections.common import (
-    SectionContext,
-    add_heading,
-    add_image,
-    add_placeholder,
-)
+from bat_reporting.sections.common import SectionContext, add_heading, add_image, add_placeholder
 
 if TYPE_CHECKING:  # pragma: no cover
     from bat_reporting.data import ReportData

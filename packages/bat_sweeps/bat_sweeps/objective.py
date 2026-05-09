@@ -159,14 +159,7 @@ def build_objective(
             **trainer_kwargs,
         )
 
-        try:
-            artifacts = trainer.fit(components.train_loader, components.val_loader)
-        except Exception as exc:  # noqa: BLE001 -- re-raise pruned, swallow elsewhere
-            import optuna
-
-            if isinstance(exc, optuna.TrialPruned):
-                raise
-            raise
+        artifacts = trainer.fit(components.train_loader, components.val_loader)
 
         # Sweep MUST NOT call trainer.test() -- the test split is sacred
         # and used only by the post-sweep champion evaluation.
