@@ -139,9 +139,7 @@ class MLflowTracker:
             cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
             self._client.log_artifact(run_id, str(cfg_path), artifact_path=None)
 
-    def would_promote(
-        self, run_id: str, criterion: str
-    ) -> tuple[bool, float | None, float | None]:
+    def would_promote(self, run_id: str, criterion: str) -> tuple[bool, float | None, float | None]:
         """Return ``(beats, candidate_metric, incumbent_metric)`` without transitioning.
 
         Mirrors the comparison performed by :meth:`promote_to_champion` but

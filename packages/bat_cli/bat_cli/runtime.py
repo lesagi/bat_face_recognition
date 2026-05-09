@@ -418,6 +418,9 @@ def run_training(
     from bat_reporting import ReportData, build_unified_pdf
     from bat_tracking import start_run
 
+    if promote and prompt_promote:
+        raise CliRuntimeError("--promote and --prompt-promote are mutually exclusive")
+
     repo = find_project_root(root)
     resolved_output = output_dir or default_output_dir(cfg, root=repo)
     bundle = build_bundle(cfg, root=repo, output_dir=resolved_output)
@@ -525,9 +528,6 @@ def run_training(
                         warnings,
                         lambda: tracker.log_artifact(permutation_dir, "permutation"),
                     )
-
-        if promote and prompt_promote:
-            raise CliRuntimeError("--promote and --prompt-promote are mutually exclusive")
 
         promotion_decision = _maybe_promote(
             tracker=tracker,

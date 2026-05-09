@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from bat_cli.__main__ import main
 from bat_cli.runtime import (
     PermutationResult,
-    PromotionDecision,
     _maybe_promote,
     _sample_explanation_records,
     _sample_projection_records,
@@ -150,10 +148,8 @@ def test_train_promote_and_prompt_promote_are_mutually_exclusive() -> None:
         ],
     )
 
-    # Mutual exclusion is enforced inside run_training (after Hydra composition);
-    # the dry-run check on the same call still passes for parser-level logic.
-    # Real exercising of the conflict path lives in test_maybe_promote_*.
-    assert result.exit_code in (0, 2)  # accept either dry-run echo or click error
+    assert result.exit_code != 0
+    assert "--promote and --prompt-promote are mutually exclusive" in result.output
 
 
 # ---------------------------------------------------------------------------

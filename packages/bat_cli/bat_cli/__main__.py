@@ -113,6 +113,8 @@ def train(
     """Run training followed by test evaluation, PDF generation, and permutation test."""
 
     try:
+        if promote and prompt_promote:
+            raise CliRuntimeError("--promote and --prompt-promote are mutually exclusive")
         root = find_project_root()
         cfg = compose_config(config_name=config_name, experiment=experiment, overrides=overrides)
         resolved_output = output_dir or default_output_dir(cfg, root=root)
@@ -566,7 +568,9 @@ def _interactive_permutation_test(ctx: click.Context, inquirer: Any) -> None:
         message="Compute degradation curve (slower)?", default=False
     ).execute()
     seed = int(
-        inquirer.text(message="Seed", default="42", validate=lambda v: v.lstrip("-").isdigit()).execute()
+        inquirer.text(
+            message="Seed", default="42", validate=lambda v: v.lstrip("-").isdigit()
+        ).execute()
     )
     checkpoint = Path(checkpoint_str) if checkpoint_str.strip() else None
     if checkpoint is not None and not checkpoint.exists():
@@ -620,9 +624,7 @@ def _interactive_build_manifest(ctx: click.Context, inquirer: Any) -> None:
     output_str = inquirer.text(
         message="Output CSV path", default="data/manifests/manifest.csv"
     ).execute()
-    species = inquirer.select(
-        message="Species", choices=["mauritius", "rousettus"]
-    ).execute()
+    species = inquirer.select(message="Species", choices=["mauritius", "rousettus"]).execute()
     val_fraction = float(
         inquirer.text(
             message="val_fraction",
