@@ -20,3 +20,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bat_reporting"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"bat_reporting/templates" = "bat_reporting/templates"
