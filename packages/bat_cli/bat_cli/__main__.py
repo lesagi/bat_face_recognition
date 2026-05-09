@@ -15,6 +15,7 @@ from bat_cli.runtime import (
     find_project_root,
     format_json,
     run_evaluation,
+    run_permutation_test,
     run_training,
 )
 
@@ -50,7 +51,46 @@ def main(ctx: click.Context) -> None:
 @click.option("--tracking-uri", help="Optional MLflow tracking URI.")
 @click.option("--run-name", help="Optional MLflow run name.")
 @click.option("--no-mlflow", is_flag=True, help="Run locally without starting an MLflow run.")
-@click.option("--promote", is_flag=True, help="Attempt champion promotion after test evaluation.")
+@click.option(
+    "--promote",
+    is_flag=True,
+    help="Auto-promote silently if criterion beats incumbent. Mutually exclusive with --prompt-promote.",
+)
+@click.option(
+    "--prompt-promote",
+    is_flag=True,
+    help="If criterion beats incumbent, prompt once before promoting. No prompt = no promotion.",
+)
+@click.option(
+    "--promotion-criterion",
+    default="test/roc_auc",
+    show_default=True,
+    help="Metric used by --promote / --prompt-promote.",
+)
+@click.option(
+    "--no-permutation",
+    is_flag=True,
+    help="Skip the auto inference-mode permutation test step.",
+)
+@click.option(
+    "--permutation-n",
+    default=1000,
+    show_default=True,
+    type=int,
+    help="Number of permutations for the auto post-training permutation test.",
+)
+@click.option(
+    "--no-explanations",
+    is_flag=True,
+    help="Skip the auto saliency / GradCAM / projection step.",
+)
+@click.option(
+    "--explanations-per-split",
+    default=2,
+    show_default=True,
+    type=int,
+    help="Identities sampled per split (train/val/test) for the saliency composite.",
+)
 @click.option("--dry-run", is_flag=True, help="Compose and print the run plan without training.")
 def train(
     config_name: str,
@@ -62,9 +102,15 @@ def train(
     run_name: str | None,
     no_mlflow: bool,
     promote: bool,
+    prompt_promote: bool,
+    promotion_criterion: str,
+    no_permutation: bool,
+    permutation_n: int,
+    no_explanations: bool,
+    explanations_per_split: int,
     dry_run: bool,
 ) -> None:
-    """Run training followed by test evaluation and unified PDF generation."""
+    """Run training followed by test evaluation, PDF generation, and permutation test."""
 
     try:
         root = find_project_root()
@@ -83,6 +129,12 @@ def train(
             run_name=run_name,
             use_mlflow=not no_mlflow,
             promote=promote,
+            prompt_promote=prompt_promote,
+            promotion_criterion=promotion_criterion,
+            run_permutation=not no_permutation,
+            permutation_n=permutation_n,
+            run_explanations=not no_explanations,
+            explanations_per_split=explanations_per_split,
         )
     except CliRuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -90,10 +142,32 @@ def train(
     click.echo(f"Training complete: {result.output_dir}")
     if result.report_path is not None:
         click.echo(f"Report: {result.report_path}")
+    if result.explanations_dir is not None:
+        click.echo(f"Explanations: {result.explanations_dir}")
+    if result.permutation_dir is not None:
+        click.echo(f"Permutation: {result.permutation_dir}")
+    if result.promotion is not None:
+        click.echo(f"Promotion: {_format_promotion(result.promotion)}")
     if result.run_id:
         click.echo(f"MLflow run: {result.run_id}")
     for warning in result.warnings:
         click.echo(f"Warning: {warning}", err=True)
+
+
+def _format_promotion(decision: Any) -> str:
+    if decision.mode == "off":
+        return "skipped (no flag)"
+    new = "?" if decision.candidate_metric is None else f"{decision.candidate_metric:.4f}"
+    inc = "none" if decision.incumbent_metric is None else f"{decision.incumbent_metric:.4f}"
+    if not decision.beats:
+        return f"skipped (candidate={new}, incumbent={inc})"
+    if decision.declined:
+        return f"declined (candidate={new}, incumbent={inc})"
+    return (
+        f"promoted (candidate={new}, incumbent={inc})"
+        if decision.promoted
+        else f"failed (candidate={new}, incumbent={inc})"
+    )
 
 
 @main.command()
@@ -205,6 +279,73 @@ def evaluate(
     click.echo(format_json(eval_report_to_dict(report)))
 
 
+@main.command("permutation-test")
+@click.option("--config-name", default="config", show_default=True)
+@click.option("--experiment", help="Hydra experiment config from configs/experiment.")
+@click.option(
+    "--hydra",
+    "overrides",
+    multiple=True,
+    callback=_overrides,
+    help="Hydra override. May be passed multiple times.",
+)
+@click.option(
+    "--checkpoint",
+    type=click.Path(exists=True, path_type=Path),
+    help="Optional checkpoint to restore before running test eval.",
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(path_type=Path),
+    help="Where plots / CSV / JSON go. Defaults to <run_output>/permutation.",
+)
+@click.option(
+    "--n-permutations",
+    default=1000,
+    show_default=True,
+    type=int,
+)
+@click.option("--seed", default=42, show_default=True, type=int)
+@click.option("--threshold", default=0.5, show_default=True, type=float)
+@click.option(
+    "--degradation",
+    is_flag=True,
+    help="Also compute the degradation curve (21 fractions, 5%% increments).",
+)
+@click.option("--verbose", is_flag=True)
+def permutation_test(
+    config_name: str,
+    experiment: str | None,
+    overrides: tuple[str, ...],
+    checkpoint: Path | None,
+    output_dir: Path | None,
+    n_permutations: int,
+    seed: int,
+    threshold: float,
+    degradation: bool,
+    verbose: bool,
+) -> None:
+    """Run the inference-mode permutation test for a configured run."""
+
+    try:
+        cfg = compose_config(config_name=config_name, experiment=experiment, overrides=overrides)
+        result = run_permutation_test(
+            cfg,
+            checkpoint=checkpoint,
+            output_dir=output_dir,
+            n_permutations=n_permutations,
+            seed=seed,
+            threshold=threshold,
+            degradation=degradation,
+            verbose=verbose,
+        )
+    except CliRuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Permutation report: {result.output_dir}")
+    click.echo(format_json({"n_permutations": result.n_permutations, "p_values": result.p_values}))
+
+
 @main.command("build-manifest")
 @click.option(
     "--input-dir", type=click.Path(exists=True, file_okay=False, path_type=Path), required=True
@@ -277,6 +418,12 @@ def promote(
     click.echo("Promoted" if promoted else "No promotion performed")
 
 
+_EXPERIMENT_CHOICES = (
+    "arcface_rousettus_random_bg_video",
+    "siamese_rousettus_random_bg_video",
+)
+
+
 def _interactive(ctx: click.Context) -> None:
     if not click.get_text_stream("stdin").isatty():
         click.echo(ctx.get_help())
@@ -286,44 +433,236 @@ def _interactive(ctx: click.Context) -> None:
 
     action = inquirer.select(
         message="Choose an action",
-        choices=["train", "sweep", "evaluate", "compare", "build-manifest", "promote"],
+        choices=[
+            "train",
+            "sweep",
+            "evaluate",
+            "permutation-test",
+            "compare",
+            "promote",
+            "build-manifest",
+        ],
     ).execute()
 
-    if action in {"train", "sweep"}:
-        experiment = inquirer.select(
-            message="Experiment",
-            choices=["arcface_rousettus_random_bg_video", "siamese_rousettus_random_bg_video"],
-        ).execute()
-        dry_run = inquirer.confirm(message="Dry run only?", default=False).execute()
-        if action == "train":
-            ctx.invoke(
-                train,
-                config_name="config",
-                experiment=experiment,
-                overrides=(),
-                output_dir=None,
-                mlflow_experiment="bat-face-recognition",
-                tracking_uri=None,
-                run_name=None,
-                no_mlflow=False,
-                promote=False,
-                dry_run=dry_run,
-            )
-        else:
-            ctx.invoke(
-                sweep,
-                config_name="config",
-                experiment=experiment,
-                sweep_config="arcface",
-                overrides=(),
-                n_jobs=1,
-                mlflow_experiment="bat-face-recognition-sweeps",
-                tracking_uri=None,
-                dry_run=dry_run,
-            )
-        return
+    if action == "train":
+        _interactive_train(ctx, inquirer)
+    elif action == "sweep":
+        _interactive_sweep(ctx, inquirer)
+    elif action == "evaluate":
+        _interactive_evaluate(ctx, inquirer)
+    elif action == "permutation-test":
+        _interactive_permutation_test(ctx, inquirer)
+    elif action == "compare":
+        _interactive_compare(ctx, inquirer)
+    elif action == "promote":
+        _interactive_promote(ctx, inquirer)
+    elif action == "build-manifest":
+        _interactive_build_manifest(ctx, inquirer)
 
-    click.echo(f"Run `bat-cli {action} --help` for the required arguments.")
+
+def _interactive_train(ctx: click.Context, inquirer: Any) -> None:
+    experiment = inquirer.select(message="Experiment", choices=list(_EXPERIMENT_CHOICES)).execute()
+    use_mlflow = inquirer.confirm(message="Log to MLflow?", default=True).execute()
+    run_explanations = inquirer.confirm(
+        message="Generate saliency + projection (samples train/val/test individuals)?",
+        default=True,
+    ).execute()
+    run_permutation = inquirer.confirm(
+        message="Run inference-mode permutation test after training?", default=True
+    ).execute()
+    promotion_mode = inquirer.select(
+        message="Champion promotion",
+        choices=[
+            {"name": "off (default — never promote)", "value": "off"},
+            {"name": "auto (promote silently if criterion improves)", "value": "auto"},
+            {"name": "prompt (ask once if criterion improves)", "value": "prompt"},
+        ],
+        default="off",
+    ).execute()
+    dry_run = inquirer.confirm(message="Dry run only?", default=False).execute()
+
+    ctx.invoke(
+        train,
+        config_name="config",
+        experiment=experiment,
+        overrides=(),
+        output_dir=None,
+        mlflow_experiment="bat-face-recognition",
+        tracking_uri=None,
+        run_name=None,
+        no_mlflow=not use_mlflow,
+        promote=promotion_mode == "auto",
+        prompt_promote=promotion_mode == "prompt",
+        promotion_criterion="test/roc_auc",
+        no_permutation=not run_permutation,
+        permutation_n=1000,
+        no_explanations=not run_explanations,
+        explanations_per_split=2,
+        dry_run=dry_run,
+    )
+
+
+def _interactive_sweep(ctx: click.Context, inquirer: Any) -> None:
+    experiment = inquirer.select(message="Experiment", choices=list(_EXPERIMENT_CHOICES)).execute()
+    sweep_choice = inquirer.select(
+        message="Sweep config", choices=["arcface"], default="arcface"
+    ).execute()
+    n_jobs = int(
+        inquirer.text(
+            message="Concurrent trials (n_jobs)",
+            default="1",
+            validate=lambda v: v.isdigit() and int(v) >= 1,
+        ).execute()
+    )
+    dry_run = inquirer.confirm(message="Dry run only?", default=False).execute()
+
+    ctx.invoke(
+        sweep,
+        config_name="config",
+        experiment=experiment,
+        sweep_config=sweep_choice,
+        overrides=(),
+        n_jobs=n_jobs,
+        mlflow_experiment="bat-face-recognition-sweeps",
+        tracking_uri=None,
+        dry_run=dry_run,
+    )
+
+
+def _interactive_evaluate(ctx: click.Context, inquirer: Any) -> None:
+    experiment = inquirer.select(message="Experiment", choices=list(_EXPERIMENT_CHOICES)).execute()
+    checkpoint_str = inquirer.text(
+        message="Checkpoint path (leave blank to evaluate fresh model)",
+        default="",
+    ).execute()
+    checkpoint = Path(checkpoint_str) if checkpoint_str.strip() else None
+    if checkpoint is not None and not checkpoint.exists():
+        raise click.ClickException(f"checkpoint does not exist: {checkpoint}")
+
+    ctx.invoke(
+        evaluate,
+        config_name="config",
+        experiment=experiment,
+        overrides=(),
+        checkpoint=checkpoint,
+        output_dir=None,
+    )
+
+
+def _interactive_permutation_test(ctx: click.Context, inquirer: Any) -> None:
+    experiment = inquirer.select(message="Experiment", choices=list(_EXPERIMENT_CHOICES)).execute()
+    checkpoint_str = inquirer.text(
+        message="Checkpoint path (blank → recompute predictions from configured model)",
+        default="",
+    ).execute()
+    n_perm = int(
+        inquirer.text(
+            message="Number of permutations",
+            default="1000",
+            validate=lambda v: v.isdigit() and int(v) >= 1,
+        ).execute()
+    )
+    degradation = inquirer.confirm(
+        message="Compute degradation curve (slower)?", default=False
+    ).execute()
+    seed = int(
+        inquirer.text(message="Seed", default="42", validate=lambda v: v.lstrip("-").isdigit()).execute()
+    )
+    checkpoint = Path(checkpoint_str) if checkpoint_str.strip() else None
+    if checkpoint is not None and not checkpoint.exists():
+        raise click.ClickException(f"checkpoint does not exist: {checkpoint}")
+
+    ctx.invoke(
+        permutation_test,
+        config_name="config",
+        experiment=experiment,
+        overrides=(),
+        checkpoint=checkpoint,
+        output_dir=None,
+        n_permutations=n_perm,
+        seed=seed,
+        threshold=0.5,
+        degradation=degradation,
+        verbose=False,
+    )
+
+
+def _interactive_compare(ctx: click.Context, inquirer: Any) -> None:
+    run_id_a = inquirer.text(message="MLflow run ID A").execute()
+    run_id_b = inquirer.text(message="MLflow run ID B").execute()
+    output_str = inquirer.text(
+        message="Output path", default="outputs/compare/report.html"
+    ).execute()
+    ctx.invoke(compare, run_id_a=run_id_a, run_id_b=run_id_b, output_path=Path(output_str))
+
+
+def _interactive_promote(ctx: click.Context, inquirer: Any) -> None:
+    run_id = inquirer.text(message="MLflow run ID to promote").execute()
+    criterion = inquirer.text(
+        message="Promotion criterion (metric key)", default="test/roc_auc"
+    ).execute()
+    mlflow_experiment = inquirer.text(
+        message="MLflow experiment", default="bat-face-recognition"
+    ).execute()
+    ctx.invoke(
+        promote,
+        run_id=run_id,
+        criterion=criterion,
+        mlflow_experiment=mlflow_experiment,
+        tracking_uri=None,
+    )
+
+
+def _interactive_build_manifest(ctx: click.Context, inquirer: Any) -> None:
+    input_dir = Path(inquirer.text(message="Input directory (with images)").execute())
+    if not input_dir.exists():
+        raise click.ClickException(f"input directory does not exist: {input_dir}")
+    output_str = inquirer.text(
+        message="Output CSV path", default="data/manifests/manifest.csv"
+    ).execute()
+    species = inquirer.select(
+        message="Species", choices=["mauritius", "rousettus"]
+    ).execute()
+    val_fraction = float(
+        inquirer.text(
+            message="val_fraction",
+            default="0.15",
+            validate=lambda v: _is_float_in_unit_interval(v),
+        ).execute()
+    )
+    test_fraction = float(
+        inquirer.text(
+            message="test_fraction",
+            default="0.15",
+            validate=lambda v: _is_float_in_unit_interval(v),
+        ).execute()
+    )
+    seed = int(
+        inquirer.text(
+            message="Split seed", default="42", validate=lambda v: v.lstrip("-").isdigit()
+        ).execute()
+    )
+    keep_unparseable = inquirer.confirm(
+        message="Fail on unparseable filenames?", default=False
+    ).execute()
+    ctx.invoke(
+        build_manifest,
+        input_dir=input_dir,
+        output_csv=Path(output_str),
+        species=species,
+        val_fraction=val_fraction,
+        test_fraction=test_fraction,
+        seed=seed,
+        keep_unparseable=keep_unparseable,
+    )
+
+
+def _is_float_in_unit_interval(value: str) -> bool:
+    try:
+        v = float(value)
+    except ValueError:
+        return False
+    return 0.0 <= v < 1.0
 
 
 def _plan_payload(cfg: dict[str, Any], output_dir: Path, *, use_mlflow: bool) -> dict[str, Any]:

@@ -139,6 +139,45 @@ class MLflowTracker:
             cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
             self._client.log_artifact(run_id, str(cfg_path), artifact_path=None)
 
+    def would_promote(
+        self, run_id: str, criterion: str
+    ) -> tuple[bool, float | None, float | None]:
+        """Return ``(beats, candidate_metric, incumbent_metric)`` without transitioning.
+
+        Mirrors the comparison performed by :meth:`promote_to_champion` but
+        does not call ``transition_model_version_stage``. Useful for CLI
+        flows that want to prompt the user before mutating the registry.
+
+        ``incumbent_metric`` is ``None`` if no Production-stage version
+        exists yet (in which case ``beats`` is True if the candidate has any
+        value for ``criterion``). ``candidate_metric`` is ``None`` if the
+        run has no value for ``criterion`` (``beats`` is False in that case).
+        """
+        candidate_run = self._client.get_run(run_id)
+        candidate_metric = candidate_run.data.metrics.get(criterion)
+        if candidate_metric is None:
+            return False, None, None
+
+        mv = _find_model_version_for_run(self._client, run_id)
+        if mv is None:
+            return False, candidate_metric, None
+
+        incumbents = self._client.get_latest_versions(mv.name, stages=[_PROD_STAGE])
+        if not incumbents:
+            return True, candidate_metric, None
+
+        incumbent_metric: float | None = None
+        for inc in incumbents:
+            inc_run = self._client.get_run(inc.run_id)
+            value = inc_run.data.metrics.get(criterion)
+            if value is None:
+                continue
+            if incumbent_metric is None or value > incumbent_metric:
+                incumbent_metric = value
+        if incumbent_metric is None:
+            return True, candidate_metric, None
+        return candidate_metric > incumbent_metric, candidate_metric, incumbent_metric
+
     def promote_to_champion(self, run_id: str, criterion: str) -> bool:
         """Promote *run_id*'s registered model to Production if it wins.
 
@@ -153,23 +192,13 @@ class MLflowTracker:
         :func:`bat_tracking.registry.register_model` already; this method only
         performs the *stage transition*.
         """
-        candidate_run = self._client.get_run(run_id)
-        candidate_metric = candidate_run.data.metrics.get(criterion)
-        if candidate_metric is None:
+        beats, _candidate, _incumbent = self.would_promote(run_id, criterion)
+        if not beats:
             return False
 
-        # Discover the registered model + version produced by this run.
         mv = _find_model_version_for_run(self._client, run_id)
         if mv is None:
             return False
-
-        # Compare against current Production-stage incumbent (if any).
-        incumbents = self._client.get_latest_versions(mv.name, stages=[_PROD_STAGE])
-        for inc in incumbents:
-            inc_run = self._client.get_run(inc.run_id)
-            inc_metric = inc_run.data.metrics.get(criterion)
-            if inc_metric is not None and candidate_metric <= inc_metric:
-                return False
 
         self._client.transition_model_version_stage(
             name=mv.name,

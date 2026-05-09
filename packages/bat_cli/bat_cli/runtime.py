@@ -11,18 +11,42 @@ import json
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bat_core import EvalReport, Manifest
+from bat_core import EvalReport, ImageRecord, Manifest, Predictions, SaliencyImage
 from bat_training import make_trainer
 from bat_training._common import TrainerConfig
 
 
 class CliRuntimeError(RuntimeError):
     """Raised when CLI inputs cannot be resolved into a runnable experiment."""
+
+
+# (beats, candidate_metric, incumbent_metric_or_None) -> approved-by-user
+PromotionConfirm = Any  # Callable[[bool, float | None, float | None], bool]
+
+
+@dataclass
+class ExplanationArtifacts:
+    """Saliency + projection artifacts returned by ``_build_explanations``."""
+
+    saliency_images: list[SaliencyImage]
+    projection_images: list[SaliencyImage]
+
+
+@dataclass
+class PromotionDecision:
+    """Outcome of the post-training promotion gate."""
+
+    mode: str  # "off" | "auto" | "prompt"
+    beats: bool
+    candidate_metric: float | None
+    incumbent_metric: float | None
+    promoted: bool
+    declined: bool = False  # True iff prompt-mode user said "no"
 
 
 @dataclass
@@ -49,6 +73,19 @@ class TrainResult:
     report_path: Path | None
     warnings: list[str]
     eval_report: EvalReport | None = None
+    permutation_dir: Path | None = None
+    explanations_dir: Path | None = None
+    promotion: PromotionDecision | None = None
+
+
+@dataclass
+class PermutationResult:
+    """Summary returned after a permutation-test command."""
+
+    output_dir: Path
+    n_permutations: int
+    metrics_tested: tuple[str, ...]
+    p_values: dict[str, float]
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -366,6 +403,15 @@ def run_training(
     run_name: str | None = None,
     use_mlflow: bool = True,
     promote: bool = False,
+    prompt_promote: bool = False,
+    promotion_criterion: str = "test/roc_auc",
+    promotion_confirm: PromotionConfirm | None = None,
+    run_permutation: bool = True,
+    permutation_n: int = 1000,
+    permutation_seed: int = 42,
+    run_explanations: bool = True,
+    explanations_per_split: int = 2,
+    explanations_projection_cap: int = 30,
 ) -> TrainResult:
     """Train, evaluate, render a PDF, and optionally log to MLflow."""
 
@@ -406,18 +452,45 @@ def run_training(
         artifacts = trainer.fit(bundle.train_loader, bundle.val_loader)
 
         eval_report = _safe("test evaluation", warnings, lambda: _run_test(trainer, bundle))
+
+        explanations: ExplanationArtifacts | None = None
+        explanations_dir: Path | None = None
+        if run_explanations:
+            explanations_dir = resolved_output / "explanations"
+            explanations = _safe(
+                "explanations",
+                warnings,
+                lambda: _build_explanations(
+                    bundle.model,
+                    bundle.manifest,
+                    output_dir=explanations_dir,
+                    samples_per_split=explanations_per_split,
+                    projection_cap=explanations_projection_cap,
+                ),
+            )
+
+        report_data_kwargs: dict[str, Any] = dict(
+            cfg=bundle.cfg,
+            run_id=run_id or artifacts.run_id or "local",
+            manifest_hash=bundle.manifest.manifest_hash,
+            timestamp=datetime.now().isoformat(timespec="seconds"),
+            eval_report=eval_report,
+            extra={"best_metrics": artifacts.best_metrics},
+        )
+        if explanations is not None:
+            from bat_reporting import EmbeddingProjection
+
+            report_data_kwargs["saliency_images"] = explanations.saliency_images
+            if explanations.projection_images:
+                report_data_kwargs["embedding_projection"] = EmbeddingProjection(
+                    images=explanations.projection_images
+                )
+
         report_path = _safe(
             "PDF report",
             warnings,
             lambda: build_unified_pdf(
-                ReportData(
-                    cfg=bundle.cfg,
-                    run_id=run_id or artifacts.run_id or "local",
-                    manifest_hash=bundle.manifest.manifest_hash,
-                    timestamp=datetime.now().isoformat(timespec="seconds"),
-                    eval_report=eval_report,
-                    extra={"best_metrics": artifacts.best_metrics},
-                ),
+                ReportData(**report_data_kwargs),
                 resolved_output / "post_training_report.pdf",
             ),
         )
@@ -428,12 +501,43 @@ def run_training(
                 warnings,
                 lambda: tracker.log_artifact(report_path, "reports"),
             )
-        if promote and tracker is not None and run_id:
-            _safe(
-                "champion promotion",
+
+        permutation_dir: Path | None = None
+        if run_permutation and eval_report is not None and eval_report.predictions is not None:
+            permutation_result = _safe(
+                "permutation test",
                 warnings,
-                lambda: tracker.promote_to_champion(run_id, "test/roc_auc"),
+                lambda: run_permutation_test(
+                    bundle.cfg,
+                    predictions=eval_report.predictions,
+                    root=repo,
+                    output_dir=resolved_output / "permutation",
+                    n_permutations=permutation_n,
+                    seed=permutation_seed,
+                    verbose=False,
+                ),
             )
+            if permutation_result is not None:
+                permutation_dir = permutation_result.output_dir
+                if tracker is not None:
+                    _safe(
+                        "MLflow permutation upload",
+                        warnings,
+                        lambda: tracker.log_artifact(permutation_dir, "permutation"),
+                    )
+
+        if promote and prompt_promote:
+            raise CliRuntimeError("--promote and --prompt-promote are mutually exclusive")
+
+        promotion_decision = _maybe_promote(
+            tracker=tracker,
+            run_id=run_id,
+            criterion=promotion_criterion,
+            promote=promote,
+            prompt_promote=prompt_promote,
+            confirm=promotion_confirm,
+            warnings=warnings,
+        )
 
     return TrainResult(
         run_id=run_id,
@@ -441,6 +545,101 @@ def run_training(
         report_path=report_path,
         warnings=warnings,
         eval_report=eval_report,
+        permutation_dir=permutation_dir,
+        explanations_dir=explanations_dir if explanations is not None else None,
+        promotion=promotion_decision,
+    )
+
+
+def _maybe_promote(
+    *,
+    tracker: Any | None,
+    run_id: str,
+    criterion: str,
+    promote: bool,
+    prompt_promote: bool,
+    confirm: PromotionConfirm | None,
+    warnings: list[str],
+) -> PromotionDecision:
+    """Apply the post-training champion-promotion policy."""
+
+    if tracker is None or not run_id:
+        return PromotionDecision(
+            mode="off", beats=False, candidate_metric=None, incumbent_metric=None, promoted=False
+        )
+    if not promote and not prompt_promote:
+        return PromotionDecision(
+            mode="off", beats=False, candidate_metric=None, incumbent_metric=None, promoted=False
+        )
+
+    probe = _safe(
+        "promotion comparison",
+        warnings,
+        lambda: tracker.would_promote(run_id, criterion),
+    )
+    if probe is None:
+        return PromotionDecision(
+            mode="auto" if promote else "prompt",
+            beats=False,
+            candidate_metric=None,
+            incumbent_metric=None,
+            promoted=False,
+        )
+    beats, candidate_metric, incumbent_metric = probe
+
+    if not beats:
+        return PromotionDecision(
+            mode="auto" if promote else "prompt",
+            beats=False,
+            candidate_metric=candidate_metric,
+            incumbent_metric=incumbent_metric,
+            promoted=False,
+        )
+
+    if prompt_promote:
+        approved = bool(
+            confirm(beats, candidate_metric, incumbent_metric)
+            if confirm is not None
+            else _default_promotion_confirm(beats, candidate_metric, incumbent_metric)
+        )
+        if not approved:
+            return PromotionDecision(
+                mode="prompt",
+                beats=True,
+                candidate_metric=candidate_metric,
+                incumbent_metric=incumbent_metric,
+                promoted=False,
+                declined=True,
+            )
+
+    promoted = bool(
+        _safe(
+            "champion promotion",
+            warnings,
+            lambda: tracker.promote_to_champion(run_id, criterion),
+        )
+    )
+    return PromotionDecision(
+        mode="prompt" if prompt_promote else "auto",
+        beats=True,
+        candidate_metric=candidate_metric,
+        incumbent_metric=incumbent_metric,
+        promoted=promoted,
+    )
+
+
+def _default_promotion_confirm(
+    beats: bool, candidate: float | None, incumbent: float | None
+) -> bool:
+    """Default click-based confirm for the prompt-promote flow."""
+
+    import click
+
+    return click.confirm(
+        f"Candidate {candidate:.4f} beats champion "
+        f"{incumbent if incumbent is None else f'{incumbent:.4f}'} on the criterion. "
+        "Promote?",
+        default=False,
     )
 
 
@@ -464,6 +663,150 @@ def run_evaluation(
     if checkpoint is not None:
         trainer.load(checkpoint)
     return _run_test(trainer, bundle)
+
+
+def _build_explanations(
+    model: Any,
+    manifest: Manifest,
+    *,
+    output_dir: Path,
+    samples_per_split: int = 2,
+    projection_cap: int = 30,
+) -> ExplanationArtifacts:
+    """Generate saliency + projection artifacts spanning train/val/test splits.
+
+    Picks ``samples_per_split`` distinct identities per split (deterministic:
+    sorted by record path), takes one record each, runs the family-appropriate
+    saliency adapter on the union, then runs the embedding projection adapter
+    on a wider pool capped at ``projection_cap``.
+
+    Identity strings on the resulting :class:`bat_core.SaliencyImage` are
+    prefixed with the source split (``"train:W"``, ``"val:H"``, ``"test:R"``)
+    so the unified PDF's saliency composite makes split provenance obvious.
+    """
+
+    from bat_interpretability import EmbeddingProjectionAdapter, select_adapter
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saliency_samples, path_to_split = _sample_explanation_records(manifest, samples_per_split)
+    if not saliency_samples:
+        return ExplanationArtifacts(saliency_images=[], projection_images=[])
+
+    adapter = select_adapter(model)
+    raw = list(adapter.explain(model, saliency_samples))
+    saliency_images = [
+        replace(img, identity=f"{path_to_split.get(img.image_path, '?')}:{img.identity}")
+        for img in raw
+    ]
+
+    projection_samples = _sample_projection_records(manifest, projection_cap)
+    projection_adapter = EmbeddingProjectionAdapter(method="both", output_dir=output_dir)
+    projection_images = (
+        list(projection_adapter.explain(model, projection_samples)) if projection_samples else []
+    )
+
+    return ExplanationArtifacts(
+        saliency_images=saliency_images,
+        projection_images=projection_images,
+    )
+
+
+def _sample_explanation_records(
+    manifest: Manifest, samples_per_split: int
+) -> tuple[list[ImageRecord], dict[Path, str]]:
+    """Pick ``samples_per_split`` representative records per split."""
+
+    samples: list[ImageRecord] = []
+    path_to_split: dict[Path, str] = {}
+    for split in ("train", "val", "test"):
+        records = manifest.filter_split(split)  # type: ignore[arg-type]
+        if not records:
+            continue
+        by_identity: dict[str, list[ImageRecord]] = defaultdict(list)
+        for r in records:
+            by_identity[r.identity].append(r)
+        # Identities sorted alphabetically; pick first record (sorted by path) per identity.
+        chosen_identities = sorted(by_identity)[:samples_per_split]
+        for identity in chosen_identities:
+            picked = sorted(by_identity[identity], key=lambda r: str(r.path))[0]
+            samples.append(picked)
+            path_to_split[picked.path] = split
+    return samples, path_to_split
+
+
+def _sample_projection_records(manifest: Manifest, cap: int) -> list[ImageRecord]:
+    """Pool records across splits for the t-SNE/UMAP projection."""
+
+    pool: list[ImageRecord] = []
+    for split in ("train", "val", "test"):
+        pool.extend(manifest.filter_split(split))  # type: ignore[arg-type]
+    if not pool:
+        return []
+    if len(pool) <= cap:
+        return pool
+    # Spread evenly: stride sample to keep identity diversity.
+    stride = max(1, len(pool) // cap)
+    return list(pool[::stride])[:cap]
+
+
+def run_permutation_test(
+    cfg: Mapping[str, Any],
+    *,
+    predictions: Predictions | None = None,
+    checkpoint: Path | None = None,
+    root: Path | None = None,
+    output_dir: Path | None = None,
+    n_permutations: int = 1000,
+    significance_level: float = 0.05,
+    seed: int = 42,
+    threshold: float = 0.5,
+    metrics_to_test: Sequence[str] | None = None,
+    degradation: bool = False,
+    verbose: bool = False,
+) -> PermutationResult:
+    """Run the inference-mode permutation test on a configured run.
+
+    If ``predictions`` is supplied (e.g. from an in-flight train pipeline),
+    we skip re-evaluation and feed them straight to ``bat_stats``. Otherwise
+    we recompose the cfg, optionally restore a checkpoint, run test eval,
+    and use the resulting ``EvalReport.predictions``.
+    """
+
+    from bat_stats import run_inference_test
+
+    repo = find_project_root(root)
+    resolved_output = output_dir or (default_output_dir(cfg, root=repo) / "permutation")
+    resolved_output.mkdir(parents=True, exist_ok=True)
+
+    if predictions is None:
+        report = run_evaluation(cfg, checkpoint=checkpoint, root=repo, output_dir=resolved_output)
+        predictions = report.predictions
+    if predictions is None:
+        raise CliRuntimeError(
+            "evaluation produced no predictions; permutation test needs a Predictions dataclass"
+        )
+
+    results = run_inference_test(
+        cfg,
+        predictions,
+        threshold=threshold,
+        n_permutations=n_permutations,
+        significance_level=significance_level,
+        metrics_to_test=metrics_to_test,
+        degradation=degradation,
+        seed=seed,
+        output_dir=resolved_output,
+        generate_report=True,
+        verbose=verbose,
+    )
+
+    p_values = {name: float(metric.p_value) for name, metric in results.metrics.items()}
+    return PermutationResult(
+        output_dir=resolved_output,
+        n_permutations=int(results.n_permutations),
+        metrics_tested=tuple(p_values),
+        p_values=p_values,
+    )
 
 
 def build_manifest_csv(
