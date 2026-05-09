@@ -98,9 +98,7 @@ def test_gradcam_class_target(tmp_path: Path) -> None:
     edge = 32
     model = _TinyEmbeddingModel()
     samples = [_record(_write_fake_image(tmp_path, "img.png", edge=edge))]
-    adapter = GradCAMAdapter(
-        target="class", target_class=0, input_size=edge
-    )
+    adapter = GradCAMAdapter(target="class", target_class=0, input_size=edge)
 
     out = adapter.explain(model, samples)
     assert len(out) == 1

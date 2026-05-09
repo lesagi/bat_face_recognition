@@ -9,11 +9,10 @@ import pytest
 
 pytest.importorskip("PIL")
 
-from PIL import Image  # noqa: E402
-
 from bat_core.types import SaliencyImage  # noqa: E402
 from bat_interpretability import make_composite  # noqa: E402
 from bat_interpretability.composite import composite_from_saliency_images  # noqa: E402
+from PIL import Image  # noqa: E402
 
 
 def _write_fake_image(path: Path, edge: int = 32) -> Path:

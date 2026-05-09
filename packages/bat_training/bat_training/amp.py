@@ -15,8 +15,9 @@ loss-scaling and bf16 is robust to gradient overflow. Users who want
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Iterator, Literal
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
     import torch
@@ -84,7 +85,7 @@ class AMPContext:
         with torch.amp.autocast(device_type=self.device_type, dtype=dtype):
             yield
 
-    def backward(self, loss: "torch.Tensor") -> None:
+    def backward(self, loss: torch.Tensor) -> None:
         """Run backward; uses :class:`torch.cuda.amp.GradScaler` for fp16."""
         if self._use_scaler and self._scaler is not None:
             self._scaler.scale(loss).backward()  # type: ignore[attr-defined]

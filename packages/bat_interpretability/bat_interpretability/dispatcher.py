@@ -32,9 +32,7 @@ def select_adapter(model: FaceModel) -> InterpretabilityAdapter:
         return SiameseSaliencyAdapter()
     if family == "embedding":
         return GradCAMAdapter()
-    raise ValueError(
-        f"Unknown model.family={family!r}; expected 'pair' or 'embedding'."
-    )
+    raise ValueError(f"Unknown model.family={family!r}; expected 'pair' or 'embedding'.")
 
 
 def available_adapters(model: FaceModel) -> list[InterpretabilityAdapter]:

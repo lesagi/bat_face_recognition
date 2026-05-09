@@ -13,10 +13,10 @@ and is always returned by the dispatcher when 2-D projections are requested.
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
-from collections.abc import Sequence
 
 import numpy as np
 
@@ -71,9 +71,7 @@ class EmbeddingProjectionAdapter:
     ) -> list[SaliencyImage]:
         """Compute embeddings for ``samples`` and project them to 2-D."""
 
-        embeddings, identities = _compute_embeddings(
-            model, samples, size=self.input_size
-        )
+        embeddings, identities = _compute_embeddings(model, samples, size=self.input_size)
         out_dir = self._resolve_output_dir()
 
         results: list[SaliencyImage] = []
@@ -90,9 +88,7 @@ class EmbeddingProjectionAdapter:
     # ------------------------------------------------------------------ #
     # Direct entry point — no model, just embeddings                     #
     # ------------------------------------------------------------------ #
-    def project_embeddings(
-        self, embedding: Embedding
-    ) -> list[SaliencyImage]:
+    def project_embeddings(self, embedding: Embedding) -> list[SaliencyImage]:
         """Project pre-computed :class:`bat_core.Embedding` to 2-D."""
         from bat_core.types import SaliencyImage
 
@@ -210,9 +206,7 @@ class EmbeddingProjectionAdapter:
     ) -> SaliencyImage:
         from bat_core.types import SaliencyImage
 
-        identity = (
-            samples[0].identity if samples else "<projection>"
-        )
+        identity = samples[0].identity if samples else "<projection>"
         return SaliencyImage(
             identity=identity,
             image_path=png,
@@ -250,11 +244,7 @@ def _compute_embeddings(
     tensors: list[torch.Tensor] = []
     identities: list[str] = []
     for record in samples:
-        img = (
-            Image.open(str(record.path))
-            .convert("RGB")
-            .resize((size, size), Image.BILINEAR)
-        )
+        img = Image.open(str(record.path)).convert("RGB").resize((size, size), Image.BILINEAR)
         arr = np.asarray(img, dtype=np.float32) / 255.0
         tensors.append(torch.from_numpy(arr).permute(2, 0, 1))
         identities.append(record.identity)

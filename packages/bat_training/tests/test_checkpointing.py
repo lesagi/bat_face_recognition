@@ -32,12 +32,9 @@ def test_best_only_retention_preserves_previous_best(tmp_path: Path) -> None:
     """After a *worse* F1 epoch the prior best file must remain untouched."""
     cm = CheckpointManager(output_dir=tmp_path, retention={"save_best_f1": True})
     state_a = {"model": {"w": torch.tensor([1.0])}, "epoch": 1}
-    state_b = {"model": {"w": torch.tensor([2.0])}, "epoch": 2}
-
     # Epoch 1: best -- write
     p1 = cm.write_best("f1", epoch=1, state=state_a)
     assert p1 is not None and p1.exists()
-    mtime_first = p1.stat().st_mtime
 
     # Epoch 2: not better, the manager doesn't write -- the user is
     # responsible for asking via tracker.update first. We simulate the
@@ -103,7 +100,7 @@ def test_restore_into_state_keys_match(tmp_path: Path) -> None:
     restore_into(loaded, model=model2, optimizer=optimizer2)
 
     # Weights should match.
-    for a, b in zip(model.parameters(), model2.parameters()):
+    for a, b in zip(model.parameters(), model2.parameters(), strict=False):
         assert torch.allclose(a, b)
     # Optimizer state-dict keys should match.
     sd1 = optimizer.state_dict()

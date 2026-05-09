@@ -15,9 +15,7 @@ from bat_training._common import TrainerConfig
 from bat_training.checkpointing import load_checkpoint
 
 
-def test_resume_state_dict_keys_round_trip(
-    tmp_path: Path, tiny_pair_model_cls: Any
-) -> None:
+def test_resume_state_dict_keys_round_trip(tmp_path: Path, tiny_pair_model_cls: Any) -> None:
     """``load_checkpoint`` returns a dict with the expected keys and they
     line up with the model / optimizer state-dicts."""
     torch.manual_seed(0)

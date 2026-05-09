@@ -118,33 +118,27 @@ class GradCAMAdapter:
             scalar = self._target_scalar(model, image)
             scalar.backward()
 
-            act = activations["value"]   # (B, K, h, w)
-            grad = gradients["value"]    # (B, K, h, w)
+            act = activations["value"]  # (B, K, h, w)
+            grad = gradients["value"]  # (B, K, h, w)
             # Channel-wise importance weights = global-avg-pool of grad.
             weights = grad.mean(dim=(2, 3), keepdim=True)  # (B, K, 1, 1)
-            cam = (weights * act).sum(dim=1)               # (B, h, w)
+            cam = (weights * act).sum(dim=1)  # (B, h, w)
             cam = torch.relu(cam)
             return cam[0]  # (h, w)
         finally:
             h_fwd.remove()
             h_bwd.remove()
 
-    def _target_scalar(
-        self, model: FaceModel, image: torch.Tensor
-    ) -> torch.Tensor:
+    def _target_scalar(self, model: FaceModel, image: torch.Tensor) -> torch.Tensor:
         """Compute the scalar to backprop from."""
         import torch
 
         if self.target == "class":
             if self.target_class is None:
-                raise ValueError(
-                    "target='class' requires `target_class` to be set"
-                )
+                raise ValueError("target='class' requires `target_class` to be set")
             # forward_train requires labels; we feed the desired class and
             # take the corresponding logit.
-            label = torch.tensor(
-                [int(self.target_class)], device=image.device, dtype=torch.long
-            )
+            label = torch.tensor([int(self.target_class)], device=image.device, dtype=torch.long)
             logits = model.forward_train(image, label)
             return logits[0, int(self.target_class)]
         # default: embedding magnitude.
@@ -187,9 +181,7 @@ class GradCAMAdapter:
 # ---------------------------------------------------------------------- #
 # Helpers                                                                #
 # ---------------------------------------------------------------------- #
-def _load_and_preprocess(
-    path: Path | str, size: int, device: torch.device
-) -> torch.Tensor:
+def _load_and_preprocess(path: Path | str, size: int, device: torch.device) -> torch.Tensor:
     import torch
     from PIL import Image
 

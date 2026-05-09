@@ -8,9 +8,9 @@ single :class:`PIL.Image.Image`.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
-from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -60,9 +60,7 @@ def make_composite(
         (plus a small header if ``title`` is given).
     """
     if not (len(images) == len(saliencies) == len(identities)):
-        raise ValueError(
-            "images, saliencies, identities must all have the same length"
-        )
+        raise ValueError("images, saliencies, identities must all have the same length")
     if len(images) != rows:
         raise ValueError(
             f"composite expects exactly {rows} samples; got {len(images)}. "
@@ -90,18 +88,14 @@ def make_composite(
         zip(images, saliencies, identities, strict=True)
     ):
         original = _load_resized(img_path, cell)
-        overlay = _make_overlay(
-            original, saliency, alpha=overlay_alpha, cmap_name=cmap_name
-        )
+        overlay = _make_overlay(original, saliency, alpha=overlay_alpha, cmap_name=cmap_name)
         y = header_h + row_idx * cell
         canvas.paste(original, (0, y))
         canvas.paste(overlay, (cell, y))
         # Tag the row with the identity in the top-left corner of the
         # original tile.
         draw = ImageDraw.Draw(canvas)
-        draw.rectangle(
-            [(0, y), (min(72, cell // 2), y + 16)], fill=(0, 0, 0)
-        )
+        draw.rectangle([(0, y), (min(72, cell // 2), y + 16)], fill=(0, 0, 0))
         draw.text((4, y + 2), str(identity), fill=(255, 255, 255))
 
     return canvas
@@ -137,7 +131,7 @@ def _make_overlay(
     sal = _resize_2d(sal, original.size)
     cmap = plt.get_cmap(cmap_name)
     coloured = (cmap(sal)[..., :3] * 255).astype(np.uint8)
-    heat = Image.fromarray(coloured, mode="RGB")
+    heat = Image.fromarray(coloured)
     return Image.blend(original, heat, alpha)
 
 
@@ -152,7 +146,7 @@ def _resize_2d(arr: np.ndarray, size_wh: tuple[int, int]) -> np.ndarray:
     lo, hi = float(arr_norm.min()), float(arr_norm.max())
     if hi > lo:
         arr_norm = (arr_norm - lo) / (hi - lo)
-    img = Image.fromarray((arr_norm * 255.0).astype(np.uint8), mode="L")
+    img = Image.fromarray((arr_norm * 255.0).astype(np.uint8))
     img = img.resize((w, h), Image.BILINEAR)
     return (np.asarray(img, dtype=np.float32) / 255.0).astype(np.float32)
 
@@ -170,9 +164,7 @@ def composite_from_saliency_images(
     """
     items = list(saliency_images)[:rows]
     if len(items) != rows:
-        raise ValueError(
-            f"need at least {rows} SaliencyImage entries; got {len(items)}"
-        )
+        raise ValueError(f"need at least {rows} SaliencyImage entries; got {len(items)}")
     images = [item.image_path for item in items]
     saliencies = [np.asarray(item.saliency) for item in items]
     identities = [item.identity for item in items]

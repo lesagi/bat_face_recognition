@@ -106,6 +106,26 @@ def test_embedding_trainer_fit_reduces_loss(tmp_path: Path) -> None:
     assert "loss" in artifacts.best_metrics
 
 
+def test_embedding_trainer_steps_partial_gradient_accumulation_tail(tmp_path: Path) -> None:
+    """A short final accumulation window must still update parameters."""
+    torch.manual_seed(0)
+    model = _ToyArcFaceModel(embedding_dim=4, num_classes=3)
+    before = {name: param.detach().clone() for name, param in model.named_parameters()}
+    cfg = TrainerConfig(
+        epochs=1,
+        lr=1e-1,
+        ema_decay=0.0,
+        gradient_accumulation_steps=2,
+        output_dir=tmp_path / "run",
+    )
+
+    trainer = EmbeddingTrainer(model=model, loss=ArcFaceLoss(), cfg=cfg)
+    trainer.fit(_make_id_loader(), val_loader=None)
+
+    after = dict(model.named_parameters())
+    assert any(not torch.allclose(before[name], after[name]) for name in before)
+
+
 def test_embedding_trainer_rejects_pair_loss() -> None:
     """`EmbeddingTrainer` must refuse a loss with family != 'embedding'."""
     pytest.importorskip("torch")

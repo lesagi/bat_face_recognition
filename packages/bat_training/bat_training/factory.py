@@ -25,11 +25,11 @@ if TYPE_CHECKING:  # pragma: no cover -- typing only
 
 def make_trainer(
     cfg: TrainerConfig,
-    model: "nn.Module",
+    model: nn.Module,
     loss: Any,
     *,
-    tracker: "Tracker | None" = None,
-    eval_manifest: "Manifest | None" = None,
+    tracker: Tracker | None = None,
+    eval_manifest: Manifest | None = None,
     eval_split: str = "test",
     accelerator: Any | None = None,
     run_id: str | None = None,
@@ -43,9 +43,7 @@ def make_trainer(
     """
     family = getattr(loss, "family", None)
     if family is None:
-        raise InterfaceViolationError(
-            "loss.family attribute is required to dispatch a trainer"
-        )
+        raise InterfaceViolationError("loss.family attribute is required to dispatch a trainer")
 
     m_family = getattr(model, "family", None)
     if m_family is not None and m_family != family:
@@ -77,9 +75,7 @@ def make_trainer(
             register_name=register_name,
             promote_criterion=promote_criterion,
         )
-    raise InterfaceViolationError(
-        f"unknown loss.family={family!r}; expected 'pair' or 'embedding'"
-    )
+    raise InterfaceViolationError(f"unknown loss.family={family!r}; expected 'pair' or 'embedding'")
 
 
 __all__ = ["make_trainer"]

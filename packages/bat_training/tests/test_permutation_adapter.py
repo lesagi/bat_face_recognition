@@ -66,9 +66,7 @@ def test_factory_consumed_by_bat_stats_runner_signature(
         val_loader_factory=None,
         cfg=cfg,
     )
-    adapter = factory(
-        permute_labels=True, num_epochs=1, verbose=False, ignored_extra="ok"
-    )
+    adapter = factory(permute_labels=True, num_epochs=1, verbose=False, ignored_extra="ok")
     assert hasattr(adapter, "train_and_evaluate")
 
     adapter.reset_for_new_permutation()

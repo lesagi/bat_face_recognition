@@ -43,7 +43,7 @@ class TrainerConfig:
     log_every_n_steps: int = 50
 
 
-def detach_to_float(t: "torch.Tensor | float | int") -> float:
+def detach_to_float(t: torch.Tensor | float | int) -> float:
     """Best-effort ``.item()`` for a 0-D tensor or scalar."""
     try:
         return float(t.detach().item())  # type: ignore[union-attr]
@@ -61,15 +61,13 @@ def looks_like_pair_batch(batch: Any) -> bool:
     """
     if isinstance(batch, dict):
         return {"x_a", "x_b", "label"}.issubset(batch.keys())
-    if isinstance(batch, (tuple, list)) and len(batch) >= 3:
-        # A batch with 3+ elements might be a pair batch; we trust the caller
-        # to wire in the right loader. Returning True here is safe because
-        # the trainers only call this for diagnostics.
-        return True
-    return False
+    # A batch with 3+ elements might be a pair batch; we trust the caller
+    # to wire in the right loader. Returning True here is safe because
+    # the trainers only call this for diagnostics.
+    return isinstance(batch, tuple | list) and len(batch) >= 3
 
 
-def unpack_pair_batch(batch: Any) -> "tuple[torch.Tensor, torch.Tensor, torch.Tensor]":
+def unpack_pair_batch(batch: Any) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Return ``(x_a, x_b, label)`` from a pair-shaped batch.
 
     Accepts:
@@ -79,14 +77,14 @@ def unpack_pair_batch(batch: Any) -> "tuple[torch.Tensor, torch.Tensor, torch.Te
     """
     if isinstance(batch, dict):
         return batch["x_a"], batch["x_b"], batch["label"]
-    if not isinstance(batch, (tuple, list)) or len(batch) < 3:
+    if not isinstance(batch, tuple | list) or len(batch) < 3:
         raise TypeError(
             f"PairTrainer expected (x_a, x_b, label[, ...]) batch; got {type(batch).__name__}"
         )
     return batch[0], batch[1], batch[2]
 
 
-def unpack_embedding_batch(batch: Any) -> "tuple[torch.Tensor, torch.Tensor]":
+def unpack_embedding_batch(batch: Any) -> tuple[torch.Tensor, torch.Tensor]:
     """Return ``(image, identity_label)`` from an embedding-shaped batch.
 
     Accepts:
@@ -97,7 +95,7 @@ def unpack_embedding_batch(batch: Any) -> "tuple[torch.Tensor, torch.Tensor]":
     """
     if isinstance(batch, dict):
         return batch["image"], batch["label"]
-    if not isinstance(batch, (tuple, list)) or len(batch) < 2:
+    if not isinstance(batch, tuple | list) or len(batch) < 2:
         raise TypeError(
             f"EmbeddingTrainer expected (image, label[, ...]) batch; got {type(batch).__name__}"
         )

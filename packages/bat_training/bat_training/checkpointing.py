@@ -75,10 +75,7 @@ class BestCheckpointTracker:
         if name not in self._states:
             return False
         state = self._states[name]
-        if state.mode == "max":
-            improved = value > state.best_value
-        else:
-            improved = value < state.best_value
+        improved = value > state.best_value if state.mode == "max" else value < state.best_value
         if improved:
             state.best_value = float(value)
             state.best_epoch = int(epoch)
@@ -91,10 +88,7 @@ class BestCheckpointTracker:
 
     def summary(self) -> dict[str, dict[str, float | int]]:
         """Return ``{metric: {value, epoch}}`` for all tracked metrics."""
-        return {
-            n: {"value": s.best_value, "epoch": s.best_epoch}
-            for n, s in self._states.items()
-        }
+        return {n: {"value": s.best_value, "epoch": s.best_epoch} for n, s in self._states.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +96,7 @@ class BestCheckpointTracker:
 # ---------------------------------------------------------------------------
 
 
-def _DEFAULT_RETENTION() -> dict[str, bool]:
+def _default_retention() -> dict[str, bool]:
     return {
         "save_best_f1": True,
         "save_best_recall": True,
@@ -131,7 +125,7 @@ class CheckpointManager:
     ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._retention = {**_DEFAULT_RETENTION(), **(retention or {})}
+        self._retention = {**_default_retention(), **(retention or {})}
 
         # Map epoch -> the canonical file written for that epoch.
         self._epoch_canonical: dict[int, str] = {}
@@ -253,8 +247,8 @@ def load_checkpoint(path: str | Path) -> dict[str, Any]:
 def restore_into(
     state: dict[str, Any],
     *,
-    model: "nn.Module | None" = None,
-    optimizer: "torch.optim.Optimizer | None" = None,
+    model: nn.Module | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
     scheduler: object | None = None,
     scaler: object | None = None,
     ema: object | None = None,

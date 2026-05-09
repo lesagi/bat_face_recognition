@@ -14,17 +14,14 @@ verification metrics come from :mod:`bat_evaluation.verification`.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any
 
 from bat_core import EvalReport, Predictions, RunArtifacts, VerificationMetrics
 from bat_core.exceptions import InterfaceViolationError
 from bat_evaluation.verification import evaluate_predictions
-from bat_training._common import (
-    TrainerConfig,
-    detach_to_float,
-    unpack_pair_batch,
-)
+from bat_training._common import TrainerConfig, detach_to_float, unpack_pair_batch
 from bat_training.amp import AMPContext
 from bat_training.callbacks import EarlyStopping, set_deterministic_mode
 from bat_training.checkpointing import (
@@ -70,12 +67,12 @@ class PairTrainer:
 
     def __init__(
         self,
-        model: "nn.Module",
+        model: nn.Module,
         loss: Any,
         cfg: TrainerConfig,
         *,
-        tracker: "Tracker | None" = None,
-        accelerator: "Accelerator | None" = None,
+        tracker: Tracker | None = None,
+        accelerator: Accelerator | None = None,
         run_id: str | None = None,
         register_name: str | None = None,
         promote_criterion: str = "test/roc_auc",
@@ -158,7 +155,7 @@ class PairTrainer:
     # ------------------------------------------------------------------ #
     # Internal helpers                                                   #
     # ------------------------------------------------------------------ #
-    def _ensure_accelerator(self) -> "Accelerator":
+    def _ensure_accelerator(self) -> Accelerator:
         if self.accelerator is None:
             from accelerate import Accelerator
 
@@ -168,12 +165,31 @@ class PairTrainer:
             )
         return self.accelerator
 
-    def _backward(self, loss: "torch.Tensor") -> None:
+    def _backward(self, loss: torch.Tensor) -> None:
         if self.accelerator is not None:
             self.accelerator.backward(loss)
             return
         # Standalone (test) path
         self.amp.backward(loss)
+
+    def _autocast(self) -> Any:
+        if self.accelerator is not None:
+            return self.accelerator.autocast()
+        return self.amp.autocast()
+
+    def _step_optimizer(self) -> None:
+        if self.accelerator is not None:
+            self.optimizer.step()
+        else:
+            self.amp.step(self.optimizer)
+        if self.scheduler is not None:
+            self.scheduler.step()
+        self.optimizer.zero_grad(set_to_none=True)
+        if self.ema is not None:
+            self.ema.update(self.model)
+
+    def _has_pending_accumulation(self) -> bool:
+        return self.grad_accum.counter > 0 and self.grad_accum.counter % self.grad_accum.steps != 0
 
     def _log(self, section: str, metrics: dict[str, float], step: int) -> None:
         if self.tracker is None:
@@ -192,7 +208,11 @@ class PairTrainer:
             steps_per_epoch = len(train_loader)
         except TypeError:  # iterable without __len__
             steps_per_epoch = 1
-        total_steps = max(1, steps_per_epoch * self.cfg.epochs)
+        optimizer_steps_per_epoch = max(
+            1,
+            (steps_per_epoch + self.grad_accum.steps - 1) // self.grad_accum.steps,
+        )
+        total_steps = max(1, optimizer_steps_per_epoch * self.cfg.epochs)
         self.scheduler = build_scheduler(
             self.optimizer,
             warmup_steps=self.cfg.warmup_steps,
@@ -278,25 +298,18 @@ class PairTrainer:
         for batch in loader:
             x_a, x_b, label = unpack_pair_batch(batch)
 
-            # Forward
-            output = self.model(x_a, x_b) if self._call_model_with_pair() else self.model(
-                (x_a, x_b)
-            )
-            loss = self.loss(output, label)
+            with self._autocast():
+                output = (
+                    self.model(x_a, x_b) if self._call_model_with_pair() else self.model((x_a, x_b))
+                )
+                loss = self.loss(output, label)
             scaled = loss / float(self.grad_accum.steps)
 
             self._backward(scaled)
             self.grad_accum.tick()
 
             if self.grad_accum.should_step:
-                if self.accelerator is not None and not self.accelerator.optimizer_step_was_skipped:
-                    pass
-                self.optimizer.step()
-                if self.scheduler is not None:
-                    self.scheduler.step()
-                self.optimizer.zero_grad(set_to_none=True)
-                if self.ema is not None:
-                    self.ema.update(self.model)
+                self._step_optimizer()
 
             total_loss += detach_to_float(loss)
             n_batches += 1
@@ -309,6 +322,9 @@ class PairTrainer:
                 running_fp += fp
                 running_tn += tn
                 running_fn += fn
+
+        if self._has_pending_accumulation():
+            self._step_optimizer()
 
         recall, precision, f1 = _prf1(running_tp, running_fp, running_fn)
         avg_loss = total_loss / max(1, n_batches)
@@ -361,10 +377,13 @@ class PairTrainer:
         with torch.no_grad():
             for batch in loader:
                 x_a, x_b, label = unpack_pair_batch(batch)
-                output = self.model(x_a, x_b) if self._call_model_with_pair() else self.model(
-                    (x_a, x_b)
-                )
-                loss = self.loss(output, label)
+                with self._autocast():
+                    output = (
+                        self.model(x_a, x_b)
+                        if self._call_model_with_pair()
+                        else self.model((x_a, x_b))
+                    )
+                    loss = self.loss(output, label)
                 total_loss += detach_to_float(loss)
                 n_batches += 1
                 # ravel
@@ -404,9 +423,7 @@ class PairTrainer:
                     state=self._build_state_dict(epoch=epoch),
                 )
 
-    def _log_verification(
-        self, metrics: VerificationMetrics, *, section: str, step: int
-    ) -> None:
+    def _log_verification(self, metrics: VerificationMetrics, *, section: str, step: int) -> None:
         self._log(
             section,
             {
@@ -460,8 +477,8 @@ class PairTrainer:
 
 
 def _confusion_pieces(
-    output: "torch.Tensor",
-    label: "torch.Tensor",
+    output: torch.Tensor,
+    label: torch.Tensor,
     threshold: float = 0.5,
 ) -> tuple[int, int, int, int]:
     """Return ``(tp, fp, tn, fn)`` at a fixed ``0.5`` threshold."""

@@ -86,14 +86,14 @@ def test_siamese_saliency_vanilla_returns_2d_map(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "method", ["guided", "integrated_gradients", "smoothgrad"],
+    "method",
+    ["guided", "integrated_gradients", "smoothgrad"],
 )
 def test_siamese_saliency_advanced_methods(method: str, tmp_path: Path) -> None:
     edge = 16
     model = _TinyPairModel(edge=edge)
     samples = [
-        _record(_write_fake_image(tmp_path, f"img_{i}.png", edge=edge), f"B{i}")
-        for i in range(2)
+        _record(_write_fake_image(tmp_path, f"img_{i}.png", edge=edge), f"B{i}") for i in range(2)
     ]
     adapter = SiameseSaliencyAdapter(
         method=method,  # type: ignore[arg-type]

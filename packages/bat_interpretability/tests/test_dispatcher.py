@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 import pytest
-
 from bat_interpretability import (
     EmbeddingProjectionAdapter,
     GradCAMAdapter,

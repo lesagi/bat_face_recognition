@@ -60,6 +60,27 @@ def test_pair_trainer_fit_reduces_loss(
     assert "loss" in artifacts.best_metrics
 
 
+def test_pair_trainer_steps_partial_gradient_accumulation_tail(
+    tmp_path: Path, tiny_pair_model_cls: Any, make_pair_loader: Any
+) -> None:
+    """A short final accumulation window must still update parameters."""
+    torch.manual_seed(0)
+    model = tiny_pair_model_cls()
+    before = {name: param.detach().clone() for name, param in model.named_parameters()}
+    cfg = TrainerConfig(
+        epochs=1,
+        lr=1e-2,
+        gradient_accumulation_steps=2,
+        output_dir=tmp_path / "run",
+    )
+
+    trainer = PairTrainer(model=model, loss=BCELoss(), cfg=cfg)
+    trainer.fit(make_pair_loader(), val_loader=None)
+
+    after = dict(model.named_parameters())
+    assert any(not torch.allclose(before[name], after[name]) for name in before)
+
+
 def test_pair_trainer_rejects_wrong_family(tiny_pair_model_cls: Any) -> None:
     """`PairTrainer` must refuse a loss with family != 'pair'."""
 

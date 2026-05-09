@@ -50,8 +50,8 @@ from bat_training.optim import (
 )
 from bat_training.pair_trainer import PairTrainer
 from bat_training.permutation_adapter import (
-    create_pair_trainer_factory,
     create_embedding_trainer_factory,
+    create_pair_trainer_factory,
 )
 
 __all__ = [

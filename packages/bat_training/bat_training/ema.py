@@ -44,17 +44,17 @@ class ExponentialMovingAverage:
 
     def __init__(
         self,
-        model: "nn.Module",
+        model: nn.Module,
         decay: float = 0.999,
-        device: "torch.device | str | None" = None,
+        device: torch.device | str | None = None,
     ) -> None:
         if not 0.0 <= decay <= 1.0:
             raise ValueError(f"decay must be in [0, 1]; got {decay}")
         self.decay = float(decay)
         self._device = device
 
-        self._shadow: dict[str, "torch.Tensor"] = {}
-        self._backup: dict[str, "torch.Tensor"] = {}
+        self._shadow: dict[str, torch.Tensor] = {}
+        self._backup: dict[str, torch.Tensor] = {}
 
         for name, param in model.named_parameters():
             if not param.requires_grad:
@@ -67,10 +67,10 @@ class ExponentialMovingAverage:
             self._shadow[name] = tensor
 
     @property
-    def shadow(self) -> "dict[str, torch.Tensor]":
+    def shadow(self) -> dict[str, torch.Tensor]:
         return self._shadow
 
-    def update(self, model: "nn.Module") -> None:
+    def update(self, model: nn.Module) -> None:
         """Update the shadow copy from ``model``'s current parameters."""
         for name, param in model.named_parameters():
             if name not in self._shadow:
@@ -81,7 +81,7 @@ class ExponentialMovingAverage:
                 new = new.to(shadow.device)
             shadow.mul_(self.decay).add_(new, alpha=1.0 - self.decay)
 
-    def apply_to(self, model: "nn.Module") -> None:
+    def apply_to(self, model: nn.Module) -> None:
         """Replace ``model``'s parameters with their EMA values.
 
         Stashes the previous values internally so :meth:`restore` can put
@@ -97,7 +97,7 @@ class ExponentialMovingAverage:
             with _no_grad():
                 param.data.copy_(shadow.to(param.device))
 
-    def restore(self, model: "nn.Module") -> None:
+    def restore(self, model: nn.Module) -> None:
         """Restore the parameters saved by the last :meth:`apply_to`."""
         if not self._backup:
             return
@@ -108,11 +108,11 @@ class ExponentialMovingAverage:
                 param.data.copy_(self._backup[name].to(param.device))
         self._backup = {}
 
-    def state_dict(self) -> "dict[str, torch.Tensor]":
+    def state_dict(self) -> dict[str, torch.Tensor]:
         """Serialise the shadow tensors for checkpointing."""
         return {name: t.detach().clone() for name, t in self._shadow.items()}
 
-    def load_state_dict(self, state: "dict[str, torch.Tensor]") -> None:
+    def load_state_dict(self, state: dict[str, torch.Tensor]) -> None:
         """Restore from a previously-saved state dict."""
         self._shadow = {name: t.detach().clone() for name, t in state.items()}
         self._backup = {}

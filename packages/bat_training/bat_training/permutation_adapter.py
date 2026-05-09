@@ -28,14 +28,14 @@ Usage from a CLI (Phase 3 sketch)::
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from bat_training._common import TrainerConfig
 from bat_training.embedding_trainer import EmbeddingTrainer
 from bat_training.pair_trainer import PairTrainer
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
-    from bat_core import Manifest
     from torch import nn
 
 ModelFactory = Callable[[], "nn.Module"]
@@ -114,9 +114,8 @@ class _PermutationAdapter:
                 continue
         # Provide an "accuracy" alias for the pair-family case (the
         # permutation runner expects it).
-        if "accuracy" not in out:
-            if "f1" in out:
-                out["accuracy"] = out["f1"]
+        if "accuracy" not in out and "f1" in out:
+            out["accuracy"] = out["f1"]
         # Provide an "f1" alias for the embedding-family case if we only
         # tracked accuracy.
         if "f1" not in out and "accuracy" in out:

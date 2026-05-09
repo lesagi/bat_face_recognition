@@ -12,17 +12,14 @@ checkpointing. Identification + verification metrics are produced by
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any
 
 from bat_core import EvalReport, Manifest, RunArtifacts
 from bat_core.exceptions import InterfaceViolationError
 from bat_evaluation.protocols import run_eval_protocol
-from bat_training._common import (
-    TrainerConfig,
-    detach_to_float,
-    unpack_embedding_batch,
-)
+from bat_training._common import TrainerConfig, detach_to_float, unpack_embedding_batch
 from bat_training.amp import AMPContext
 from bat_training.callbacks import EarlyStopping, set_deterministic_mode
 from bat_training.checkpointing import (
@@ -69,14 +66,14 @@ class EmbeddingTrainer:
 
     def __init__(
         self,
-        model: "nn.Module",
+        model: nn.Module,
         loss: Any,
         cfg: TrainerConfig,
         *,
         eval_manifest: Manifest | None = None,
         eval_split: str = "test",
-        tracker: "Tracker | None" = None,
-        accelerator: "Accelerator | None" = None,
+        tracker: Tracker | None = None,
+        accelerator: Accelerator | None = None,
         run_id: str | None = None,
         register_name: str | None = None,
         promote_criterion: str = "test/roc_auc",
@@ -127,9 +124,7 @@ class EmbeddingTrainer:
 
         self.amp = AMPContext(precision=cfg.mixed_precision, enabled=cfg.mixed_precision != "no")
         ema_decay = cfg.ema_decay if cfg.ema_decay is not None else 0.999
-        self.ema = (
-            ExponentialMovingAverage(model, decay=ema_decay) if ema_decay > 0 else None
-        )
+        self.ema = ExponentialMovingAverage(model, decay=ema_decay) if ema_decay > 0 else None
         self.grad_accum = GradientAccumulator(steps=max(1, cfg.gradient_accumulation_steps))
 
         self.best = BestCheckpointTracker(
@@ -161,7 +156,7 @@ class EmbeddingTrainer:
     # ------------------------------------------------------------------ #
     # Internal helpers                                                   #
     # ------------------------------------------------------------------ #
-    def _ensure_accelerator(self) -> "Accelerator":
+    def _ensure_accelerator(self) -> Accelerator:
         if self.accelerator is None:
             from accelerate import Accelerator
 
@@ -171,20 +166,37 @@ class EmbeddingTrainer:
             )
         return self.accelerator
 
-    def _backward(self, loss: "torch.Tensor") -> None:
+    def _backward(self, loss: torch.Tensor) -> None:
         if self.accelerator is not None:
             self.accelerator.backward(loss)
             return
         self.amp.backward(loss)
+
+    def _autocast(self) -> Any:
+        if self.accelerator is not None:
+            return self.accelerator.autocast()
+        return self.amp.autocast()
+
+    def _step_optimizer(self) -> None:
+        if self.accelerator is not None:
+            self.optimizer.step()
+        else:
+            self.amp.step(self.optimizer)
+        if self.scheduler is not None:
+            self.scheduler.step()
+        self.optimizer.zero_grad(set_to_none=True)
+        if self.ema is not None:
+            self.ema.update(self.model)
+
+    def _has_pending_accumulation(self) -> bool:
+        return self.grad_accum.counter > 0 and self.grad_accum.counter % self.grad_accum.steps != 0
 
     def _log(self, section: str, metrics: dict[str, float], step: int) -> None:
         if self.tracker is None:
             return
         self.tracker.log_metrics(section=section, metrics=metrics, step=step)  # type: ignore[arg-type]
 
-    def _forward_train(
-        self, x: "torch.Tensor", labels: "torch.Tensor"
-    ) -> "torch.Tensor":
+    def _forward_train(self, x: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """Run ``model.forward_train(x, labels)`` (or fall back).
 
         :mod:`bat_models` ArcFaceModel/AdaFaceModel implement
@@ -206,7 +218,11 @@ class EmbeddingTrainer:
             steps_per_epoch = len(train_loader)
         except TypeError:
             steps_per_epoch = 1
-        total_steps = max(1, steps_per_epoch * self.cfg.epochs)
+        optimizer_steps_per_epoch = max(
+            1,
+            (steps_per_epoch + self.grad_accum.steps - 1) // self.grad_accum.steps,
+        )
+        total_steps = max(1, optimizer_steps_per_epoch * self.cfg.epochs)
         self.scheduler = build_scheduler(
             self.optimizer,
             warmup_steps=self.cfg.warmup_steps,
@@ -334,20 +350,16 @@ class EmbeddingTrainer:
             x, labels = unpack_embedding_batch(batch)
             labels_long = labels.long() if labels.dtype != torch.long else labels
 
-            logits = self._forward_train(x, labels_long)
-            loss_value = self.loss(logits, labels_long)
+            with self._autocast():
+                logits = self._forward_train(x, labels_long)
+                loss_value = self.loss(logits, labels_long)
             scaled = loss_value / float(self.grad_accum.steps)
 
             self._backward(scaled)
             self.grad_accum.tick()
 
             if self.grad_accum.should_step:
-                self.optimizer.step()
-                if self.scheduler is not None:
-                    self.scheduler.step()
-                self.optimizer.zero_grad(set_to_none=True)
-                if self.ema is not None:
-                    self.ema.update(self.model)
+                self._step_optimizer()
 
             total_loss += detach_to_float(loss_value)
             n_batches += 1
@@ -357,6 +369,9 @@ class EmbeddingTrainer:
                 preds = torch.argmax(logits.detach(), dim=1)
                 total_correct += int((preds == labels_long).sum().item())
                 total_count += int(labels_long.numel())
+
+        if self._has_pending_accumulation():
+            self._step_optimizer()
 
         accuracy = total_correct / max(1, total_count)
         avg_loss = total_loss / max(1, n_batches)
@@ -385,8 +400,9 @@ class EmbeddingTrainer:
                 for batch in loader:
                     x, labels = unpack_embedding_batch(batch)
                     labels_long = labels.long() if labels.dtype != torch.long else labels
-                    logits = self._forward_train(x, labels_long)
-                    loss_value = self.loss(logits, labels_long)
+                    with self._autocast():
+                        logits = self._forward_train(x, labels_long)
+                        loss_value = self.loss(logits, labels_long)
                     total_loss += detach_to_float(loss_value)
                     n_batches += 1
                     preds = torch.argmax(logits.detach(), dim=1)
@@ -429,7 +445,7 @@ class EmbeddingTrainer:
 
         return _embed
 
-    def _infer_device(self) -> "torch.device":
+    def _infer_device(self) -> torch.device:
         try:
             return next(self.model.parameters()).device
         except StopIteration:  # pragma: no cover -- empty model

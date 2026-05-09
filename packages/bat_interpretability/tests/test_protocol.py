@@ -6,11 +6,7 @@ import pytest
 
 # These tests don't need torch at runtime — only the protocol check.
 from bat_core.interfaces import InterpretabilityAdapter
-from bat_interpretability import (
-    EmbeddingProjectionAdapter,
-    GradCAMAdapter,
-    SiameseSaliencyAdapter,
-)
+from bat_interpretability import EmbeddingProjectionAdapter, GradCAMAdapter, SiameseSaliencyAdapter
 
 
 def test_siamese_saliency_satisfies_protocol() -> None:

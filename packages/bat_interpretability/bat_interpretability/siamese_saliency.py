@@ -32,9 +32,7 @@ if TYPE_CHECKING:  # pragma: no cover - import-time only
     from bat_core.interfaces import FaceModel
     from bat_core.types import ImageRecord, SaliencyImage
 
-SaliencyMethod = Literal[
-    "vanilla", "guided", "integrated_gradients", "smoothgrad"
-]
+SaliencyMethod = Literal["vanilla", "guided", "integrated_gradients", "smoothgrad"]
 
 
 @dataclass
@@ -92,13 +90,9 @@ class SiameseSaliencyAdapter:
 
         results: list[SaliencyImage] = []
         for record in samples:
-            image_tensor = _load_and_preprocess(
-                record.path, size=self.input_size, device=device
-            )
+            image_tensor = _load_and_preprocess(record.path, size=self.input_size, device=device)
             counterpart = _random_counterpart(image_tensor)
-            saliency_2d = self._compute_saliency(
-                model, image_tensor, counterpart
-            )
+            saliency_2d = self._compute_saliency(model, image_tensor, counterpart)
             saliency_np = saliency_2d.detach().cpu().numpy().astype(np.float32)
             saliency_np = _normalize(saliency_np)
             if self.apply_smoothing:
@@ -130,9 +124,7 @@ class SiameseSaliencyAdapter:
 
             grads = torch.where(grads > 0, grads, torch.zeros_like(grads))
         elif self.method == "integrated_gradients":
-            grads = _integrated_gradients(
-                model, image, counterpart, steps=self.integration_steps
-            )
+            grads = _integrated_gradients(model, image, counterpart, steps=self.integration_steps)
         elif self.method == "smoothgrad":
             grads = _smooth_grads(
                 model,
@@ -236,9 +228,7 @@ def _pair_similarity(
     return out
 
 
-def _aggregate_channels(
-    grads: torch.Tensor, mode: str
-) -> torch.Tensor:
+def _aggregate_channels(grads: torch.Tensor, mode: str) -> torch.Tensor:
     """Reduce a (B, C, H, W) gradient tensor to a (H, W) saliency map.
 
     Assumes ``B == 1`` (per-image saliency); the leading batch dim is dropped.
@@ -263,9 +253,7 @@ def _aggregate_channels(
     return s
 
 
-def _load_and_preprocess(
-    path: Path | str, size: int, device: torch.device
-) -> torch.Tensor:
+def _load_and_preprocess(path: Path | str, size: int, device: torch.device) -> torch.Tensor:
     """Load image from disk and return a (1, 3, size, size) tensor in [0, 1]."""
     import torch
     from PIL import Image
@@ -297,9 +285,7 @@ def _gaussian_blur_2d(arr: np.ndarray, sigma: float) -> np.ndarray:
         out = np.zeros_like(arr)
         for i in range(h):
             for j in range(w):
-                out[i, j] = float(
-                    np.sum(padded[i : i + 3, j : j + 3] * kernel)
-                )
+                out[i, j] = float(np.sum(padded[i : i + 3, j : j + 3] * kernel))
         return out
 
 

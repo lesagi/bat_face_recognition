@@ -20,7 +20,8 @@ Public surface:
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Iterable, Literal
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:  # pragma: no cover -- typing-only imports
     import torch
@@ -31,7 +32,7 @@ OptimName = Literal["adam", "adamw", "sgd"]
 
 
 def build_optimizer(
-    params: "Iterable[torch.nn.Parameter]",
+    params: Iterable[torch.nn.Parameter],
     *,
     name: OptimName = "adam",
     lr: float = 1e-4,
@@ -39,7 +40,7 @@ def build_optimizer(
     momentum: float = 0.9,
     betas: tuple[float, float] = (0.9, 0.999),
     eps: float = 1e-8,
-) -> "Optimizer":
+) -> Optimizer:
     """Build a :class:`torch.optim.Optimizer` from a flat name.
 
     Notes
@@ -114,12 +115,12 @@ def warmup_cosine_lr(
 
 
 def build_scheduler(
-    optimizer: "Optimizer",
+    optimizer: Optimizer,
     *,
     warmup_steps: int,
     total_steps: int,
     min_lr_ratio: float = 0.0,
-) -> "LambdaLR":
+) -> LambdaLR:
     """Wrap :func:`warmup_cosine_lr` into a :class:`LambdaLR`."""
     import torch
 
