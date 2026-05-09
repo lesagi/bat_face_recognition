@@ -293,6 +293,78 @@ def test_promote_returns_false_when_no_registered_version() -> None:
 
 
 # ---------------------------------------------------------------------------
+# would_promote: pure predicate (no transition)
+# ---------------------------------------------------------------------------
+
+
+def test_would_promote_reports_beats_and_metrics_when_better() -> None:
+    client = MagicMock()
+    client.get_experiment_by_name.return_value = _fake_experiment()
+    candidate = _candidate_run("run-NEW", "test/roc_auc", 0.94)
+    incumbent = _candidate_run("run-OLD", "test/roc_auc", 0.88)
+    client.get_run.side_effect = lambda rid: candidate if rid == "run-NEW" else incumbent
+    client.search_model_versions.return_value = [_model_version("arcface", "5", "run-NEW")]
+    client.get_latest_versions.return_value = [_model_version("arcface", "4", "run-OLD")]
+
+    tracker = MLflowTracker(experiment_name="exp", client=client)
+    beats, candidate_metric, incumbent_metric = tracker.would_promote("run-NEW", "test/roc_auc")
+
+    assert beats is True
+    assert candidate_metric == pytest.approx(0.94)
+    assert incumbent_metric == pytest.approx(0.88)
+    client.transition_model_version_stage.assert_not_called()
+
+
+def test_would_promote_reports_loss_when_candidate_worse() -> None:
+    client = MagicMock()
+    client.get_experiment_by_name.return_value = _fake_experiment()
+    candidate = _candidate_run("run-NEW", "test/roc_auc", 0.7)
+    incumbent = _candidate_run("run-OLD", "test/roc_auc", 0.92)
+    client.get_run.side_effect = lambda rid: candidate if rid == "run-NEW" else incumbent
+    client.search_model_versions.return_value = [_model_version("arcface", "5", "run-NEW")]
+    client.get_latest_versions.return_value = [_model_version("arcface", "4", "run-OLD")]
+
+    tracker = MLflowTracker(experiment_name="exp", client=client)
+    beats, candidate_metric, incumbent_metric = tracker.would_promote("run-NEW", "test/roc_auc")
+
+    assert beats is False
+    assert candidate_metric == pytest.approx(0.7)
+    assert incumbent_metric == pytest.approx(0.92)
+    client.transition_model_version_stage.assert_not_called()
+
+
+def test_would_promote_no_incumbent_returns_beats_with_none_incumbent() -> None:
+    client = MagicMock()
+    client.get_experiment_by_name.return_value = _fake_experiment()
+    client.get_run.return_value = _candidate_run("run-NEW", "test/roc_auc", 0.5)
+    client.search_model_versions.return_value = [_model_version("arcface", "1", "run-NEW")]
+    client.get_latest_versions.return_value = []
+
+    tracker = MLflowTracker(experiment_name="exp", client=client)
+    beats, candidate_metric, incumbent_metric = tracker.would_promote("run-NEW", "test/roc_auc")
+
+    assert beats is True
+    assert candidate_metric == pytest.approx(0.5)
+    assert incumbent_metric is None
+    client.transition_model_version_stage.assert_not_called()
+
+
+def test_would_promote_missing_criterion_returns_no_metrics() -> None:
+    client = MagicMock()
+    client.get_experiment_by_name.return_value = _fake_experiment()
+    client.get_run.return_value = SimpleNamespace(
+        info=SimpleNamespace(run_id="run-NEW"),
+        data=SimpleNamespace(metrics={}),
+    )
+    tracker = MLflowTracker(experiment_name="exp", client=client)
+    beats, candidate_metric, incumbent_metric = tracker.would_promote("run-NEW", "test/roc_auc")
+
+    assert beats is False
+    assert candidate_metric is None
+    assert incumbent_metric is None
+
+
+# ---------------------------------------------------------------------------
 # Active-run resolution
 # ---------------------------------------------------------------------------
 

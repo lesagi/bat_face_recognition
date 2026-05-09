@@ -51,7 +51,22 @@ def main(ctx: click.Context) -> None:
 @click.option("--tracking-uri", help="Optional MLflow tracking URI.")
 @click.option("--run-name", help="Optional MLflow run name.")
 @click.option("--no-mlflow", is_flag=True, help="Run locally without starting an MLflow run.")
-@click.option("--promote", is_flag=True, help="Attempt champion promotion after test evaluation.")
+@click.option(
+    "--promote",
+    is_flag=True,
+    help="Auto-promote silently if criterion beats incumbent. Mutually exclusive with --prompt-promote.",
+)
+@click.option(
+    "--prompt-promote",
+    is_flag=True,
+    help="If criterion beats incumbent, prompt once before promoting. No prompt = no promotion.",
+)
+@click.option(
+    "--promotion-criterion",
+    default="test/roc_auc",
+    show_default=True,
+    help="Metric used by --promote / --prompt-promote.",
+)
 @click.option(
     "--no-permutation",
     is_flag=True,
@@ -64,6 +79,18 @@ def main(ctx: click.Context) -> None:
     type=int,
     help="Number of permutations for the auto post-training permutation test.",
 )
+@click.option(
+    "--no-explanations",
+    is_flag=True,
+    help="Skip the auto saliency / GradCAM / projection step.",
+)
+@click.option(
+    "--explanations-per-split",
+    default=2,
+    show_default=True,
+    type=int,
+    help="Identities sampled per split (train/val/test) for the saliency composite.",
+)
 @click.option("--dry-run", is_flag=True, help="Compose and print the run plan without training.")
 def train(
     config_name: str,
@@ -75,8 +102,12 @@ def train(
     run_name: str | None,
     no_mlflow: bool,
     promote: bool,
+    prompt_promote: bool,
+    promotion_criterion: str,
     no_permutation: bool,
     permutation_n: int,
+    no_explanations: bool,
+    explanations_per_split: int,
     dry_run: bool,
 ) -> None:
     """Run training followed by test evaluation, PDF generation, and permutation test."""
@@ -98,8 +129,12 @@ def train(
             run_name=run_name,
             use_mlflow=not no_mlflow,
             promote=promote,
+            prompt_promote=prompt_promote,
+            promotion_criterion=promotion_criterion,
             run_permutation=not no_permutation,
             permutation_n=permutation_n,
+            run_explanations=not no_explanations,
+            explanations_per_split=explanations_per_split,
         )
     except CliRuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -107,12 +142,32 @@ def train(
     click.echo(f"Training complete: {result.output_dir}")
     if result.report_path is not None:
         click.echo(f"Report: {result.report_path}")
+    if result.explanations_dir is not None:
+        click.echo(f"Explanations: {result.explanations_dir}")
     if result.permutation_dir is not None:
         click.echo(f"Permutation: {result.permutation_dir}")
+    if result.promotion is not None:
+        click.echo(f"Promotion: {_format_promotion(result.promotion)}")
     if result.run_id:
         click.echo(f"MLflow run: {result.run_id}")
     for warning in result.warnings:
         click.echo(f"Warning: {warning}", err=True)
+
+
+def _format_promotion(decision: Any) -> str:
+    if decision.mode == "off":
+        return "skipped (no flag)"
+    new = "?" if decision.candidate_metric is None else f"{decision.candidate_metric:.4f}"
+    inc = "none" if decision.incumbent_metric is None else f"{decision.incumbent_metric:.4f}"
+    if not decision.beats:
+        return f"skipped (candidate={new}, incumbent={inc})"
+    if decision.declined:
+        return f"declined (candidate={new}, incumbent={inc})"
+    return (
+        f"promoted (candidate={new}, incumbent={inc})"
+        if decision.promoted
+        else f"failed (candidate={new}, incumbent={inc})"
+    )
 
 
 @main.command()
@@ -408,11 +463,21 @@ def _interactive(ctx: click.Context) -> None:
 def _interactive_train(ctx: click.Context, inquirer: Any) -> None:
     experiment = inquirer.select(message="Experiment", choices=list(_EXPERIMENT_CHOICES)).execute()
     use_mlflow = inquirer.confirm(message="Log to MLflow?", default=True).execute()
+    run_explanations = inquirer.confirm(
+        message="Generate saliency + projection (samples train/val/test individuals)?",
+        default=True,
+    ).execute()
     run_permutation = inquirer.confirm(
         message="Run inference-mode permutation test after training?", default=True
     ).execute()
-    promote = inquirer.confirm(
-        message="Attempt champion promotion if criterion improves?", default=False
+    promotion_mode = inquirer.select(
+        message="Champion promotion",
+        choices=[
+            {"name": "off (default — never promote)", "value": "off"},
+            {"name": "auto (promote silently if criterion improves)", "value": "auto"},
+            {"name": "prompt (ask once if criterion improves)", "value": "prompt"},
+        ],
+        default="off",
     ).execute()
     dry_run = inquirer.confirm(message="Dry run only?", default=False).execute()
 
@@ -426,9 +491,13 @@ def _interactive_train(ctx: click.Context, inquirer: Any) -> None:
         tracking_uri=None,
         run_name=None,
         no_mlflow=not use_mlflow,
-        promote=promote,
+        promote=promotion_mode == "auto",
+        prompt_promote=promotion_mode == "prompt",
+        promotion_criterion="test/roc_auc",
         no_permutation=not run_permutation,
         permutation_n=1000,
+        no_explanations=not run_explanations,
+        explanations_per_split=2,
         dry_run=dry_run,
     )
 
