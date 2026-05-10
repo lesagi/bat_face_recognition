@@ -252,6 +252,10 @@ class EmbeddingTrainer:
             val_metrics: dict[str, float] = {}
             if val_loader is not None:
                 val_metrics = self._validate(val_loader)
+                if self.cfg.val_verification and self.eval_manifest is not None:
+                    verif_metrics = self._validate_verification(split="val")
+                    if verif_metrics is not None:
+                        val_metrics = {**val_metrics, **verif_metrics}
                 self._log("val", val_metrics, step=epoch)
                 self._maybe_save_best(epoch, val_metrics)
             else:
@@ -423,6 +427,40 @@ class EmbeddingTrainer:
         finally:
             if self.ema is not None:
                 self.ema.restore(self.model)
+
+    def _validate_verification(self, *, split: str) -> dict[str, float] | None:
+        """Run bat_evaluation verification on the chosen manifest split.
+
+        Returns ``{"roc_auc", "tar_at_far_1e3", "tar_at_far_1e4",
+        "optimal_threshold", "youden_j"}`` on success, or ``None`` if the
+        protocol can't be run (e.g., the split has fewer than 2 identities
+        with the gallery/probe minimum). Failure is silent because this is
+        a best-effort enrichment of the val metrics dict.
+        """
+        if self.eval_manifest is None:
+            return None
+        embed_fn = self._build_embed_fn()
+        if self.ema is not None:
+            self.ema.apply_to(self.model)
+        try:
+            report = run_eval_protocol(
+                self.eval_manifest,  # type: ignore[arg-type]
+                split=split,  # type: ignore[arg-type]
+                embed_fn=embed_fn,
+            )
+        except Exception:  # pragma: no cover -- best-effort enrichment
+            return None
+        finally:
+            if self.ema is not None:
+                self.ema.restore(self.model)
+        v = report.verification
+        return {
+            "roc_auc": float(v.roc_auc),
+            "tar_at_far_1e3": float(v.tar_at_far_1e3),
+            "tar_at_far_1e4": float(v.tar_at_far_1e4),
+            "optimal_threshold": float(v.optimal_threshold),
+            "youden_j": float(v.youden_j),
+        }
 
     def _build_embed_fn(self) -> Callable[[list[Path]], Any]:
         """Return a closure that maps a list of image paths to an embedding tensor.

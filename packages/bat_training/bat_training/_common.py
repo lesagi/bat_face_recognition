@@ -41,6 +41,11 @@ class TrainerConfig:
     output_dir: Path = Path("./outputs/training")
     artifact_retention: dict[str, bool] | None = None
     log_every_n_steps: int = 50
+    # Embedding-trainer-only: run bat_evaluation verification on the val
+    # split each epoch so val/roc_auc + val/tar_at_far_* are emitted.
+    # Requires an eval_manifest to be set on the trainer. When True and the
+    # manifest is missing, the trainer silently skips this step (no error).
+    val_verification: bool = True
 
 
 def detach_to_float(t: torch.Tensor | float | int) -> float:
