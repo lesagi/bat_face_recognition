@@ -8,8 +8,9 @@ remaining workstation-driven steps.
 
 ## What's on `main`
 
-Tag `refactor-foundation-pytorch` was placed on the Phase 0 commit. The
-post-Phase-3 stabilize commit is the current `main` HEAD.
+Tag `refactor-foundation-pytorch` was placed on the Phase 0 commit.
+Phase 3 completed at `40eeb75` (`fix: validate cli promotion flags before
+training`); later commits may add documentation or Phase 4 prep tooling.
 
 13 workspace packages under `packages/`, all Python 3.11, all importing
 only from `bat_core` upward through the dependency graph. No package
@@ -59,12 +60,14 @@ Flags to skip individual steps: `--no-mlflow`, `--no-permutation`,
 These are intentional simplifications agreed during execution:
 
 - **No CI**: single-programmer repo. Quality gates run via `pre-commit`
-  locally (the plan originally called for GitHub Actions; we dropped it).
+  locally, matching the locked plan.
 - **No Dockerfile**: same reason; `uv sync --frozen` on the workstation
-  is the entire setup.
-- **Two TF YOLO weights kept** under `models/preprocessing/` (segmentation
-  + pose) because they drive the still-image extraction pipeline. The
-  rest of `legacy/` was deleted in Phase 0.
+  is the entire setup, matching the locked plan.
+- **Two YOLO `.pt` weights kept** under `models/preprocessing/`
+  (segmentation + pose) because they drive the still-image extraction
+  pipeline. Tracked legacy artifacts were pruned in Phase 0; ignored
+  local `legacy/` leftovers, if present on a workstation, are not part of
+  the PyTorch runtime.
 - **`bat_stats` retrain-mode permutation trainer hooks** deliberately kept
   thin: `bat_training.permutation_adapter.create_pair_trainer_factory`
   is the DI seam (no upstream modification of `bat_stats`).
@@ -108,5 +111,6 @@ These are intentional simplifications agreed during execution:
 | `bat_sweeps` | 32 | optuna |
 | `bat_cli` | 17 (post-stabilize) | CliRunner + mocked runtime |
 
-Approximate total: ~350 tests. Full workspace pytest is the quality gate
-referenced in `docs/PHASE_4_CHECKLIST.md`.
+Last full verification before this status snapshot: `371 passed, 1 skipped`.
+Full workspace pytest is the quality gate referenced in
+`docs/PHASE_4_CHECKLIST.md`.
