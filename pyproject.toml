@@ -54,6 +54,22 @@ bat-tracking = { workspace = true }
 bat-reporting = { workspace = true }
 bat-sweeps = { workspace = true }
 bat-cli = { workspace = true }
+torch = [
+    { index = "pytorch-cu121", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cu121", marker = "sys_platform == 'linux'" },
+]
+
+# CUDA 12.1 wheels for torch / torchvision on Linux. Compatible with
+# NVIDIA drivers that report CUDA-runtime support >= 12.1 (covers the
+# workstation's current driver, which advertises 12.4). On non-Linux
+# platforms uv falls back to the default PyPI index, which is fine
+# because no GPU support is needed there.
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
 
 [tool.ruff]
 line-length = 100
