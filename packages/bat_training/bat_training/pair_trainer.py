@@ -294,9 +294,13 @@ class PairTrainer:
 
         self.optimizer.zero_grad(set_to_none=True)
         self.grad_accum.reset()
+        device = self._infer_device()
 
         for batch in loader:
             x_a, x_b, label = unpack_pair_batch(batch)
+            x_a = x_a.to(device)
+            x_b = x_b.to(device)
+            label = label.to(device)
 
             with self._autocast():
                 output = (
@@ -374,9 +378,13 @@ class PairTrainer:
         y_score: list[float] = []
         total_loss = 0.0
         n_batches = 0
+        device = self._infer_device()
         with torch.no_grad():
             for batch in loader:
                 x_a, x_b, label = unpack_pair_batch(batch)
+                x_a = x_a.to(device)
+                x_b = x_b.to(device)
+                label = label.to(device)
                 with self._autocast():
                     output = (
                         self.model(x_a, x_b)
@@ -396,6 +404,14 @@ class PairTrainer:
             y_score=tuple(float(v) for v in y_score),
         )
         return predictions, total_loss, n_batches
+
+    def _infer_device(self) -> torch.device:
+        try:
+            return next(self.model.parameters()).device
+        except StopIteration:  # pragma: no cover -- empty model
+            import torch
+
+            return torch.device("cpu")
 
     # ------------------------------------------------------------------ #
     # Misc                                                               #
