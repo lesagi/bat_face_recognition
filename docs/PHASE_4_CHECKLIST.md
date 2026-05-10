@@ -1,8 +1,9 @@
 # Phase 4 — Migration & cleanup checklist
 
-Phase 0–3 are complete on `main`. The remaining work is sequenced in five
-steps. Steps 1–3 must run on the workstation (need data + GPU). Steps 4–5
-are mechanical and can be driven from any machine once 1–3 pass.
+Phase 0–3 are complete on `main`. Phase 4 is sequenced in five steps.
+Steps 1–3 run on the workstation (need data + GPU). Step 4 is a mechanical
+deletion once the package tests and isolation check are clean. Step 5 waits
+until the parity and baseline acceptance checks pass.
 
 Reference: the approved refactor plan in the original session and
 `docs/REFACTOR_STATUS.md` for the per-package merge state.
@@ -84,7 +85,8 @@ comparison is approximate. Document the delta in the run's MLflow notes.
 
 If the delta is larger than ±2 %, investigate **before** moving on:
 - Confirm `weight_decay=1e-4` was applied (`SiameseModel.recommended_weight_decay`).
-- Confirm Siamese conv/pool dims still match `app/siamese_core/network.py`.
+- Confirm Siamese conv/pool dims still match
+  `refactor-foundation-pytorch:app/siamese_core/network.py`.
 - Confirm the manifest split seed reproduces the same identity partitioning.
 
 ---
@@ -114,7 +116,8 @@ an issue **before** Step 4.
 
 ## Step 4 — Delete TF code
 
-Only after Steps 1–3 pass. Reversible via git but a big diff.
+Reversible via git but a big diff. The legacy source remains available at
+tag `refactor-foundation-pytorch` for parity archaeology.
 
 ```bash
 git checkout -B refactor/remove-tf origin/main
