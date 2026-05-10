@@ -32,6 +32,7 @@ example_*.py
 requirements*.txt
 *.md
 !README.md
+!CLAUDE.md
 !*/README.md
 !docs/**/*.md
 models/*
