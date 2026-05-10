@@ -122,7 +122,7 @@ def test_embedding_trainer_steps_partial_gradient_accumulation_tail(tmp_path: Pa
     trainer = EmbeddingTrainer(model=model, loss=ArcFaceLoss(), cfg=cfg)
     trainer.fit(_make_id_loader(), val_loader=None)
 
-    after = dict(model.named_parameters())
+    after = {name: param.detach().cpu() for name, param in model.named_parameters()}
     assert any(not torch.allclose(before[name], after[name]) for name in before)
 
 

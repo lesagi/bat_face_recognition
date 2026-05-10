@@ -77,7 +77,7 @@ def test_pair_trainer_steps_partial_gradient_accumulation_tail(
     trainer = PairTrainer(model=model, loss=BCELoss(), cfg=cfg)
     trainer.fit(make_pair_loader(), val_loader=None)
 
-    after = dict(model.named_parameters())
+    after = {name: param.detach().cpu() for name, param in model.named_parameters()}
     assert any(not torch.allclose(before[name], after[name]) for name in before)
 
 

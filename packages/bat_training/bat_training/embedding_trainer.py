@@ -345,10 +345,12 @@ class EmbeddingTrainer:
 
         self.optimizer.zero_grad(set_to_none=True)
         self.grad_accum.reset()
+        device = self._infer_device()
 
         for batch in loader:
             x, labels = unpack_embedding_batch(batch)
-            labels_long = labels.long() if labels.dtype != torch.long else labels
+            x = x.to(device)
+            labels_long = labels.to(device=device, dtype=torch.long)
 
             with self._autocast():
                 logits = self._forward_train(x, labels_long)
@@ -396,10 +398,12 @@ class EmbeddingTrainer:
             total_correct = 0
             total_count = 0
             n_batches = 0
+            device = self._infer_device()
             with torch.no_grad():
                 for batch in loader:
                     x, labels = unpack_embedding_batch(batch)
-                    labels_long = labels.long() if labels.dtype != torch.long else labels
+                    x = x.to(device)
+                    labels_long = labels.to(device=device, dtype=torch.long)
                     with self._autocast():
                         logits = self._forward_train(x, labels_long)
                         loss_value = self.loss(logits, labels_long)
