@@ -62,7 +62,7 @@ uv run bat-cli
 └── uv.lock
 ```
 
-The legacy TF surfaces (`app/`, `run.py`, `Makefile`, `scripts/`, `setup.py`) are still on disk pending the Phase 4 parity check. They are isolated — no Phase-1+ package imports them — and scheduled for deletion. See `docs/PHASE_4_CHECKLIST.md`.
+The legacy TF/Keras surfaces (`app/`, `run.py`, `Makefile`, `scripts/`, `setup.py`) were removed during Phase 4 step 4. The pre-refactor snapshot is preserved at the `refactor-foundation-pytorch` git tag; recover any individual file with `git show refactor-foundation-pytorch:<path>`.
 
 ## Common workflows
 

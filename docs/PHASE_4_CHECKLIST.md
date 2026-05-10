@@ -7,6 +7,17 @@ are mechanical and can be driven from any machine once 1–3 pass.
 Reference: the approved refactor plan in the original session and
 `docs/REFACTOR_STATUS.md` for the per-package merge state.
 
+## Status (live)
+
+| Step | State | Notes |
+|---|---|---|
+| Pre-flight | ✅ done | `uv sync --frozen` clean (cu121 wheels), 371/372 tests pass, `tools/check_tf_isolation.py` clean |
+| 1. Build manifest | ✅ done | `--val-fraction 0.25 --test-fraction 0.25 --seed 7` → 6 train / 3 val / 3 test identities; 1059 rows |
+| 2. Siamese parity | ⏳ pending | needs workstation GPU; cu121 wheels in place |
+| 3. ArcFace + AdaFace baselines | ⏳ pending | acceptance: `test/roc_auc > 0.9` + 8 PDF sections + experiment-aware filenames |
+| 4. Delete TF code | ✅ done in this branch | `app/`, `run.py`, `Makefile`, `scripts/`, `setup.py` removed; pre-refactor snapshot at tag `refactor-foundation-pytorch` |
+| 5. Tag `v2.0.0-pytorch` | ⏳ pending | run after steps 2–3 are done |
+
 ---
 
 ## Pre-flight (one-time)

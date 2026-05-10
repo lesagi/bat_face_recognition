@@ -82,7 +82,7 @@ Promotion: `--promote` (silent auto-on-improve) and `--prompt-promote` (ask once
 
 - Plan archive: `docs/REFACTOR_STATUS.md` — per-package public surface, intentional plan deviations, open follow-ups, test counts.
 - Outstanding work: `docs/PHASE_4_CHECKLIST.md` — exact commands for the remaining steps + acceptance criteria.
-- Legacy TF code: `app/`, `run.py`, `Makefile`, `scripts/`, `setup.py` — still on disk pending Phase 4 step 4 deletion. Verified isolated by `tools/check_tf_isolation.py`.
+- Legacy TF code (`app/`, `run.py`, `Makefile`, `scripts/`, `setup.py`) was removed in Phase 4 step 4. The pre-refactor snapshot is preserved at the `refactor-foundation-pytorch` git tag — `git show refactor-foundation-pytorch:<path>` recovers any file.
 - Hydra root: `configs/config.yaml` composes from `configs/{data,model,loss,trainer,evaluation,preprocessing,sweep,experiment}/`.
 
 ## Things to avoid

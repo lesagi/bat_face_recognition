@@ -37,7 +37,6 @@ requirements*.txt
 !*/README.md
 !docs/**/*.md
 models/*
-!app/models/
 !models/preprocessing/
 predicions*.csv
 batwoman*
