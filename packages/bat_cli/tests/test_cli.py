@@ -25,6 +25,65 @@ def test_help_lists_core_commands() -> None:
     assert "sweep" in result.output
     assert "build-manifest" in result.output
     assert "permutation-test" in result.output
+    assert "compare-champion" in result.output
+
+
+def test_compare_champion_help_lists_required_options() -> None:
+    result = CliRunner().invoke(main, ["compare-champion", "--help"])
+
+    assert result.exit_code == 0
+    for flag in ("--model-name", "--output", "--tracking-uri"):
+        assert flag in result.output
+
+
+def test_compare_champion_command_invokes_runtime(tmp_path: Path) -> None:
+    output = tmp_path / "champion.html"
+    with patch(
+        "bat_reporting.compare_to_champion", return_value=output
+    ) as fake:
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare-champion",
+                "run-CANDIDATE",
+                "--model-name",
+                "arcface-model",
+                "--output",
+                str(output),
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    fake.assert_called_once()
+    kwargs = fake.call_args.kwargs
+    assert kwargs["candidate_run_id"] == "run-CANDIDATE"
+    assert kwargs["model_name"] == "arcface-model"
+    assert kwargs["output_path"] == output
+    assert "Champion comparison report" in result.output
+
+
+def test_compare_champion_surfaces_no_champion_error(tmp_path: Path) -> None:
+    """When the registry has no champion, the user sees a clear error."""
+    from bat_reporting import NoChampionError
+
+    with patch(
+        "bat_reporting.compare_to_champion",
+        side_effect=NoChampionError("no Production-stage version of 'arcface-model'"),
+    ):
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare-champion",
+                "run-CANDIDATE",
+                "--model-name",
+                "arcface-model",
+                "--output",
+                str(tmp_path / "champion.html"),
+            ],
+        )
+
+    assert result.exit_code != 0
+    assert "no Production-stage version" in result.output
 
 
 def test_train_help_advertises_permutation_flags() -> None:

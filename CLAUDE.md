@@ -72,6 +72,7 @@ uv run bat-cli
 | `evaluate` | Re-run test eval against a checkpoint |
 | `permutation-test` | Inference-mode permutation test on a configured run |
 | `compare <a> <b>` | Side-by-side MLflow run comparison HTML |
+| `compare-champion <candidate> --model-name <name>` | Same report, left column auto-resolved via `bat_tracking.get_champion(name)` |
 | `promote <run>` | Promote registered model if criterion beats incumbent |
 | `build-manifest` | Walk a directory tree → split + write manifest CSV |
 
@@ -99,5 +100,4 @@ These are flagged in `docs/REFACTOR_STATUS.md` but live here too as a quick refe
 
 - `EmbeddingTrainer` doesn't emit `val/roc_auc`; default sweep target needs either a small `bat_training` patch or a re-targeted metric.
 - `bat_sweeps.OptunaPruningCallback` wires through the `Tracker` wrap; a real `bat_training` per-epoch callback list would be cleaner.
-- `bat_reporting.compare_runs` could grow a "champion vs candidate" mode using `bat_tracking.get_champion`.
 - ONNX export prefers `dynamo_export` with a legacy fallback; full-model dynamo verification is part of the Phase-4 reproducibility check.

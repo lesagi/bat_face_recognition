@@ -84,12 +84,16 @@ These are intentional simplifications agreed during execution:
   `bat_sweeps.OptunaPruningCallback` is wired via the `Tracker` wrap
   workaround. A `TODO(phase-2.1)` marker in
   `bat_sweeps/pruning_callback.py` flags the swap point.
-- `bat_reporting.compare_runs` reads metrics via vanilla `MlflowClient`;
-  a "champion vs candidate" mode using `bat_tracking.get_champion` is
-  flagged for follow-up.
 - ONNX export prefers `torch.onnx.dynamo_export` with a legacy `torch.onnx.export`
   fallback. Phase 4 reproducibility check should confirm dynamo path
   succeeds end-to-end on a full ArcFace model.
+
+(Resolved: `bat_reporting.compare_to_champion(candidate_run_id, model_name, ...)`
++ `bat-cli compare-champion <candidate-run-id> --model-name <name>` resolves
+the current Production-stage version via `bat_tracking.get_champion` and
+renders the existing HTML report with the champion on the left and the
+candidate on the right. Raises `NoChampionError` when no champion is
+registered.)
 
 ---
 

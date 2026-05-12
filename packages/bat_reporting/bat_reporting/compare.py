@@ -110,6 +110,54 @@ def compare_runs(
     return output_path.resolve()
 
 
+class NoChampionError(RuntimeError):
+    """Raised when ``compare_to_champion`` cannot resolve a Production version."""
+
+
+def compare_to_champion(
+    candidate_run_id: str,
+    model_name: str,
+    output_path: Path,
+    *,
+    mlflow_client: MlflowClient | None = None,
+    inputs_candidate: RunComparisonInputs | None = None,
+    inputs_champion: RunComparisonInputs | None = None,
+    plot_cfg: Any | None = None,
+) -> Path:
+    """Render a candidate-vs-current-champion comparison HTML report.
+
+    Resolves the current Production-stage version of ``model_name`` via
+    :func:`bat_tracking.get_champion`, then delegates to :func:`compare_runs`
+    with ``run_id_a=champion.run_id`` and ``run_id_b=candidate_run_id`` so
+    the champion appears in the left column of the table (status-quo on the
+    left, new candidate on the right).
+
+    Raises:
+        NoChampionError: when no Production version of ``model_name``
+            exists in the registry yet. The caller should surface this
+            to the user (e.g., suggest ``bat-cli promote`` first, or use
+            the generic ``compare_runs`` with two explicit run ids).
+    """
+    from bat_tracking import get_champion
+
+    champion = get_champion(model_name, client=mlflow_client)
+    if champion is None:
+        raise NoChampionError(
+            f"no Production-stage version of model {model_name!r} found in "
+            "the registry; nothing to compare against. Register a champion "
+            "via `bat-cli promote` first, or use `compare_runs` directly."
+        )
+    return compare_runs(
+        run_id_a=str(champion.run_id),
+        run_id_b=candidate_run_id,
+        output_path=output_path,
+        mlflow_client=mlflow_client,
+        inputs_a=inputs_champion,
+        inputs_b=inputs_candidate,
+        plot_cfg=plot_cfg,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Internals                                                                   #
 # --------------------------------------------------------------------------- #
