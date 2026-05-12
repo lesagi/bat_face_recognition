@@ -38,9 +38,7 @@ def test_compare_champion_help_lists_required_options() -> None:
 
 def test_compare_champion_command_invokes_runtime(tmp_path: Path) -> None:
     output = tmp_path / "champion.html"
-    with patch(
-        "bat_reporting.compare_to_champion", return_value=output
-    ) as fake:
+    with patch("bat_reporting.compare_to_champion", return_value=output) as fake:
         result = CliRunner().invoke(
             main,
             [

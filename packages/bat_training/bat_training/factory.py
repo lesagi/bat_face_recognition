@@ -35,6 +35,7 @@ def make_trainer(
     run_id: str | None = None,
     register_name: str | None = None,
     promote_criterion: str = "test/roc_auc",
+    callbacks: list[Any] | None = None,
 ) -> PairTrainer | EmbeddingTrainer:
     """Build the right trainer based on ``loss.family``.
 
@@ -61,6 +62,7 @@ def make_trainer(
             run_id=run_id,
             register_name=register_name,
             promote_criterion=promote_criterion,
+            callbacks=callbacks,
         )
     if family == "embedding":
         return EmbeddingTrainer(
@@ -74,6 +76,7 @@ def make_trainer(
             run_id=run_id,
             register_name=register_name,
             promote_criterion=promote_criterion,
+            callbacks=callbacks,
         )
     raise InterfaceViolationError(f"unknown loss.family={family!r}; expected 'pair' or 'embedding'")
 

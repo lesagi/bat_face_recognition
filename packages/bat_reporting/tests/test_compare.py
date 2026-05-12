@@ -142,25 +142,23 @@ def test_compare_to_champion_renders_with_champion_on_left(tmp_path: Path) -> No
 def test_compare_to_champion_raises_when_no_champion(tmp_path: Path) -> None:
     """No Production-stage version -> NoChampionError with a useful message."""
     fake_client = _FakeMlflowClient({"run-CANDIDATE": {"metrics": {}}})
-    with patch("bat_tracking.get_champion", return_value=None):
-        with pytest.raises(NoChampionError, match="no Production-stage version"):
-            compare_to_champion(
-                candidate_run_id="run-CANDIDATE",
-                model_name="arcface-model",
-                output_path=tmp_path / "champion.html",
-                mlflow_client=fake_client,
-            )
+    with (
+        patch("bat_tracking.get_champion", return_value=None),
+        pytest.raises(NoChampionError, match="no Production-stage version"),
+    ):
+        compare_to_champion(
+            candidate_run_id="run-CANDIDATE",
+            model_name="arcface-model",
+            output_path=tmp_path / "champion.html",
+            mlflow_client=fake_client,
+        )
 
 
 def test_compare_to_champion_accepts_prebuilt_inputs(tmp_path: Path) -> None:
     """Prebuilt RunComparisonInputs bypass MLflow but champion resolution still happens."""
     fake_champion = SimpleNamespace(run_id="run-CHAMPION", version="1", name="m")
-    champion_inputs = RunComparisonInputs(
-        run_id="run-CHAMPION", metrics={"test/roc_auc": 0.5}
-    )
-    candidate_inputs = RunComparisonInputs(
-        run_id="run-CANDIDATE", metrics={"test/roc_auc": 0.9}
-    )
+    champion_inputs = RunComparisonInputs(run_id="run-CHAMPION", metrics={"test/roc_auc": 0.5})
+    candidate_inputs = RunComparisonInputs(run_id="run-CANDIDATE", metrics={"test/roc_auc": 0.9})
 
     output = tmp_path / "champion.html"
     with patch("bat_tracking.get_champion", return_value=fake_champion):

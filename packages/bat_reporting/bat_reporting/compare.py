@@ -262,6 +262,8 @@ def _render_template(**kwargs: Any) -> str:
 
 __all__ = [
     "DEFAULT_METRIC_ORDER",
+    "NoChampionError",
     "RunComparisonInputs",
     "compare_runs",
+    "compare_to_champion",
 ]

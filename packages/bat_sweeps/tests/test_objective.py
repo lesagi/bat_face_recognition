@@ -50,10 +50,12 @@ class _FakeTrainer:
         tracker: Any,
         epoch_metrics: list[dict[str, float]],
         target_metric: str,
+        callbacks: list[Any] | None = None,
     ) -> None:
         self.tracker = tracker
         self.epoch_metrics = epoch_metrics
         self.target_metric = target_metric
+        self.callbacks = list(callbacks or [])
 
     def fit(self, train_loader: Any, val_loader: Any) -> _FakeRunArtifacts:  # noqa: ARG002
         last = 0.0
@@ -65,6 +67,9 @@ class _FakeTrainer:
                     section="train", metrics={"loss": m.get("loss", 0.5)}, step=epoch
                 )
                 self.tracker.log_metrics(section="val", metrics=m, step=epoch)
+            # The real trainers fire callbacks AFTER the val log call. Mirror.
+            for cb in self.callbacks:
+                cb.on_validation_end(epoch=epoch, metrics=m)
             if bare in m:
                 last = float(m[bare])
         return _FakeRunArtifacts(best_metrics={bare: last})
@@ -135,11 +140,17 @@ def _patch_make_trainer(monkeypatch: pytest.MonkeyPatch, state: dict) -> None:
         loss: Any,  # noqa: ARG001
         *,
         tracker: Any | None = None,
+        callbacks: list[Any] | None = None,
         **kwargs: Any,
     ) -> _FakeTrainer:
         schedule = kwargs.pop("_schedule", [{}])
         target = kwargs.pop("_target_metric", "val/roc_auc")
-        ft = _FakeTrainer(tracker=tracker, epoch_metrics=schedule, target_metric=target)
+        ft = _FakeTrainer(
+            tracker=tracker,
+            epoch_metrics=schedule,
+            target_metric=target,
+            callbacks=callbacks,
+        )
         state["trainer"] = ft
         return ft
 
@@ -295,3 +306,85 @@ def test_objective_overrides_reach_build_components(monkeypatch: pytest.MonkeyPa
     assert merged["loss"]["name"] == "arcface"
     # The override landed.
     assert 0.3 <= merged["loss"]["margin"] <= 0.6
+
+
+def test_objective_wires_pruning_through_callback_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The objective plugs OptunaPruningCallback into trainer.callbacks=[...]
+    (not into a wrapper around the tracker)."""
+    from bat_sweeps.pruning_callback import OptunaPruningCallback
+
+    schedules = {0: [{"roc_auc": 0.5}, {"roc_auc": 0.7}]}
+    factory, state = _build_components_factory(schedules, target_metric="val/roc_auc")
+    _patch_make_trainer(monkeypatch, state)
+
+    objective = build_objective(
+        base_cfg={},
+        search_space={"loss.margin": {"type": "float", "low": 0.3, "high": 0.6}},
+        build_components=factory,
+        target_metric="val/roc_auc",
+    )
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=1)
+
+    ft = state["trainer"]
+    assert ft is not None
+    # Exactly one OptunaPruningCallback should be in the trainer's callback
+    # list; the legacy tracker-wrap path is no longer used.
+    pruning_cbs = [cb for cb in ft.callbacks if isinstance(cb, OptunaPruningCallback)]
+    assert len(pruning_cbs) == 1
+    # Pruning callback must have observed the last reported value.
+    assert pruning_cbs[0].last_value == pytest.approx(0.7)
+
+
+def test_objective_preserves_user_callbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """User-supplied callbacks from build_components survive the objective."""
+    from bat_sweeps.pruning_callback import OptunaPruningCallback
+
+    class _UserCb:
+        def __init__(self) -> None:
+            self.seen: list[int] = []
+
+        def on_validation_end(self, epoch: int, metrics: dict[str, float]) -> None:
+            self.seen.append(epoch)
+
+    user_cb = _UserCb()
+    schedules = {0: [{"roc_auc": 0.5}, {"roc_auc": 0.7}]}
+    target_metric = "val/roc_auc"
+    state = {"trainer": None, "trials_seen": 0}
+
+    def _factory(_merged: dict[str, Any]) -> TrialComponents:
+        idx = state["trials_seen"]
+        state["trials_seen"] = idx + 1
+        return TrialComponents(
+            model=object(),
+            loss=_FakeLoss("embedding"),
+            trainer_cfg=object(),
+            train_loader=[],
+            val_loader=[],
+            tracker=None,
+            trainer_kwargs={
+                "callbacks": [user_cb],
+                "_schedule": schedules[idx],
+                "_target_metric": target_metric,
+            },
+        )
+
+    _patch_make_trainer(monkeypatch, state)
+    objective = build_objective(
+        base_cfg={},
+        search_space={"loss.margin": {"type": "float", "low": 0.3, "high": 0.6}},
+        build_components=_factory,
+        target_metric=target_metric,
+    )
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=1)
+
+    ft = state["trainer"]
+    assert ft is not None
+    # Both callbacks present: the user's plus the pruning hook (appended).
+    assert user_cb in ft.callbacks
+    assert any(isinstance(cb, OptunaPruningCallback) for cb in ft.callbacks)
+    # The user callback observed every val epoch.
+    assert user_cb.seen == [1, 2]
