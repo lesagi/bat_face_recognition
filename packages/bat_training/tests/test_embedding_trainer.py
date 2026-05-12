@@ -286,9 +286,7 @@ def test_embedding_trainer_fires_callbacks_on_validation_end(tmp_path: Path) -> 
             self.calls.append((epoch, dict(metrics)))
 
     cb = _RecordingCb()
-    trainer = EmbeddingTrainer(
-        model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[cb]
-    )
+    trainer = EmbeddingTrainer(model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[cb])
     loader = _make_id_loader()
     trainer.fit(loader, val_loader=loader)
 
@@ -313,9 +311,7 @@ def test_embedding_trainer_callback_can_abort_via_exception(tmp_path: Path) -> N
         def on_validation_end(self, epoch: int, metrics: dict[str, float]) -> None:
             raise RuntimeError(f"abort at epoch {epoch}")
 
-    trainer = EmbeddingTrainer(
-        model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[_Aborter()]
-    )
+    trainer = EmbeddingTrainer(model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[_Aborter()])
     loader = _make_id_loader()
     with pytest.raises(RuntimeError, match="abort at epoch 1"):
         trainer.fit(loader, val_loader=loader)
@@ -336,9 +332,7 @@ def test_embedding_trainer_skips_callbacks_without_val_loader(tmp_path: Path) ->
         def on_validation_end(self, epoch: int, metrics: dict[str, float]) -> None:
             raise AssertionError("should not be called without a val loader")
 
-    trainer = EmbeddingTrainer(
-        model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[_Bomb()]
-    )
+    trainer = EmbeddingTrainer(model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[_Bomb()])
     trainer.fit(_make_id_loader(), val_loader=None)  # must NOT raise
 
 

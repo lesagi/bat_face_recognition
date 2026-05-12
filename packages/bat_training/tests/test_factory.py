@@ -53,6 +53,25 @@ def test_make_trainer_dispatches_embedding() -> None:
     assert isinstance(t, EmbeddingTrainer)
 
 
+def test_make_trainer_forwards_callbacks() -> None:
+    class _Callback:
+        def on_validation_end(self, epoch: int, metrics: dict[str, float]) -> None:
+            pass
+
+    cb = _Callback()
+
+    pair = make_trainer(TrainerConfig(), _PairModel(), _PairLossStub(), callbacks=[cb])
+    embedding = make_trainer(
+        TrainerConfig(),
+        _EmbedModel(),
+        _EmbedLossStub(),
+        callbacks=[cb],
+    )
+
+    assert pair.callbacks == [cb]
+    assert embedding.callbacks == [cb]
+
+
 def test_make_trainer_family_mismatch_raises() -> None:
     with pytest.raises(InterfaceViolationError):
         make_trainer(TrainerConfig(), _PairModel(), _EmbedLossStub())
