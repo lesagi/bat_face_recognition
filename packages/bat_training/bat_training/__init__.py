@@ -32,7 +32,12 @@ Composable utilities (used by both trainers):
 from __future__ import annotations
 
 from bat_training.amp import AMPContext
-from bat_training.callbacks import EarlyStopping, set_deterministic_mode, worker_init_fn
+from bat_training.callbacks import (
+    EarlyStopping,
+    TrainerCallback,
+    set_deterministic_mode,
+    worker_init_fn,
+)
 from bat_training.checkpointing import (
     BestCheckpointTracker,
     CheckpointManager,
@@ -63,6 +68,7 @@ __all__ = [
     "ExponentialMovingAverage",
     "GradientAccumulator",
     "PairTrainer",
+    "TrainerCallback",
     "build_optimizer",
     "build_scheduler",
     "create_embedding_trainer_factory",

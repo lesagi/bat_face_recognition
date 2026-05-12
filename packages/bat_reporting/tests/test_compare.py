@@ -5,12 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 pytest.importorskip("jinja2")
 
-from bat_reporting.compare import RunComparisonInputs, compare_runs  # noqa: E402
+from bat_reporting.compare import (  # noqa: E402
+    NoChampionError,
+    RunComparisonInputs,
+    compare_runs,
+    compare_to_champion,
+)
 
 
 class _FakeMlflowClient:
@@ -92,3 +98,79 @@ def test_compare_runs_prebuilt_inputs_with_overlays(tmp_path: Path) -> None:
     assert any("cmc_overlay" in p.name for p in pngs)
     for png in pngs:
         assert "mauritius" in png.name and "siamese" in png.name
+
+
+# ---------------------------------------------------------------------------
+# compare_to_champion
+# ---------------------------------------------------------------------------
+
+
+def test_compare_to_champion_renders_with_champion_on_left(tmp_path: Path) -> None:
+    """Champion run_id resolved via get_champion lands on the left (run_a)."""
+    fake_client = _FakeMlflowClient(
+        {
+            "run-CHAMPION": {
+                "metrics": {"test/roc_auc": 0.84, "val/f1": 0.77},
+                "tags": {"experiment_name": "rousettus_video_random_arcface_arcface"},
+            },
+            "run-CANDIDATE": {
+                "metrics": {"test/roc_auc": 0.91, "val/f1": 0.85},
+                "tags": {"experiment_name": "rousettus_video_random_arcface_adaface"},
+            },
+        }
+    )
+    fake_champion = SimpleNamespace(run_id="run-CHAMPION", version="3", name="arcface-model")
+
+    output = tmp_path / "champion.html"
+    with patch("bat_tracking.get_champion", return_value=fake_champion) as fake_gc:
+        result = compare_to_champion(
+            candidate_run_id="run-CANDIDATE",
+            model_name="arcface-model",
+            output_path=output,
+            mlflow_client=fake_client,
+        )
+
+    fake_gc.assert_called_once_with("arcface-model", client=fake_client)
+    assert result.exists()
+    text = result.read_text(encoding="utf-8")
+    # Champion is run_a (left), candidate is run_b (right).
+    assert "run-CHAMPION" in text and "run-CANDIDATE" in text
+    # Delta column: candidate - champion = 0.91 - 0.84 = 0.07.
+    assert "0.0700" in text
+
+
+def test_compare_to_champion_raises_when_no_champion(tmp_path: Path) -> None:
+    """No Production-stage version -> NoChampionError with a useful message."""
+    fake_client = _FakeMlflowClient({"run-CANDIDATE": {"metrics": {}}})
+    with (
+        patch("bat_tracking.get_champion", return_value=None),
+        pytest.raises(NoChampionError, match="no Production-stage version"),
+    ):
+        compare_to_champion(
+            candidate_run_id="run-CANDIDATE",
+            model_name="arcface-model",
+            output_path=tmp_path / "champion.html",
+            mlflow_client=fake_client,
+        )
+
+
+def test_compare_to_champion_accepts_prebuilt_inputs(tmp_path: Path) -> None:
+    """Prebuilt RunComparisonInputs bypass MLflow but champion resolution still happens."""
+    fake_champion = SimpleNamespace(run_id="run-CHAMPION", version="1", name="m")
+    champion_inputs = RunComparisonInputs(run_id="run-CHAMPION", metrics={"test/roc_auc": 0.5})
+    candidate_inputs = RunComparisonInputs(run_id="run-CANDIDATE", metrics={"test/roc_auc": 0.9})
+
+    output = tmp_path / "champion.html"
+    with patch("bat_tracking.get_champion", return_value=fake_champion):
+        result = compare_to_champion(
+            candidate_run_id="run-CANDIDATE",
+            model_name="m",
+            output_path=output,
+            inputs_champion=champion_inputs,
+            inputs_candidate=candidate_inputs,
+        )
+    assert result.exists()
+    text = result.read_text(encoding="utf-8")
+    assert "run-CHAMPION" in text and "run-CANDIDATE" in text
+    # 0.9 - 0.5 = 0.4
+    assert "0.4000" in text

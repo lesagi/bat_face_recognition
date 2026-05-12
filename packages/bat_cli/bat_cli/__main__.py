@@ -400,6 +400,47 @@ def compare(run_id_a: str, run_id_b: str, output_path: Path) -> None:
     click.echo(f"Comparison report: {path}")
 
 
+@main.command("compare-champion")
+@click.argument("candidate_run_id")
+@click.option(
+    "--model-name",
+    required=True,
+    help="Registered MLflow model name whose Production-stage version is the champion.",
+)
+@click.option("--output", "output_path", type=click.Path(path_type=Path), required=True)
+@click.option("--tracking-uri", help="Optional MLflow tracking URI.")
+def compare_champion(
+    candidate_run_id: str,
+    model_name: str,
+    output_path: Path,
+    tracking_uri: str | None,
+) -> None:
+    """Render a candidate-vs-current-champion HTML comparison report.
+
+    Resolves the current Production-stage version of MODEL_NAME via the
+    MLflow registry and compares its source run against CANDIDATE_RUN_ID
+    (left column = champion, right column = candidate). Errors loudly if
+    no champion is registered yet.
+    """
+    from bat_reporting import NoChampionError, compare_to_champion
+
+    client = None
+    if tracking_uri:
+        from mlflow.tracking import MlflowClient
+
+        client = MlflowClient(tracking_uri=tracking_uri)
+    try:
+        path = compare_to_champion(
+            candidate_run_id=candidate_run_id,
+            model_name=model_name,
+            output_path=output_path,
+            mlflow_client=client,
+        )
+    except NoChampionError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Champion comparison report: {path}")
+
+
 @main.command()
 @click.argument("run_id")
 @click.option("--criterion", default="test/roc_auc", show_default=True)
@@ -441,6 +482,7 @@ def _interactive(ctx: click.Context) -> None:
             "evaluate",
             "permutation-test",
             "compare",
+            "compare-champion",
             "promote",
             "build-manifest",
         ],
@@ -456,6 +498,8 @@ def _interactive(ctx: click.Context) -> None:
         _interactive_permutation_test(ctx, inquirer)
     elif action == "compare":
         _interactive_compare(ctx, inquirer)
+    elif action == "compare-champion":
+        _interactive_compare_champion(ctx, inquirer)
     elif action == "promote":
         _interactive_promote(ctx, inquirer)
     elif action == "build-manifest":
@@ -598,6 +642,23 @@ def _interactive_compare(ctx: click.Context, inquirer: Any) -> None:
         message="Output path", default="outputs/compare/report.html"
     ).execute()
     ctx.invoke(compare, run_id_a=run_id_a, run_id_b=run_id_b, output_path=Path(output_str))
+
+
+def _interactive_compare_champion(ctx: click.Context, inquirer: Any) -> None:
+    candidate_run_id = inquirer.text(message="Candidate MLflow run ID").execute()
+    model_name = inquirer.text(
+        message="Registered model name (Production-stage version becomes champion)"
+    ).execute()
+    output_str = inquirer.text(
+        message="Output path", default="outputs/compare/champion.html"
+    ).execute()
+    ctx.invoke(
+        compare_champion,
+        candidate_run_id=candidate_run_id,
+        model_name=model_name,
+        output_path=Path(output_str),
+        tracking_uri=None,
+    )
 
 
 def _interactive_promote(ctx: click.Context, inquirer: Any) -> None:

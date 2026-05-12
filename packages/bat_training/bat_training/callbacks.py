@@ -2,6 +2,10 @@
 
 Currently:
 
+* :class:`TrainerCallback` -- per-epoch validation-end hook protocol.
+  Trainers iterate ``callbacks`` after each ``_log("val", ...)`` and fire
+  ``cb.on_validation_end(epoch, metrics)``. Used by
+  :class:`bat_sweeps.OptunaPruningCallback` to fire the Optuna pruner.
 * :class:`EarlyStopping` -- patience-based monitor on a configurable
   metric. Mirrors the legacy
   ``app/siamese_training/trainer.py:_check_early_stopping`` semantics:
@@ -16,9 +20,23 @@ from __future__ import annotations
 import os
 import random
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol, runtime_checkable
 
 Mode = Literal["max", "min"]
+
+
+@runtime_checkable
+class TrainerCallback(Protocol):
+    """Per-epoch validation-end hook trainers iterate over.
+
+    Trainers call ``on_validation_end(epoch, metrics)`` once per epoch
+    after the val ``log_metrics`` payload has been computed (``metrics``
+    is the same dict logged to the ``"val"`` section). Callbacks may
+    raise to abort training (e.g. :class:`optuna.TrialPruned`); the
+    trainer does NOT catch — callers wrap ``fit`` appropriately.
+    """
+
+    def on_validation_end(self, epoch: int, metrics: dict[str, float]) -> None: ...
 
 
 @dataclass
@@ -155,6 +173,7 @@ __all__ = [
     "EarlyStopping",
     "EarlyStoppingState",
     "Mode",
+    "TrainerCallback",
     "set_deterministic_mode",
     "worker_init_fn",
 ]
