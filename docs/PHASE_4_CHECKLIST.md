@@ -35,9 +35,30 @@ uv run pytest packages/
 
 # Confirm no PyTorch package depends on legacy TF surfaces.
 uv run python tools/check_tf_isolation.py
+
+# Smoke-check CUDA is actually live on the workstation.
+uv run python -c "import torch; print(torch.__version__, 'cuda=', torch.cuda.is_available())"
+# Expected:  2.X.Y+cu121 cuda= True
 ```
 
 If any of those fail, fix before continuing.
+
+### Workstation environment notes (resolved; recorded for future sessions)
+
+- **PyTorch wheels routed through the CUDA-12.1 index.** Default PyPI
+  torch wheels target a CUDA runtime newer than the workstation's NVIDIA
+  driver advertises (driver reports CUDA-runtime support up to 12.4). The
+  workspace `pyproject.toml` now has a `[[tool.uv.index]] name =
+  "pytorch-cu121"` entry with `[tool.uv.sources]` routing `torch` and
+  `torchvision` through it, scoped to `sys_platform == 'linux'`. PyPI
+  remains the default for everything else. Verified working — do not
+  revert this configuration.
+- **Training batches move to model device explicitly.** Both
+  `PairTrainer` and `EmbeddingTrainer` call `_infer_device()` and
+  `.to(device)` on each batch in the train + validate loops; required
+  because the trainers don't pass loaders through `accelerator.prepare`
+  for auto-device-placement. Don't remove these `.to(device)` calls
+  without re-introducing the prepare step.
 
 ---
 
@@ -45,20 +66,33 @@ If any of those fail, fix before continuing.
 
 Convert `data/processed/` to a 3-way identity-disjoint manifest CSV.
 
+**Locked spec used for the live status above** (12 rousettus identities total —
+`0.25 / 0.25` lands cleanly on 6 train / 3 val / 3 test):
+
 ```bash
 uv run bat-cli build-manifest \
-  --input-dir data/processed/rousettus \
+  --input-dir data/processed/rousettus/video/not_augmented/random_bg \
   --output data/manifests/rousettus_manifest.csv \
   --species rousettus \
-  --val-fraction 0.15 \
-  --test-fraction 0.15 \
-  --seed 42
+  --val-fraction 0.25 \
+  --test-fraction 0.25 \
+  --seed 7
 ```
+
+Expected output: `train=486, val=343, test=230, total=1059`. The
+`assert_identity_disjoint()` sanity script reports `train ids: 6 / val ids:
+3 / test ids: 3`. Use these values + the `.hash` sidecar as the
+parity-check baseline; do not re-roll without documenting why.
+
+The plan's original `--val 0.15 --test 0.15 --seed 42` defaults are not
+appropriate at this dataset size — they collapse to 8/2/2, which leaves
+verification metrics dominated by 2 identities each and the test ROC-AUC
+confidence interval too wide for the ±2 % Siamese-parity bar.
 
 Verify:
 - `data/manifests/rousettus_manifest.csv` exists.
 - `data/manifests/rousettus_manifest.csv.hash` exists (manifest hash sidecar).
-- Counts printed in the CLI summary (train / val / test) look reasonable.
+- Counts printed in the CLI summary match the expected numbers above.
 
 Commit the CSV + hash file under `data/manifests/`.
 
