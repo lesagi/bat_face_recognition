@@ -267,6 +267,81 @@ def test_embedding_trainer_skips_val_verification_when_eval_manifest_missing(
     assert "roc_auc" not in val_calls[0][1]
 
 
+def test_embedding_trainer_fires_callbacks_on_validation_end(tmp_path: Path) -> None:
+    """callbacks=[cb] -> cb.on_validation_end(epoch, metrics) once per val epoch."""
+    torch.manual_seed(0)
+    model = _ToyArcFaceModel(embedding_dim=4, num_classes=3)
+    cfg = TrainerConfig(
+        epochs=2,
+        lr=1e-1,
+        ema_decay=0.0,
+        output_dir=tmp_path / "run",
+    )
+
+    class _RecordingCb:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, dict[str, float]]] = []
+
+        def on_validation_end(self, epoch: int, metrics: dict[str, float]) -> None:
+            self.calls.append((epoch, dict(metrics)))
+
+    cb = _RecordingCb()
+    trainer = EmbeddingTrainer(
+        model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[cb]
+    )
+    loader = _make_id_loader()
+    trainer.fit(loader, val_loader=loader)
+
+    assert [c[0] for c in cb.calls] == [1, 2]
+    # Metrics dict should at minimum carry the classification keys.
+    assert "loss" in cb.calls[0][1]
+    assert "accuracy" in cb.calls[0][1]
+
+
+def test_embedding_trainer_callback_can_abort_via_exception(tmp_path: Path) -> None:
+    """Callback exceptions propagate out of fit() (trainer does not catch)."""
+    torch.manual_seed(0)
+    model = _ToyArcFaceModel(embedding_dim=4, num_classes=3)
+    cfg = TrainerConfig(
+        epochs=5,  # epochs we will never reach
+        lr=1e-1,
+        ema_decay=0.0,
+        output_dir=tmp_path / "run",
+    )
+
+    class _Aborter:
+        def on_validation_end(self, epoch: int, metrics: dict[str, float]) -> None:
+            raise RuntimeError(f"abort at epoch {epoch}")
+
+    trainer = EmbeddingTrainer(
+        model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[_Aborter()]
+    )
+    loader = _make_id_loader()
+    with pytest.raises(RuntimeError, match="abort at epoch 1"):
+        trainer.fit(loader, val_loader=loader)
+
+
+def test_embedding_trainer_skips_callbacks_without_val_loader(tmp_path: Path) -> None:
+    """No val loader -> callbacks never invoked."""
+    torch.manual_seed(0)
+    model = _ToyArcFaceModel(embedding_dim=4, num_classes=3)
+    cfg = TrainerConfig(
+        epochs=1,
+        lr=1e-1,
+        ema_decay=0.0,
+        output_dir=tmp_path / "run",
+    )
+
+    class _Bomb:
+        def on_validation_end(self, epoch: int, metrics: dict[str, float]) -> None:
+            raise AssertionError("should not be called without a val loader")
+
+    trainer = EmbeddingTrainer(
+        model=model, loss=ArcFaceLoss(), cfg=cfg, callbacks=[_Bomb()]
+    )
+    trainer.fit(_make_id_loader(), val_loader=None)  # must NOT raise
+
+
 def test_embedding_trainer_rejects_pair_loss() -> None:
     """`EmbeddingTrainer` must refuse a loss with family != 'embedding'."""
     pytest.importorskip("torch")

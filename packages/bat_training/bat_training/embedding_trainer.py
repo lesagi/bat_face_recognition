@@ -77,6 +77,7 @@ class EmbeddingTrainer:
         run_id: str | None = None,
         register_name: str | None = None,
         promote_criterion: str = "test/roc_auc",
+        callbacks: list[Any] | None = None,
     ) -> None:
         family = getattr(loss, "family", None)
         if family != "embedding":
@@ -101,6 +102,7 @@ class EmbeddingTrainer:
         self._promote_criterion = promote_criterion
         self.eval_manifest = eval_manifest
         self.eval_split = eval_split
+        self.callbacks: list[Any] = list(callbacks or [])
 
         # ArcFace/AdaFace baselines benefit from non-zero weight_decay
         # (the canonical recipe is 5e-4 with SGD); we honor whatever the
@@ -257,6 +259,8 @@ class EmbeddingTrainer:
                     if verif_metrics is not None:
                         val_metrics = {**val_metrics, **verif_metrics}
                 self._log("val", val_metrics, step=epoch)
+                for cb in self.callbacks:
+                    cb.on_validation_end(epoch=epoch, metrics=val_metrics)
                 self._maybe_save_best(epoch, val_metrics)
             else:
                 self._maybe_save_best(epoch, train_metrics)

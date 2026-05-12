@@ -11,9 +11,12 @@ The objective:
    workspace -- :mod:`bat_sweeps` deliberately avoids importing
    :mod:`bat_models` / :mod:`bat_losses` / :mod:`bat_data` so it can run
    on minimal environments.
-4. Wraps the (optional) inner tracker in :class:`OptunaPruningTracker` so
-   each per-epoch ``log_metrics(section="val", ...)`` triggers
-   ``trial.report(value, step=epoch)`` and ``trial.should_prune()``.
+4. Plugs an :class:`OptunaPruningCallback` into the trainer's
+   ``callbacks=[...]`` list so each per-epoch ``on_validation_end``
+   triggers ``trial.report(value, step=epoch)`` and
+   ``trial.should_prune()``. The legacy :class:`OptunaPruningTracker`
+   wrap is no longer needed -- it stays exported as a fallback for
+   custom trainers that don't implement the callback list seam yet.
 5. Builds a trainer via :func:`bat_training.make_trainer` and runs
    :meth:`Trainer.fit`. **The objective never calls ``trainer.test()``**
    -- the test split is sacred and lives outside the sweep.
@@ -28,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from bat_sweeps.pruning_callback import OptunaPruningCallback, OptunaPruningTracker
+from bat_sweeps.pruning_callback import OptunaPruningCallback
 from bat_sweeps.search_space import SearchSpaceSpec, apply_overrides, parse_search_space
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
@@ -47,8 +50,9 @@ class TrialComponents:
     * ``trainer_cfg``: a :class:`bat_training.TrainerConfig`.
     * ``train_loader`` / ``val_loader``: PyTorch loaders (or any iterable
       the trainer accepts). The val loader is **never** the test loader.
-    * ``tracker``: optional inner :class:`bat_core.Tracker`. The objective
-      wraps it in :class:`OptunaPruningTracker`.
+    * ``tracker``: optional inner :class:`bat_core.Tracker`. Passes
+      through to the trainer untouched; the pruning hook attaches via
+      ``callbacks=[...]`` instead.
     * ``trainer_kwargs``: extra kwargs forwarded into
       :func:`bat_training.make_trainer` (e.g. ``eval_manifest``).
     """
@@ -144,13 +148,17 @@ def build_objective(
         components = build_components(merged)
 
         callback = OptunaPruningCallback(trial=trial, target_metric=target_metric)
-        wrapped_tracker = OptunaPruningTracker(inner=components.tracker, callback=callback)
 
         trainer_kwargs = dict(components.trainer_kwargs or {})
-        trainer_kwargs.setdefault("tracker", wrapped_tracker)
-        # Force the wrapper even if the caller passed an explicit tracker;
-        # we wrapped their tracker as inner above.
-        trainer_kwargs["tracker"] = wrapped_tracker
+        # Plug the pruning hook into the trainer's first-class callback
+        # list. Append so any user-supplied callbacks survive (e.g. extra
+        # monitors a custom build_components might attach).
+        existing = list(trainer_kwargs.get("callbacks") or [])
+        trainer_kwargs["callbacks"] = [*existing, callback]
+        # Tracker passes through untouched; the legacy OptunaPruningTracker
+        # wrap is no longer needed now that the callback list exists.
+        if components.tracker is not None:
+            trainer_kwargs["tracker"] = components.tracker
 
         trainer = make_trainer(
             cfg=components.trainer_cfg,
