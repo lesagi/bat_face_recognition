@@ -76,14 +76,16 @@ These are intentional simplifications agreed during execution:
 
 ## Open follow-ups not blocking Phase 4
 
-- `bat_reporting.compare_runs` reads metrics via vanilla `MlflowClient`;
-  a "champion vs candidate" mode using `bat_tracking.get_champion` is
-  flagged for follow-up.
 - ONNX export prefers `torch.onnx.dynamo_export` with a legacy `torch.onnx.export`
   fallback. Phase 4 reproducibility check should confirm dynamo path
   succeeds end-to-end on a full ArcFace model.
 
-(Resolved: `val/roc_auc` is now emitted by `EmbeddingTrainer` when
+(Resolved: `bat_reporting.compare_to_champion(candidate_run_id, model_name, ...)`
++ `bat-cli compare-champion <candidate-run-id> --model-name <name>` resolves
+the current Production-stage version via `bat_tracking.get_champion` and
+renders the existing HTML report with the champion on the left and the
+candidate on the right. Raises `NoChampionError` when no champion is
+registered. Resolved: `val/roc_auc` is now emitted by `EmbeddingTrainer` when
 `cfg.val_verification=True` and `eval_manifest` is set —
 PR #22. Resolved: `bat_training` now exposes a first-class
 `callbacks=[...]` list via the `TrainerCallback` protocol;
