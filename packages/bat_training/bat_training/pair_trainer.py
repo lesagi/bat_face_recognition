@@ -76,6 +76,7 @@ class PairTrainer:
         run_id: str | None = None,
         register_name: str | None = None,
         promote_criterion: str = "test/roc_auc",
+        callbacks: list[Any] | None = None,
     ) -> None:
         # Family contract: PairTrainer accepts only family="pair" losses.
         family = getattr(loss, "family", None)
@@ -101,6 +102,7 @@ class PairTrainer:
         self._run_id = run_id
         self._register_name = register_name
         self._promote_criterion = promote_criterion
+        self.callbacks: list[Any] = list(callbacks or [])
 
         weight_decay = cfg.weight_decay
         recommended = getattr(model, "recommended_weight_decay", None)
@@ -243,6 +245,8 @@ class PairTrainer:
             if val_loader is not None:
                 val_metrics = self._evaluate(val_loader)
                 self._log("val", val_metrics, step=epoch)
+                for cb in self.callbacks:
+                    cb.on_validation_end(epoch=epoch, metrics=val_metrics)
 
                 # Best-only checkpointing on val metrics (or train metrics
                 # when no val loader is provided).

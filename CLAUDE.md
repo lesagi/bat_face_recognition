@@ -97,7 +97,5 @@ Promotion: `--promote` (silent auto-on-improve) and `--prompt-promote` (ask once
 
 These are flagged in `docs/REFACTOR_STATUS.md` but live here too as a quick reference:
 
-- `EmbeddingTrainer` doesn't emit `val/roc_auc`; default sweep target needs either a small `bat_training` patch or a re-targeted metric.
-- `bat_sweeps.OptunaPruningCallback` wires through the `Tracker` wrap; a real `bat_training` per-epoch callback list would be cleaner.
 - `bat_reporting.compare_runs` could grow a "champion vs candidate" mode using `bat_tracking.get_champion`.
 - ONNX export prefers `dynamo_export` with a legacy fallback; full-model dynamo verification is part of the Phase-4 reproducibility check.

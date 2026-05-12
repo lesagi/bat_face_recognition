@@ -76,20 +76,20 @@ These are intentional simplifications agreed during execution:
 
 ## Open follow-ups not blocking Phase 4
 
-- `EmbeddingTrainer._validate` only emits `loss`/`accuracy`/`f1`/
-  `precision`/`recall` per val epoch; the default sweep target `val/roc_auc`
-  needs either a `bat_training` patch (compute it via
-  `bat_evaluation.verification`) or a re-targeted `target_metric`.
-- `bat_training` doesn't expose an explicit per-epoch callback list;
-  `bat_sweeps.OptunaPruningCallback` is wired via the `Tracker` wrap
-  workaround. A `TODO(phase-2.1)` marker in
-  `bat_sweeps/pruning_callback.py` flags the swap point.
 - `bat_reporting.compare_runs` reads metrics via vanilla `MlflowClient`;
   a "champion vs candidate" mode using `bat_tracking.get_champion` is
   flagged for follow-up.
 - ONNX export prefers `torch.onnx.dynamo_export` with a legacy `torch.onnx.export`
   fallback. Phase 4 reproducibility check should confirm dynamo path
   succeeds end-to-end on a full ArcFace model.
+
+(Resolved: `val/roc_auc` is now emitted by `EmbeddingTrainer` when
+`cfg.val_verification=True` and `eval_manifest` is set —
+PR #22. Resolved: `bat_training` now exposes a first-class
+`callbacks=[...]` list via the `TrainerCallback` protocol;
+`bat_sweeps.build_objective` plugs `OptunaPruningCallback` in directly
+and the `OptunaPruningTracker` wrap is kept only as a fallback for
+custom trainers without the callback seam.)
 
 ---
 

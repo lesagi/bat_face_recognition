@@ -1,27 +1,24 @@
 """Optuna pruning hook for :mod:`bat_training`.
 
-Design note (trainer-seam adaptation)
--------------------------------------
+Design note
+-----------
 
 :class:`bat_training.PairTrainer` and :class:`bat_training.EmbeddingTrainer`
-do not expose an explicit per-epoch callback list -- the only public seam
-that fires once per validation pass is::
+expose a first-class ``callbacks=[...]`` list (see
+:class:`bat_training.TrainerCallback`). The primary integration path is
+to instantiate :class:`OptunaPruningCallback` and pass it via
+``callbacks=[callback]`` -- the trainer fires
+``cb.on_validation_end(epoch, metrics)`` once per validation pass after
+``log_metrics(section="val", ...)``. If the trial should be pruned the
+callback raises :class:`optuna.TrialPruned`, which the objective wraps
+:meth:`Trainer.fit` to catch.
 
-    self.tracker.log_metrics(section="val", metrics={...}, step=epoch)
-
-So the pruning hook is implemented as a **tracker wrapper** rather than a
-free-standing trainer callback. :class:`OptunaPruningTracker` proxies every
-:class:`bat_core.Tracker` method through to an inner tracker (or no-ops if
-none is provided), and additionally fires ``trial.report(value, step)`` +
-``trial.should_prune()`` whenever a ``section="val"`` payload contains the
-target metric. If the trial should be pruned the wrapper raises
-:class:`optuna.TrialPruned`, which the trainer's caller (the objective) is
-responsible for catching.
-
-A standalone :class:`OptunaPruningCallback` is also exported with a
-``on_validation_end(epoch, metrics)`` API in case ``bat_training`` later
-exposes a callback list -- the wrapper delegates to the callback so the two
-stay in lockstep.
+:class:`OptunaPruningTracker` is kept as a **fallback** for custom
+trainers that don't yet implement the callback list seam. It proxies
+every :class:`bat_core.Tracker` method through to an inner tracker (or
+no-ops if none is provided), and additionally invokes the callback when
+a ``section="val"`` payload arrives. Both paths share the same
+:class:`OptunaPruningCallback`, so behaviour is identical.
 """
 
 from __future__ import annotations
