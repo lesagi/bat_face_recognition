@@ -116,30 +116,3 @@ custom trainers without the callback seam.)
 Last full verification before this status snapshot: `371 passed, 1 skipped`.
 Full workspace pytest is the quality gate referenced in
 `docs/PHASE_4_CHECKLIST.md`.
-
----
-
-## Open PR queue (transient — delete this section when all are merged)
-
-These PRs were opened from the Claude Code UI and are awaiting merge.
-A future session checking this file should `gh pr list` (or use the UI)
-to see whether they've landed; once they're all on `main`, drop this
-section in the next docs sweep.
-
-| PR | Branch | What it lands |
-|---|---|---|
-| #23 | `feat/bat-training-callback-list` | First-class per-epoch `callbacks=[...]` list on both trainers; `bat_sweeps.OptunaPruningCallback` plugs in directly; `OptunaPruningTracker` kept as fallback. |
-| #24 | `feat/compare-runs-champion-mode` | `bat_reporting.compare_to_champion(candidate_run_id, model_name, ...)` + `bat-cli compare-champion` subcommand. Raises `NoChampionError` when no Production-stage version is registered. |
-
-Merged in the previous batch (kept here for one cycle for cross-reference):
-
-| PR | What it landed |
-|---|---|
-| #20 | `chore/torch-cu121` — route `torch`/`torchvision` through the CUDA-12.1 index on Linux (workstation driver compatibility). |
-| #21 | `refactor/remove-tf` — Phase 4 step 4: deletion of `app/`, `run.py`, `Makefile`, `scripts/`, `setup.py`. Legacy snapshot preserved at tag `refactor-foundation-pytorch`. |
-| #22 | `feat/embedding-trainer-val-roc-auc` — `EmbeddingTrainer` emits `val/roc_auc` + TAR@FAR every val epoch (with the `cfg.val_verification` flag). Unblocks the default sweep target metric. |
-
-User workflow: PRs are created from the Claude Code UI by the user
-themselves; Claude pushes branches but does **not** call `gh pr create`
-(or any other PR-creation tool). "Pull, merge, repeat" runs fast — most
-PRs land within minutes of being opened.
