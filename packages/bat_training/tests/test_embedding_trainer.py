@@ -126,6 +126,147 @@ def test_embedding_trainer_steps_partial_gradient_accumulation_tail(tmp_path: Pa
     assert any(not torch.allclose(before[name], after[name]) for name in before)
 
 
+def test_embedding_trainer_emits_val_roc_auc_when_eval_manifest_present(tmp_path: Path) -> None:
+    """val_verification=True + eval_manifest → val/roc_auc + TAR@FAR merged in."""
+    torch.manual_seed(0)
+    model = _ToyArcFaceModel(embedding_dim=4, num_classes=3)
+    cfg = TrainerConfig(
+        epochs=1,
+        lr=1e-1,
+        ema_decay=0.0,
+        output_dir=tmp_path / "run",
+        val_verification=True,
+    )
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, float], int]] = []
+
+        def log_metrics(self, section: str, metrics: dict[str, float], step: int) -> None:
+            self.calls.append((section, dict(metrics), step))
+
+        def log_artifact(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def log_config(self, cfg: Any) -> None:
+            pass
+
+        def promote_to_champion(self, run_id: str, criterion: str) -> bool:
+            return False
+
+    rec = _Recorder()
+    # eval_manifest just needs to be truthy; _validate_verification is patched below.
+    trainer = EmbeddingTrainer(
+        model=model, loss=ArcFaceLoss(), cfg=cfg, tracker=rec, eval_manifest=object()
+    )
+    trainer._validate_verification = lambda *, split: {  # type: ignore[method-assign]
+        "roc_auc": 0.873,
+        "tar_at_far_1e3": 0.5,
+        "tar_at_far_1e4": 0.3,
+        "optimal_threshold": 0.42,
+        "youden_j": 0.61,
+    }
+
+    loader = _make_id_loader()
+    trainer.fit(loader, val_loader=loader)
+
+    val_calls = [c for c in rec.calls if c[0] == "val"]
+    assert len(val_calls) == 1
+    metrics = val_calls[0][1]
+    assert metrics["roc_auc"] == pytest.approx(0.873)
+    assert metrics["tar_at_far_1e3"] == pytest.approx(0.5)
+    assert metrics["tar_at_far_1e4"] == pytest.approx(0.3)
+    # Existing classification metrics must still be there.
+    assert "loss" in metrics
+    assert "accuracy" in metrics
+
+
+def test_embedding_trainer_skips_val_verification_when_flag_disabled(tmp_path: Path) -> None:
+    """val_verification=False → no roc_auc even if eval_manifest is set."""
+    torch.manual_seed(0)
+    model = _ToyArcFaceModel(embedding_dim=4, num_classes=3)
+    cfg = TrainerConfig(
+        epochs=1,
+        lr=1e-1,
+        ema_decay=0.0,
+        output_dir=tmp_path / "run",
+        val_verification=False,
+    )
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, float], int]] = []
+
+        def log_metrics(self, section: str, metrics: dict[str, float], step: int) -> None:
+            self.calls.append((section, dict(metrics), step))
+
+        def log_artifact(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def log_config(self, cfg: Any) -> None:
+            pass
+
+        def promote_to_champion(self, run_id: str, criterion: str) -> bool:
+            return False
+
+    rec = _Recorder()
+    trainer = EmbeddingTrainer(
+        model=model, loss=ArcFaceLoss(), cfg=cfg, tracker=rec, eval_manifest=object()
+    )
+    called = []
+    trainer._validate_verification = lambda *, split: called.append(split) or {}  # type: ignore[method-assign]
+
+    loader = _make_id_loader()
+    trainer.fit(loader, val_loader=loader)
+
+    val_calls = [c for c in rec.calls if c[0] == "val"]
+    assert len(val_calls) == 1
+    assert "roc_auc" not in val_calls[0][1]
+    assert called == []  # helper never invoked
+
+
+def test_embedding_trainer_skips_val_verification_when_eval_manifest_missing(
+    tmp_path: Path,
+) -> None:
+    """val_verification=True but no eval_manifest → no roc_auc, no crash."""
+    torch.manual_seed(0)
+    model = _ToyArcFaceModel(embedding_dim=4, num_classes=3)
+    cfg = TrainerConfig(
+        epochs=1,
+        lr=1e-1,
+        ema_decay=0.0,
+        output_dir=tmp_path / "run",
+        val_verification=True,
+    )
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, float], int]] = []
+
+        def log_metrics(self, section: str, metrics: dict[str, float], step: int) -> None:
+            self.calls.append((section, dict(metrics), step))
+
+        def log_artifact(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def log_config(self, cfg: Any) -> None:
+            pass
+
+        def promote_to_champion(self, run_id: str, criterion: str) -> bool:
+            return False
+
+    rec = _Recorder()
+    trainer = EmbeddingTrainer(model=model, loss=ArcFaceLoss(), cfg=cfg, tracker=rec)
+    # No eval_manifest set; helper should not be called.
+
+    loader = _make_id_loader()
+    trainer.fit(loader, val_loader=loader)
+
+    val_calls = [c for c in rec.calls if c[0] == "val"]
+    assert len(val_calls) == 1
+    assert "roc_auc" not in val_calls[0][1]
+
+
 def test_embedding_trainer_rejects_pair_loss() -> None:
     """`EmbeddingTrainer` must refuse a loss with family != 'embedding'."""
     pytest.importorskip("torch")

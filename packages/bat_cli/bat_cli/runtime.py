@@ -286,6 +286,7 @@ def build_trainer_config(cfg: Mapping[str, Any], *, output_dir: Path) -> Trainer
         output_dir=Path(output_dir),
         artifact_retention=dict(_mapping(trainer.get("artifact_retention"))),
         log_every_n_steps=int(trainer.get("log_every_n_steps", 50)),
+        val_verification=bool(trainer.get("val_verification", True)),
     )
 
 

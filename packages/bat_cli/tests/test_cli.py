@@ -10,6 +10,7 @@ from bat_cli.runtime import (
     _maybe_promote,
     _sample_explanation_records,
     _sample_projection_records,
+    build_trainer_config,
     compose_config,
 )
 from bat_core import ImageRecord, Manifest
@@ -68,6 +69,17 @@ def test_train_dry_run_does_not_require_manifest() -> None:
     assert result.exit_code == 0
     assert "Dry run OK" in result.output
     assert "arcface" in result.output
+
+
+def test_build_trainer_config_maps_val_verification_override(tmp_path: Path) -> None:
+    cfg = compose_config(
+        experiment="arcface_rousettus_random_bg_video",
+        overrides=["trainer.val_verification=false"],
+    )
+
+    trainer_cfg = build_trainer_config(cfg, output_dir=tmp_path / "run")
+
+    assert trainer_cfg.val_verification is False
 
 
 def test_permutation_test_command_invokes_runtime(tmp_path: Path) -> None:
