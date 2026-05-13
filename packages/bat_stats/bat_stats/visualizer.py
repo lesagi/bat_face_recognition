@@ -14,7 +14,6 @@ The visualizer is matplotlib-only -- no torch / TF dependency.
 
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 from typing import Any
@@ -388,42 +387,6 @@ class PermutationVisualizer:
     # ------------------------------------------------------------------
     # exports
     # ------------------------------------------------------------------
-    def export_csv(self, filename: str | None = None) -> Path:
-        """Export results to CSV format (filename is experiment-aware)."""
-
-        if self.output_dir is None:
-            raise ValueError("output_dir must be set to export files")
-        fname = filename or self._filename("permutation_results", suffix=".csv")
-        filepath = self.output_dir / fname
-        with open(filepath, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                [
-                    "Metric",
-                    "Observed",
-                    "Null_Mean",
-                    "Null_Std",
-                    "P_Value",
-                    "Significant",
-                    "Experiment",
-                ]
-            )
-            exp = experiment_name(self.cfg)
-            for metric, result in self.results.metrics.items():
-                writer.writerow(
-                    [
-                        metric,
-                        result.observed,
-                        result.null_mean,
-                        result.null_std,
-                        result.p_value,
-                        result.significant,
-                        exp,
-                    ]
-                )
-        print(f"Exported: {filepath}")
-        return filepath
-
     def export_json(self, filename: str | None = None) -> Path:
         """Export full results to a JSON file with an experiment-aware filename."""
 
@@ -441,7 +404,6 @@ class PermutationVisualizer:
     def generate_full_report(
         self,
         show: bool = False,
-        export_csv: bool = True,
         export_json: bool = True,
         degradation_data: dict[str, list[tuple[float, float]]] | None = None,
     ) -> list[Path]:
@@ -498,8 +460,6 @@ class PermutationVisualizer:
             except Exception as e:
                 print(f"Skipping degradation curve plot: {e}")
 
-        if export_csv:
-            artifacts.append(self.export_csv())
         if export_json:
             artifacts.append(self.export_json())
 

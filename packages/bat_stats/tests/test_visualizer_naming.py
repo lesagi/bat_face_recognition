@@ -75,7 +75,6 @@ def test_individual_filenames_are_experiment_aware(tmp_path: Path, cfg) -> None:
         show=False,
         save=True,
     )
-    viz.export_csv()
     viz.export_json()
 
     files = sorted(p.name for p in tmp_path.iterdir())
@@ -91,7 +90,6 @@ def test_full_report_filenames_are_experiment_aware(tmp_path: Path, cfg) -> None
     viz = PermutationVisualizer(results, cfg=cfg, output_dir=tmp_path)
     artifacts = viz.generate_full_report(
         show=False,
-        export_csv=True,
         export_json=True,
         degradation_data={"f1": [(0.0, 0.92), (0.5, 0.71), (1.0, 0.50)]},
     )
@@ -107,7 +105,6 @@ def test_no_generic_names_leak(tmp_path: Path, cfg) -> None:
     viz = PermutationVisualizer(results, cfg=cfg, output_dir=tmp_path)
     viz.generate_full_report(
         show=False,
-        export_csv=True,
         export_json=True,
         degradation_data={"accuracy": [(0.0, 0.91), (1.0, 0.50)]},
     )
@@ -116,13 +113,16 @@ def test_no_generic_names_leak(tmp_path: Path, cfg) -> None:
         "null_dist_accuracy.png",
         "null_distributions_all.png",
         "permutation_summary.png",
-        "permutation_results.csv",
         "permutation_results.json",
         "degradation_curve.png",
     }
     actual = {p.name for p in tmp_path.iterdir()}
     leaked = forbidden & actual
     assert not leaked, f"generic filename(s) leaked: {leaked}; actual files={actual}"
+    assert not any(p.suffix == ".csv" for p in tmp_path.iterdir()), (
+        "bat_stats must not emit CSV artifacts; "
+        f"found CSVs: {[p.name for p in tmp_path.iterdir() if p.suffix == '.csv']}"
+    )
 
 
 def test_filenames_change_with_cfg(tmp_path: Path) -> None:
@@ -158,17 +158,6 @@ def test_filenames_change_with_cfg(tmp_path: Path) -> None:
     assert files_a != files_b
     assert any("rousettus" in f for f in files_a)
     assert any("mauritius" in f for f in files_b)
-
-
-def test_csv_includes_experiment_column(tmp_path: Path, cfg) -> None:
-    """The CSV row format includes a per-row experiment-name token."""
-
-    results = _build_results()
-    viz = PermutationVisualizer(results, cfg=cfg, output_dir=tmp_path)
-    csv_path = viz.export_csv()
-    text = csv_path.read_text()
-    assert "Experiment" in text.splitlines()[0]
-    assert "rousettus_video_random_arcface_arcface" in text
 
 
 def test_json_filename_is_experiment_aware(tmp_path: Path, cfg) -> None:
