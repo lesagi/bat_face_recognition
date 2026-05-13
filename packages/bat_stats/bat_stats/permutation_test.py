@@ -170,9 +170,9 @@ class PermutationTest:
 
         ``trainer_factory(**trainer_kwargs)`` must return a TrainerProtocol-like
         object exposing ``train_and_evaluate() -> dict[str, float]`` and
-        ``reset_for_new_permutation()``.
-
-        TODO(phase-2): wire to ``bat_training`` PyTorch trainers once they exist.
+        ``reset_for_new_permutation()``.  Production callers obtain such a
+        factory from :mod:`bat_training.permutation_adapter`; ``bat_stats``
+        itself can't construct one without violating the workspace dep graph.
         """
 
         start_time = time.time()

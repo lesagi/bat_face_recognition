@@ -8,16 +8,16 @@ PermutationTrainer that:
 - runs a custom training loop with ``tf.GradientTape`` etc.
 
 That entire module is **intentionally not ported here**: PyTorch trainers live
-in :mod:`bat_training`, which is a Phase-2 deliverable.  Until ``bat_training``
-exists we only define the *shape* of what the permutation runner needs from
-a trainer (the :class:`TrainerProtocol`) and a stub factory so the runner
-imports cleanly and tests can pass mocks.
+in :mod:`bat_training`, and ``bat_stats`` sits strictly below ``bat_training``
+in the workspace dependency graph (importing the latter would flip the edge).
+We therefore only define the *shape* of what the permutation runner needs
+from a trainer (the :class:`TrainerProtocol`) and a stub factory so the
+runner imports cleanly and tests can pass mocks.
 
-TODO(phase-2): provide a real ``PermutationTrainerAdapter`` that wraps the
-PyTorch ``PairTrainer`` from ``bat_training`` and exposes
-``train_and_evaluate`` / ``reset_for_new_permutation``.  At that point the
-``create_permutation_trainer`` factory below should be replaced with one that
-imports from ``bat_training`` lazily.
+The real ``PermutationTrainerAdapter`` is provided by
+:mod:`bat_training.permutation_adapter` (``create_pair_trainer_factory`` /
+``create_embedding_trainer_factory``); callers inject it via the
+``trainer_factory=`` argument on :func:`bat_stats.runner.run_retrain_test`.
 """
 
 from __future__ import annotations
@@ -60,26 +60,27 @@ def create_permutation_trainer(
     verbose: bool = False,
     **_kwargs: Any,
 ) -> TrainerProtocol:
-    """Stub factory.  Raises ``NotImplementedError`` until Phase 2.
+    """Stub factory.  Always raises ``NotImplementedError``.
 
-    The retrain-style permutation test cannot run end-to-end without a real
-    PyTorch trainer.  Callers should either:
-    - use the inference-based path (:func:`bat_stats.run_inference_permutation_test`),
-      which doesn't retrain, or
-    - inject their own ``trainer_factory`` that returns something satisfying
-      :class:`TrainerProtocol`.
-
-    TODO(phase-2): replace this with a thin wrapper around
-    ``bat_training.PairTrainer`` once it lands.
+    ``bat_stats`` cannot construct a real trainer itself without importing
+    ``bat_training`` (which would invert the workspace dep graph).  Callers
+    must either:
+    - use the inference-based path
+      (:func:`bat_stats.run_inference_permutation_test`), which doesn't
+      retrain, or
+    - inject a ``trainer_factory`` from
+      :mod:`bat_training.permutation_adapter` (or any callable returning a
+      :class:`TrainerProtocol`).
     """
 
     del permute_labels, num_epochs, verbose  # silence linters
 
     raise NotImplementedError(
-        "Retrain-style permutation training is not yet wired up. "
-        "Use bat_stats.run_inference_permutation_test for now, or pass your "
-        "own trainer_factory to PermutationTest.run(). "
-        "Phase-2 (bat_training) will provide the concrete trainer."
+        "Retrain-style permutation training has no default factory in "
+        "bat_stats. Either call bat_stats.run_inference_permutation_test, "
+        "or pass a trainer_factory built via "
+        "bat_training.permutation_adapter.create_pair_trainer_factory / "
+        "create_embedding_trainer_factory."
     )
 
 
