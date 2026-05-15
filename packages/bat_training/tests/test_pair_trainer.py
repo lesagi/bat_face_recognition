@@ -81,6 +81,45 @@ def test_pair_trainer_steps_partial_gradient_accumulation_tail(
     assert any(not torch.allclose(before[name], after[name]) for name in before)
 
 
+def test_pair_trainer_test_logs_classification_metrics(
+    tmp_path: Path, tiny_pair_model_cls: Any, make_pair_loader: Any
+) -> None:
+    """`test()` must log f1/precision/recall alongside roc_auc etc.
+
+    Phase-4 Step-2 parity vs the legacy TF run depends on `test/f1` being
+    present in MLflow; the verification surface alone (`roc_auc`,
+    `tar_at_far_*`) is not comparable to the TF baseline.
+    """
+    torch.manual_seed(0)
+    cfg = TrainerConfig(epochs=1, lr=1e-2, output_dir=tmp_path / "run")
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, float], int]] = []
+
+        def log_metrics(self, section: str, metrics: dict[str, float], step: int) -> None:
+            self.calls.append((section, dict(metrics), step))
+
+        def log_artifact(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def log_config(self, cfg: Any) -> None:
+            pass
+
+        def promote_to_champion(self, run_id: str, criterion: str) -> bool:
+            return False
+
+    rec = _Recorder()
+    trainer = PairTrainer(model=tiny_pair_model_cls(), loss=BCELoss(), cfg=cfg, tracker=rec)
+    trainer.test(make_pair_loader())
+
+    test_calls = [c for c in rec.calls if c[0] == "test"]
+    assert len(test_calls) == 1
+    payload = test_calls[0][1]
+    for key in ("f1", "precision", "recall", "roc_auc", "optimal_threshold"):
+        assert key in payload, f"missing test/{key} in {sorted(payload)}"
+
+
 def test_pair_trainer_rejects_wrong_family(tiny_pair_model_cls: Any) -> None:
     """`PairTrainer` must refuse a loss with family != 'pair'."""
 
