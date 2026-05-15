@@ -461,6 +461,9 @@ def run_training(
         explanations_dir: Path | None = None
         if run_explanations:
             explanations_dir = resolved_output / "explanations"
+            explanation_image_size = int(
+                _mapping(bundle.cfg.get("model")).get("input_edge_length", 224)
+            )
             explanations = _safe(
                 "explanations",
                 warnings,
@@ -470,6 +473,7 @@ def run_training(
                     output_dir=explanations_dir,
                     samples_per_split=explanations_per_split,
                     projection_cap=explanations_projection_cap,
+                    image_size=explanation_image_size,
                 ),
             )
 
@@ -673,6 +677,7 @@ def _build_explanations(
     output_dir: Path,
     samples_per_split: int = 2,
     projection_cap: int = 30,
+    image_size: int,
 ) -> ExplanationArtifacts:
     """Generate saliency + projection artifacts spanning train/val/test splits.
 
@@ -680,6 +685,12 @@ def _build_explanations(
     sorted by record path), takes one record each, runs the family-appropriate
     saliency adapter on the union, then runs the embedding projection adapter
     on a wider pool capped at ``projection_cap``.
+
+    ``image_size`` is the edge length the model was trained at (Siamese: 105,
+    embedding ResNet backbones: 224). Both adapters resize inputs to that
+    edge before invoking the model, since their dataclass defaults
+    (``EmbeddingProjectionAdapter.input_size=224``) silently mismatch a
+    pair-family Siamese head and cascade-fail the entire explanation block.
 
     Identity strings on the resulting :class:`bat_core.SaliencyImage` are
     prefixed with the source split (``"train:W"``, ``"val:H"``, ``"test:R"``)
@@ -693,7 +704,7 @@ def _build_explanations(
     if not saliency_samples:
         return ExplanationArtifacts(saliency_images=[], projection_images=[])
 
-    adapter = select_adapter(model)
+    adapter = replace(select_adapter(model), input_size=image_size)
     raw = list(adapter.explain(model, saliency_samples))
     saliency_images = [
         replace(img, identity=f"{path_to_split.get(img.image_path, '?')}:{img.identity}")
@@ -701,7 +712,9 @@ def _build_explanations(
     ]
 
     projection_samples = _sample_projection_records(manifest, projection_cap)
-    projection_adapter = EmbeddingProjectionAdapter(method="both", output_dir=output_dir)
+    projection_adapter = EmbeddingProjectionAdapter(
+        method="both", output_dir=output_dir, input_size=image_size
+    )
     projection_images = (
         list(projection_adapter.explain(model, projection_samples)) if projection_samples else []
     )
