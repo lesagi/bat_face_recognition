@@ -7,6 +7,7 @@ import pytest
 from bat_cli.__main__ import main
 from bat_cli.runtime import (
     PermutationResult,
+    _audit_params,
     _maybe_promote,
     _sample_explanation_records,
     _sample_projection_records,
@@ -527,3 +528,89 @@ def test_build_explanations_routes_image_size_to_both_adapters(tmp_path: Path) -
 
     assert captured_inputs["adapter"] == 105
     assert captured_inputs["projection"] == 105
+
+
+def test_audit_params_emits_keys_that_survive_hp_filter() -> None:
+    """`_audit_params` must produce keys the bat_tracking allowlist keeps.
+
+    The MLflow run for the first PyTorch Siamese parity attempt logged zero
+    params because the previous flattener emitted dotted Hydra keys
+    (`trainer.lr`) that `bat_tracking.filter_params` drops. This pins the
+    contract that the audit-translator's output round-trips through
+    `filter_params` non-empty.
+    """
+    from bat_tracking.hp_audit import filter_params
+
+    cfg = {
+        "model": {
+            "family": "pair",
+            "arch": "siamese_4conv",
+            "embedding_dim": 4096,
+        },
+        "loss": {"type": "binary_focal", "alpha": 0.75, "gamma": 2.0},
+        "trainer": {
+            "optimizer": "adam",
+            "lr": 5.0e-5,
+            "weight_decay": 0.0,
+            "epochs": 80,
+            "gradient_accumulation_steps": 1,
+            "warmup_epochs": 0,
+            "ema_decay": 0.0,
+            "early_stop": {"patience": 5, "monitor": "val/f1"},
+        },
+        "data": {
+            "species": "rousettus",
+            "background": "random",
+            "source": "video",
+            "split_mode": "identity_disjoint",
+            "split_seed": 7,
+            "val_fraction": 0.25,
+            "test_fraction": 0.25,
+            "batch_size": 32,
+        },
+    }
+
+    audited = _audit_params(cfg, manifest_hash="deadbeef")
+    kept = filter_params(audited)
+
+    # Core knobs must survive the audit.
+    for key in (
+        "model_family",
+        "model_arch",
+        "embedding_dim",
+        "loss_type",
+        "optimizer",
+        "lr",
+        "weight_decay",
+        "epochs",
+        "early_stop_patience",
+        "early_stop_monitor",
+        "split_mode",
+        "split_seed",
+        "species",
+        "background",
+        "data_source",
+        "manifest_hash",
+    ):
+        assert key in kept, f"audit dropped {key!r}; kept keys: {sorted(kept)}"
+
+    # Loss sub-params are routed through the `loss_params.` prefix.
+    assert kept["loss_params.alpha"] == 0.75
+    assert kept["loss_params.gamma"] == 2.0
+
+    # The previous flattener emitted these dotted forms; they must NOT appear.
+    assert "trainer.lr" not in kept
+    assert "model.family" not in kept
+
+    # AdaFace's `h` knob (configs/loss/adaface.yaml) lives alongside
+    # margin/scale and must also survive the audit.
+    adaface_cfg = {
+        "model": {"family": "embedding", "arch": "adaface", "embedding_dim": 512},
+        "loss": {"type": "adaface", "margin": 0.4, "h": 0.333, "scale": 64.0},
+        "trainer": {"optimizer": "adam", "lr": 1.0e-3, "epochs": 30},
+        "data": {"species": "rousettus", "background": "random", "source": "video"},
+    }
+    adaface_kept = filter_params(_audit_params(adaface_cfg, manifest_hash="deadbeef"))
+    assert adaface_kept["loss_params.margin"] == 0.4
+    assert adaface_kept["loss_params.h"] == 0.333
+    assert adaface_kept["loss_params.scale"] == 64.0
