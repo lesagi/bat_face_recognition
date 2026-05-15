@@ -442,7 +442,9 @@ def run_training(
         run_id = _tracker_run_id(tracker)
         if tracker is not None:
             tracker.log_config(bundle.cfg)
-            tracker.log_params(_flatten_params(bundle.cfg))
+            tracker.log_params(
+                _audit_params(bundle.cfg, manifest_hash=bundle.manifest.manifest_hash)
+            )
 
         trainer_kwargs = dict(bundle.trainer_kwargs)
         trainer_kwargs["tracker"] = tracker
@@ -1033,21 +1035,74 @@ def _tracker_run_id(tracker: Any | None) -> str:
     return str(resolver())
 
 
-def _flatten_params(cfg: Mapping[str, Any]) -> dict[str, Any]:
-    flat: dict[str, Any] = {}
+def _audit_params(cfg: Mapping[str, Any], manifest_hash: str | None) -> dict[str, Any]:
+    """Translate the Hydra cfg into the flat audit allowlist.
 
-    def _walk(prefix: str, value: Any) -> None:
-        if isinstance(value, Mapping):
-            for key, child in value.items():
-                child_prefix = f"{prefix}.{key}" if prefix else str(key)
-                _walk(child_prefix, child)
-        elif isinstance(value, list | tuple):
-            flat[prefix] = ",".join(str(v) for v in value)
-        else:
-            flat[prefix] = value
+    ``bat_tracking.filter_params`` keeps an explicit, curated set of flat keys
+    (``model_family``, ``lr``, ``species`` …) plus the ``loss_params.``,
+    ``lr_schedule_params.``, ``best_`` and ``test/`` prefixes. The Hydra cfg
+    arrives nested under ``model.``, ``loss.``, ``trainer.``, ``data.``; walking
+    it with dotted keys produces names the audit drops outright. We pull the
+    audit-relevant knobs out by hand so MLflow runs surface the parameters the
+    plan actually selected.
+    """
 
-    _walk("", cfg)
-    return flat
+    model = _mapping(cfg.get("model"))
+    loss = _mapping(cfg.get("loss"))
+    trainer = _mapping(cfg.get("trainer"))
+    data = _mapping(cfg.get("data"))
+    early_stop = _mapping(trainer.get("early_stop"))
+    lr_schedule_params = _mapping(trainer.get("lr_schedule_params"))
+    loss_params = _mapping(loss.get("params"))
+
+    params: dict[str, Any] = {}
+
+    def _put(key: str, value: Any) -> None:
+        if value is not None:
+            params[key] = value
+
+    _put("model_family", model.get("family") or loss.get("family"))
+    _put("model_arch", model.get("arch"))
+    _put("embedding_dim", model.get("embedding_dim"))
+    _put("loss_type", loss.get("type"))
+    _put("optimizer", trainer.get("optimizer"))
+    _put("lr", trainer.get("lr"))
+    _put("weight_decay", trainer.get("weight_decay"))
+    _put("ema_decay", trainer.get("ema_decay"))
+    _put("gradient_accumulation_steps", trainer.get("gradient_accumulation_steps"))
+    _put("batch_size", trainer.get("batch_size", data.get("batch_size")))
+    _put("epochs", trainer.get("epochs"))
+    _put("early_stop_patience", early_stop.get("patience"))
+    _put("early_stop_monitor", early_stop.get("monitor"))
+    _put("split_mode", data.get("split_mode"))
+    _put("split_seed", data.get("split_seed"))
+    _put("val_fraction", data.get("val_fraction"))
+    _put("test_fraction", data.get("test_fraction"))
+    _put("species", data.get("species"))
+    _put("background", data.get("background"))
+    _put("data_source", data.get("source"))
+    _put("augmentation_preset", data.get("augmentation_preset"))
+    _put("manifest_hash", manifest_hash)
+
+    # Loss-family sub-params (e.g. focal alpha/gamma, arcface margin/scale,
+    # adaface h). The audit allows the ``loss_params.`` prefix to pass
+    # through; we also accept the legacy practice of putting these directly
+    # on the loss config (`cfg.loss.alpha`) by mirroring known knobs.
+    known_loss_keys = ("margin", "scale", "alpha", "gamma", "sub_centers", "h")
+    for key in known_loss_keys:
+        value = loss_params.get(key, loss.get(key))
+        if value is not None:
+            params[f"loss_params.{key}"] = value
+
+    # LR schedule sub-params (warmup, T_max, min_lr, ...). Allow both
+    # ``cfg.trainer.lr_schedule_params.*`` and the looser
+    # ``cfg.trainer.warmup_epochs`` style.
+    for key, value in lr_schedule_params.items():
+        params[f"lr_schedule_params.{key}"] = value
+    if "warmup_epochs" in trainer and "lr_schedule_params.warmup_epochs" not in params:
+        params["lr_schedule_params.warmup_epochs"] = trainer["warmup_epochs"]
+
+    return params
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
