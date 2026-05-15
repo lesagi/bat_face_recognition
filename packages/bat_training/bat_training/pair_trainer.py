@@ -282,7 +282,16 @@ class PairTrainer:
         predictions = self._collect_predictions(test_loader)
         verification = evaluate_predictions(predictions)
         if self.tracker is not None:
-            self._log_verification(verification, section="test", step=0)
+            tp, fp, _tn, fn = _confusion_at_threshold(
+                predictions, threshold=verification.optimal_threshold
+            )
+            recall, precision, f1 = _prf1(tp, fp, fn)
+            self._log_verification(
+                verification,
+                section="test",
+                step=0,
+                classification={"f1": f1, "precision": precision, "recall": recall},
+            )
         return EvalReport(verification=verification, identification=None, predictions=predictions)
 
     # ------------------------------------------------------------------ #
@@ -443,16 +452,27 @@ class PairTrainer:
                     state=self._build_state_dict(epoch=epoch),
                 )
 
-    def _log_verification(self, metrics: VerificationMetrics, *, section: str, step: int) -> None:
+    def _log_verification(
+        self,
+        metrics: VerificationMetrics,
+        *,
+        section: str,
+        step: int,
+        classification: dict[str, float] | None = None,
+    ) -> None:
+        payload: dict[str, float] = {
+            "roc_auc": float(metrics.roc_auc),
+            "youden_j": float(metrics.youden_j),
+            "optimal_threshold": float(metrics.optimal_threshold),
+            "tar_at_far_1e3": float(metrics.tar_at_far_1e3),
+            "tar_at_far_1e4": float(metrics.tar_at_far_1e4),
+        }
+        if classification is not None:
+            for key, value in classification.items():
+                payload[key] = float(value)
         self._log(
             section,
-            {
-                "roc_auc": float(metrics.roc_auc),
-                "youden_j": float(metrics.youden_j),
-                "optimal_threshold": float(metrics.optimal_threshold),
-                "tar_at_far_1e3": float(metrics.tar_at_far_1e3),
-                "tar_at_far_1e4": float(metrics.tar_at_far_1e4),
-            },
+            payload,
             step=step,
         )
 

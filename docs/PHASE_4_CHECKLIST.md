@@ -14,7 +14,7 @@ Reference: the approved refactor plan in the original session and
 |---|---|---|
 | Pre-flight | ✅ done | `uv sync --frozen` clean (cu121 wheels), 371/372 tests pass, `tools/check_tf_isolation.py` clean |
 | 1. Build manifest | ✅ done | `--val-fraction 0.25 --test-fraction 0.25 --seed 7` → 6 train / 3 val / 3 test identities; 1059 rows |
-| 2. Siamese parity | ⏳ pending | needs workstation GPU; cu121 wheels in place |
+| 2. Siamese parity | ⏳ pending | first run completed but exposed 4 blockers; tracked in `docs/PHASE_4_STEP2_FIXES.md` |
 | 3. ArcFace + AdaFace baselines | ⏳ pending | acceptance: `test/roc_auc > 0.9` + 8 PDF sections + experiment-aware filenames |
 | 4. Delete TF code | ✅ done in this branch | `app/`, `run.py`, `Makefile`, `scripts/`, `setup.py` removed; pre-refactor snapshot at tag `refactor-foundation-pytorch` |
 | 5. Tag `v2.0.0-pytorch` | ⏳ pending | run after steps 2–3 are done |
@@ -116,6 +116,13 @@ uv run bat-cli train \
 Acceptance: PyTorch best test-F1 within ±2 % of legacy TF best test-F1.
 Caveat: the new pipeline uses a 3-way identity-disjoint split, so the
 comparison is approximate. Document the delta in the run's MLflow notes.
+
+Legacy parity baseline (recorded for this checklist): TF run `197c5739`
+in experiment `417610805828946312`
+(`siamese_rousettus_video_no_aug_random_bg`) finished with
+`best_test_f1 = 0.9872`. The ±2 % acceptance band is therefore
+**[0.9674, 1.0000]** — the PyTorch run's `test/f1` must land inside this
+window.
 
 If the delta is larger than ±2 %, investigate **before** moving on:
 - Confirm `weight_decay=1e-4` was applied (`SiameseModel.recommended_weight_decay`).
