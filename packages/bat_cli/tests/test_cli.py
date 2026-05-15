@@ -464,3 +464,66 @@ def test_build_manifest_command_writes_split_csv(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert output_csv.exists()
     assert output_csv.with_suffix(".csv.hash").exists()
+
+
+def test_build_explanations_routes_image_size_to_both_adapters(tmp_path: Path) -> None:
+    """`_build_explanations` must override the adapters' default input_size.
+
+    The `EmbeddingProjectionAdapter` dataclass defaults to ``input_size=224``,
+    which silently mismatches a Siamese head trained at 105 and cascade-fails
+    the whole explanation block. The CLI is responsible for forwarding the
+    model's actual training edge length, sourced from
+    `cfg.model.input_edge_length`.
+    """
+    from dataclasses import dataclass
+    from unittest.mock import MagicMock
+
+    from bat_cli.runtime import _build_explanations
+
+    captured_inputs: dict[str, int] = {}
+
+    @dataclass
+    class _CaptureAdapter:
+        input_size: int = -1
+
+        def explain(self, _model, _samples):  # noqa: ANN001 - mock
+            captured_inputs["adapter"] = self.input_size
+            return []
+
+    def fake_select_adapter(_model):  # noqa: ANN001 - mock
+        return _CaptureAdapter()
+
+    class _FakeProjection:
+        def __init__(self, *, method: str, output_dir: Path, input_size: int) -> None:
+            captured_inputs["projection"] = input_size
+
+        def explain(self, _model, _samples):  # noqa: ANN001 - mock
+            return []
+
+    fake_model = MagicMock()
+    fake_model.family = "pair"
+    fake_manifest = MagicMock()
+
+    # Force at least one sample so the function reaches the adapter calls.
+    fake_record = MagicMock()
+    fake_record.path = Path("/dev/null/fake.png")
+    fake_record.identity = "X"
+    fake_manifest.filter_split.side_effect = lambda split: (  # noqa: ARG005
+        [fake_record] if split == "train" else []
+    )
+
+    with (
+        patch("bat_interpretability.EmbeddingProjectionAdapter", new=_FakeProjection),
+        patch("bat_interpretability.select_adapter", new=fake_select_adapter),
+    ):
+        _build_explanations(
+            fake_model,
+            fake_manifest,
+            output_dir=tmp_path,
+            samples_per_split=1,
+            projection_cap=1,
+            image_size=105,
+        )
+
+    assert captured_inputs["adapter"] == 105
+    assert captured_inputs["projection"] == 105
