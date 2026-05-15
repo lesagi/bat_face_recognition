@@ -1,5 +1,23 @@
 # Phase 4 — Step 2 fix plan
 
+**Status: closed 2026-05-16.** All four infrastructure blockers landed
+on `main` (#27, #28, #29, #30); the parity re-run
+(`siamese-parity-pytorch-v2`, MLflow `e1401b8090024ee5871b338b6646732c`)
+hit `test/f1 = 0.7420`, `test/roc_auc = 0.8047`. The absolute parity
+bar against the legacy TF 0.9872 is *not* met and is no longer being
+chased — that number came from a random-pair split where test pairs
+shared identities with train; the new pipeline is identity-disjoint and
+the held-out identities are genuinely unseen. The lower number is the
+truthful one. Step 2 is closed; see `docs/PHASE_4_CHECKLIST.md` for the
+final resolution note.
+
+The history below is kept for archaeology — it documents the
+investigation that turned the first 33-second smoke run into a real
+9-minute training run, why each blocker mattered, and what each fix
+changed.
+
+---
+
 Phase 4 Step 2 (Siamese parity vs legacy TF) cannot complete until the
 issues below are resolved. First PyTorch Siamese run on the
 `siamese_rousettus_random_bg_video` experiment (MLflow run
@@ -12,11 +30,11 @@ and re-run the parity training under `docs/PHASE_4_CHECKLIST.md` Step 2.
 
 | # | Issue | Status | PR |
 |---|---|---|---|
-| 1 | `test/f1`, `test/precision`, `test/recall` not logged | ✅ done | (this PR) |
-| 2 | Saliency adapter shape mismatch (`9216 vs 102400`) | ✅ done | follow-up PR |
-| 3 | Generalization gap on 3-way identity-disjoint split | ✅ done (root cause fixed; awaits parity re-run) | follow-up PR |
-| 4 | MLflow params empty despite `_flatten_params` call | ✅ done | follow-up PR |
-| 5 | (deferred) Early-stop patience may need re-tuning *after* (3) | ⏳ pending | — |
+| 1 | `test/f1`, `test/precision`, `test/recall` not logged | ✅ done | #27 |
+| 2 | Saliency adapter shape mismatch (`9216 vs 102400`) | ✅ done | #29 |
+| 3 | Generalization gap on 3-way identity-disjoint split | ✅ done (pair sampler rewritten; absolute parity bar dropped per identity-disjoint paradigm) | #30 |
+| 4 | MLflow params empty despite `_flatten_params` call | ✅ done | #28 |
+| 5 | (deferred) Early-stop patience may need re-tuning *after* (3) | not pursued — v2 run hit early-stop at epoch 13 (val/f1 peaked epoch 8), behaviour acceptable | — |
 
 ---
 
