@@ -885,9 +885,33 @@ def format_json(payload: Mapping[str, Any]) -> str:
 
 
 class ManifestPairDataset:
-    """Simple deterministic pair dataset over a manifest split."""
+    """Reproducible random pair dataset over a manifest split.
 
-    def __init__(self, manifest: Manifest, split: str, *, image_size: int = 105) -> None:
+    Each ``__getitem__(idx)`` draws a fresh anchor + partner pair via a
+    deterministic per-index RNG (``random.Random(seed + idx)``), so the
+    same ``idx`` always yields the same pair (dataloader replay /
+    checkpoint resume stays bit-exact) but across an epoch the sampler
+    explores all ``C(n, 2)`` positives and cross-class negatives instead
+    of the O(n) cycle the previous deterministic walk produced.
+
+    Epoch size is ``pairs_per_record * len(records)`` (default ``20`` →
+    9 720 pairs for the 486-record rousettus train split), tuned to
+    approach the legacy TF pipeline's pair diversity without exploding
+    memory or step count.
+
+    Pair label balance is exactly 50/50 by construction: even indices
+    yield positives, odd indices yield negatives.
+    """
+
+    def __init__(
+        self,
+        manifest: Manifest,
+        split: str,
+        *,
+        image_size: int = 105,
+        pairs_per_record: int = 20,
+        seed: int = 0,
+    ) -> None:
         from bat_data import default_image_loader
 
         self.records = tuple(r for r in manifest.records if r.split == split)
@@ -900,30 +924,41 @@ class ManifestPairDataset:
             by_identity[record.identity].append(record)
         if len(by_identity) < 2:
             raise ValueError(f"pair dataset split {split!r} needs at least two identities")
-        self.by_identity = {k: tuple(v) for k, v in by_identity.items()}
+        # Drop identities with only one record — they cannot produce a
+        # within-identity positive pair, and rotating through them as
+        # anchors corrupts the 50/50 label balance.
+        self.by_identity = {k: tuple(v) for k, v in by_identity.items() if len(v) >= 2}
+        if len(self.by_identity) < 2:
+            raise ValueError(
+                f"pair dataset split {split!r} needs at least two identities "
+                "with >= 2 records each"
+            )
         self.identities = tuple(sorted(self.by_identity))
-        self._position = {id(record): idx for idx, record in enumerate(self.records)}
+        self._seed = int(seed)
+        self._pairs_per_record = max(1, int(pairs_per_record))
+        # Keep the eligible record pool aligned with the filtered identities
+        # so __getitem__ never lands on a singleton-identity anchor.
+        self._anchor_pool = tuple(r for r in self.records if r.identity in self.by_identity)
 
     def __len__(self) -> int:
-        return len(self.records) * 2
+        return len(self._anchor_pool) * self._pairs_per_record
 
     def __getitem__(self, index: int) -> tuple[Any, Any, Any]:
+        import random
+
         import torch
 
-        anchor = self.records[index % len(self.records)]
+        rng = random.Random(self._seed + index)
+        anchor = rng.choice(self._anchor_pool)
         positive = index % 2 == 0
         if positive:
-            candidates = self.by_identity[anchor.identity]
-            pos = self._position[id(anchor)] % len(candidates)
-            other = candidates[(pos + 1) % len(candidates)]
+            candidates = [r for r in self.by_identity[anchor.identity] if r is not anchor]
+            other = rng.choice(candidates) if candidates else anchor
             label = 1.0
         else:
-            current_idx = self.identities.index(anchor.identity)
-            neg_identity = self.identities[(current_idx + 1 + index) % len(self.identities)]
-            if neg_identity == anchor.identity:
-                neg_identity = self.identities[(current_idx + 1) % len(self.identities)]
-            candidates = self.by_identity[neg_identity]
-            other = candidates[index % len(candidates)]
+            other_ids = [i for i in self.identities if i != anchor.identity]
+            neg_identity = rng.choice(other_ids)
+            other = rng.choice(self.by_identity[neg_identity])
             label = 0.0
         return (
             self.loader(anchor.path),

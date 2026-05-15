@@ -614,3 +614,60 @@ def test_audit_params_emits_keys_that_survive_hp_filter() -> None:
     assert adaface_kept["loss_params.margin"] == 0.4
     assert adaface_kept["loss_params.h"] == 0.333
     assert adaface_kept["loss_params.scale"] == 64.0
+
+
+def test_manifest_pair_dataset_is_reproducible_and_label_balanced(tmp_path: Path) -> None:
+    """ManifestPairDataset must yield bit-exact same pair for the same idx.
+
+    Phase-4 Step-2 root cause was an O(n) deterministic walk that gave the
+    model only ~972 unique pairs per epoch on the rousettus train split.
+    The replacement uses a per-index `random.Random(seed + idx)` to produce
+    O(n²)-style diversity while staying bit-exact for dataloader replay /
+    checkpoint resume.
+    """
+    from bat_cli.runtime import ManifestPairDataset
+
+    # Synthetic manifest: 3 identities × 4 records each, all in "train".
+    records = [
+        ImageRecord(
+            path=tmp_path / f"{identity}_{i}.png",
+            identity=identity,
+            species="rousettus",
+            background="random",
+            source="video",
+            split="train",
+            quality=1.0,
+        )
+        for identity in ("A", "B", "C")
+        for i in range(4)
+    ]
+    manifest = Manifest(records=records, manifest_hash="testhash")
+
+    # Patch the image loader to avoid real I/O — return the path as a sentinel.
+    def fake_loader(path: Path, image_size: int) -> str:  # noqa: ARG001 - mock
+        return str(path.name)
+
+    with patch("bat_data.default_image_loader", new=fake_loader):
+        ds = ManifestPairDataset(manifest, "train", image_size=105, pairs_per_record=10, seed=42)
+        # Same idx → same pair, twice.
+        a1, b1, lab1 = ds[7]
+        a2, b2, lab2 = ds[7]
+        assert (a1, b1, float(lab1)) == (a2, b2, float(lab2))
+
+        # Even idx is positive (label 1.0), odd idx is negative (label 0.0).
+        for even in (0, 2, 100):
+            assert float(ds[even][2]) == 1.0
+        for odd in (1, 3, 101):
+            assert float(ds[odd][2]) == 0.0
+
+        # Pair diversity: across many positive draws, anchor should pair with
+        # multiple distinct same-identity partners (the bug we fixed gave a
+        # single fixed partner per anchor).
+        partners_for_first_anchor: set[str] = set()
+        for k in range(0, 200, 2):  # positives only
+            anchor_name, partner_name, _ = ds[k]
+            if anchor_name == "A_0.png":
+                partners_for_first_anchor.add(partner_name)
+        assert (
+            len(partners_for_first_anchor) >= 2
+        ), f"sampler regressed to single-partner mode: {partners_for_first_anchor}"
