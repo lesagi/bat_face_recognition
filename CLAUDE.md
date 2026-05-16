@@ -29,11 +29,11 @@ packages/
   bat_cli/             # single-entry interactive launcher
 ```
 
-`configs/` holds the Hydra root + groups. `models/preprocessing/` holds the two YOLO weights still in active use (face_seg.pt, face_pose.pt). `docs/` holds `REFACTOR_STATUS.md` (per-package state) and `PHASE_4_CHECKLIST.md` (workstation steps).
+`configs/` holds the Hydra root + groups. `models/preprocessing/` holds the two YOLO weights still in active use (face_seg.pt, face_pose.pt). `docs/PROJECT_SUMMARY.md` is the canonical go-forward reference (architecture, research outcomes, recommended next steps).
 
 ## Key invariants
 
-- **No upward dependencies.** A package may only import from `bat_core` or packages strictly lower in the dep graph (see the table in `docs/REFACTOR_STATUS.md`). `bat_core` imports nothing from the workspace.
+- **No upward dependencies.** A package may only import from `bat_core` or packages strictly lower in the dep graph (see the package table in `docs/PROJECT_SUMMARY.md`). `bat_core` imports nothing from the workspace.
 - **`bat_core` stays import-light.** It type-annotates `torch.Tensor` via `TYPE_CHECKING`; runtime never requires torch at import time.
 - **Trainers are loops, not god-classes.** Data wiring → `bat_data`. MLflow → `bat_tracking`. Eval → `bat_evaluation`. Loss math → `bat_losses`. The trainer keeps only optimizer / scheduler / AMP / EMA / checkpointing / callbacks.
 - **Test split is sacred.** `bat_sweeps` only reads val metrics; the objective never calls `trainer.test`. Verified with a mock test.
@@ -81,14 +81,13 @@ Promotion: `--promote` (silent auto-on-improve) and `--prompt-promote` (ask once
 
 ## Where to find things
 
-- Plan archive: `docs/REFACTOR_STATUS.md` — per-package public surface, intentional plan deviations, open follow-ups, test counts.
-- Outstanding work: `docs/PHASE_4_CHECKLIST.md` — exact commands for the remaining steps + acceptance criteria.
-- Legacy TF code (`app/`, `run.py`, `Makefile`, `scripts/`, `setup.py`) was removed in Phase 4 step 4. The pre-refactor snapshot is preserved at the `refactor-foundation-pytorch` git tag — `git show refactor-foundation-pytorch:<path>` recovers any file.
+- **Go-forward reference**: `docs/PROJECT_SUMMARY.md` — package architecture, refactor history with tag pointers, research outcomes (the identity-disjoint generalization wall at ≤ ~12 train identities), and recommended next steps split into mandatory-for-research vs optional.
+- Legacy TF code (`app/`, `run.py`, `Makefile`, `scripts/`, `setup.py`) was removed in Phase 4 step 4. The pre-refactor snapshot is preserved at the `refactor-foundation-pytorch` git tag — `git show refactor-foundation-pytorch:<path>` recovers any file. Per-phase milestones are at `refactor-phase-{1,2,3}-complete`; release cuts are `v2.0.0-pytorch` and `v2.0.1-pytorch`.
 - Hydra root: `configs/config.yaml` composes from `configs/{data,model,loss,trainer,evaluation,preprocessing,sweep,experiment}/`.
 
 ## Things to avoid
 
-- Adding upward deps (e.g., `bat_data` importing `bat_training`). The dep table in `REFACTOR_STATUS.md` is the contract.
+- Adding upward deps (e.g., `bat_data` importing `bat_training`). The package table in `docs/PROJECT_SUMMARY.md` is the contract.
 - Modifying `bat_core` mid-task. Workers historically left `TODO(bat_core):` markers and used the closest existing primitive instead; I (the user) batch core changes when convenient.
 - Restoring CSV output from new code. The plan locked this; report renders to the unified PDF.
 - Bypassing `bat_stats.naming.*` helpers in any plot/file output. The original naming bug is the reason the helpers exist.
@@ -96,6 +95,7 @@ Promotion: `--promote` (silent auto-on-improve) and `--prompt-promote` (ask once
 
 ## Open follow-ups (non-blocking)
 
-These are flagged in `docs/REFACTOR_STATUS.md` but live here too as a quick reference:
+The recommended research-side next steps + explicitly-deferred optional items both live in `docs/PROJECT_SUMMARY.md`. The short version:
 
-- ONNX export prefers `dynamo_export` with a legacy fallback; full-model dynamo verification is part of the Phase-4 reproducibility check.
+- **Research-relevant** (mandatory if pursuing the project's publishable goals): re-enable augmentation, multi-seed runs + permutation tests for paper-grade statistics, combined-species manifest, triplet + hard-negative mining (the existing `bat_losses.TripletLoss` + `bat_data.HardNegativeMiner` are unwired), cross-species transfer.
+- **Deferred-on-purpose** (skip unless thesis scope demands): serving / inference API, ONNX dynamo full-model verification, SLURM templates, WandB integration, GitHub Actions CI, Dockerfile.

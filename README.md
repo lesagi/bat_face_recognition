@@ -52,8 +52,7 @@ uv run bat-cli
 │   └── bat_cli/             # Single-entry interactive launcher
 ├── configs/                 # Hydra config root (data/model/loss/trainer/...)
 ├── docs/
-│   ├── PHASE_4_CHECKLIST.md # Workstation-driven steps to finish migration
-│   └── REFACTOR_STATUS.md   # Per-package status + open follow-ups
+│   └── PROJECT_SUMMARY.md   # Canonical go-forward reference (architecture + research outcomes + next steps)
 ├── tools/
 │   └── check_tf_isolation.py # Static check before deleting legacy TF code
 ├── models/
@@ -137,14 +136,9 @@ uv run pre-commit run --all-files
 
 At last full verification: 371 passed, 1 skipped across all 13 packages.
 
-## Refactor status
+## Project reference
 
-Phase 0–3 of the PyTorch refactor are merged on `main`. Phase 4 is underway: manifest build and TF deletion are done; Siamese parity, ArcFace/AdaFace baselines, and the `v2.0.0-pytorch` tag remain workstation-driven.
-
-- `docs/REFACTOR_STATUS.md` — per-package public surface, open follow-ups, test counts.
-- `docs/PHASE_4_CHECKLIST.md` — exact commands and acceptance criteria for the remaining steps.
-
-The Phase 0 commit is tagged `refactor-foundation-pytorch`.
+The full TF → PyTorch refactor is complete and tagged `v2.0.1-pytorch`. All architectural details, the refactor history (with tag pointers for archaeology), the central research result so far (the identity-disjoint generalization wall at ≤ ~12 train identities), and recommended next steps live in **`docs/PROJECT_SUMMARY.md`**. The Phase 0 commit is tagged `refactor-foundation-pytorch`; per-phase milestones are at `refactor-phase-{1,2,3}-complete`.
 
 ## License
 
