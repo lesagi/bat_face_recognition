@@ -8,6 +8,7 @@ from bat_cli.__main__ import main
 from bat_cli.runtime import (
     PermutationResult,
     _audit_params,
+    _build_train_generator,
     _maybe_promote,
     _sample_explanation_records,
     _sample_projection_records,
@@ -614,6 +615,48 @@ def test_audit_params_emits_keys_that_survive_hp_filter() -> None:
     assert adaface_kept["loss_params.margin"] == 0.4
     assert adaface_kept["loss_params.h"] == 0.333
     assert adaface_kept["loss_params.scale"] == 64.0
+
+
+def test_build_train_generator_returns_none_when_deterministic_off() -> None:
+    """No deterministic flag → no generator (preserves pre-fix DataLoader behavior)."""
+    assert _build_train_generator({"trainer": {"deterministic": False}}) is None
+    assert _build_train_generator({"trainer": {}}) is None
+    assert _build_train_generator({}) is None
+
+
+def test_build_train_generator_yields_deterministic_shuffle_order() -> None:
+    """The end-to-end contract: identical cfg → identical batch order.
+
+    Phase-4 follow-up #33 documented that two ArcFace runs with
+    `trainer.deterministic=true` diverged from the first batch because
+    `DataLoader(shuffle=True)` was constructed without an explicit
+    generator. This pins the fix: two `_build_train_generator` calls
+    with the same seed produce DataLoaders that iterate in lock-step.
+    """
+    pytest.importorskip("torch")
+    import torch
+    from torch.utils.data import DataLoader, TensorDataset
+
+    cfg = {"trainer": {"deterministic": True}, "seed": 42}
+
+    dataset = TensorDataset(torch.arange(20).unsqueeze(1))
+
+    def _first_two_batches(gen) -> list[list[int]]:  # noqa: ANN001 - mock
+        loader = DataLoader(dataset, batch_size=4, shuffle=True, generator=gen)
+        return [batch[0].squeeze(-1).tolist() for batch, in [next(iter(loader))]] + [
+            batch[0].squeeze(-1).tolist() for batch, in [list(loader)[1]]
+        ]
+
+    order_a = _first_two_batches(_build_train_generator(cfg))
+    order_b = _first_two_batches(_build_train_generator(cfg))
+
+    assert order_a == order_b, (
+        f"deterministic generator failed to produce stable batch order: " f"{order_a} vs {order_b}"
+    )
+
+    # And: omitting the deterministic flag must NOT return a generator
+    # (so the existing non-deterministic call path is untouched).
+    assert _build_train_generator({"trainer": {"deterministic": False}, "seed": 42}) is None
 
 
 def test_manifest_pair_dataset_is_reproducible_and_label_balanced(tmp_path: Path) -> None:

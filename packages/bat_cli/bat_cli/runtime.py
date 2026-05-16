@@ -164,12 +164,26 @@ def build_bundle(
         _trainer_value(cfg_dict, "num_workers", _data_value(cfg_dict, "num_workers", 0))
     )
 
+    # Reproducibility: with `trainer.deterministic=true`, seed the global
+    # RNG stack *before* building the model, and produce a fixed-seed
+    # generator for the train DataLoader's shuffler. Without both, two
+    # runs with identical Hydra cfg diverge from epoch 1 — the trainer's
+    # own `set_deterministic_mode` call fires after the model has
+    # already been initialized from the unseeded global generator, and
+    # the DataLoader's default shuffler reads from that same generator
+    # after it has been advanced.
+    train_generator = _build_train_generator(cfg_dict)
+
     if family == "pair":
         train_ds = ManifestPairDataset(manifest, "train", image_size=image_size)
         val_ds = _optional_pair_dataset(manifest, "val", image_size=image_size)
         test_ds = _optional_pair_dataset(manifest, "test", image_size=image_size)
         train_loader = _loader(
-            train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers
+            train_ds,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            generator=train_generator,
         )
         val_loader = (
             _loader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
@@ -195,6 +209,7 @@ def build_bundle(
             shuffle=True,
             num_workers=num_workers,
             collate_fn=_embedding_collate,
+            generator=train_generator,
         )
         val_loader = (
             _loader(
@@ -998,7 +1013,18 @@ def _loader(
     shuffle: bool,
     num_workers: int,
     collate_fn: Any | None = None,
+    generator: Any | None = None,
 ) -> Any:
+    """Wrap :class:`torch.utils.data.DataLoader`.
+
+    ``generator`` is forwarded to ``DataLoader(..., generator=...)`` when
+    ``shuffle=True``. Without an explicit generator the loader uses the
+    global torch RNG, which has already been advanced by model weight
+    init by the time iteration starts -- so identical Hydra configs can
+    still produce different batch orders. Pass a fixed-seed generator
+    here when ``cfg.trainer.deterministic=true`` to keep batch order
+    bit-exact across runs.
+    """
     from torch.utils.data import DataLoader
 
     return DataLoader(
@@ -1007,7 +1033,34 @@ def _loader(
         shuffle=shuffle,
         num_workers=num_workers,
         collate_fn=collate_fn,
+        generator=generator,
     )
+
+
+def _build_train_generator(cfg: Mapping[str, Any]) -> Any | None:
+    """Return a fixed-seed `torch.Generator` when deterministic mode is on.
+
+    Also primes the global RNG stack (`set_deterministic_mode`) so model
+    weight init -- which runs *before* the trainer's own deterministic
+    setup -- gets the same seed as the loader's shuffler.
+
+    Returns ``None`` when ``cfg.trainer.deterministic`` is unset or
+    false, leaving DataLoader behavior identical to the pre-fix default.
+    """
+
+    trainer_cfg = _mapping(cfg.get("trainer"))
+    if not bool(trainer_cfg.get("deterministic", False)):
+        return None
+
+    seed = int(cfg.get("seed", 0))
+
+    from bat_training.callbacks import set_deterministic_mode
+
+    set_deterministic_mode(seed)
+
+    import torch
+
+    return torch.Generator().manual_seed(seed)
 
 
 def _embedding_collate(batch: Sequence[Any]) -> tuple[Any, Any]:
