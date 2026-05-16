@@ -269,15 +269,9 @@ EOF
 git push origin v2.0.0-pytorch
 ```
 
-Optional, for archeology — backfill per-phase breadcrumb tags:
-
-```bash
-# Confirm SHAs with `git log --oneline` before tagging.
-git tag -a refactor-phase-1-complete dc84d78 -m "All Phase-1 packages merged + stabilize"
-git tag -a refactor-phase-2-complete e49f235 -m "All Phase-2 integration packages merged + stabilize"
-git tag -a refactor-phase-3-complete 40eeb75 -m "bat_cli + auto-pipeline + promotion gate complete"
-git push origin refactor-phase-1-complete refactor-phase-2-complete refactor-phase-3-complete
-```
+**Archeology tags backfilled (2026-05-16)**: `refactor-phase-1-complete`
+→ `dc84d78`, `refactor-phase-2-complete` → `e49f235`,
+`refactor-phase-3-complete` → `40eeb75`. Pushed to origin.
 
 ---
 
@@ -293,7 +287,63 @@ uv run bat-cli train --experiment arcface_rousettus_random_bg_video --run-name r
 uv run bat-cli compare <run-id-1> <run-id-2> --output outputs/compare/repro.html
 ```
 
-Document any drift in the v2.0.0-pytorch release notes.
+**Result (2026-05-16)**: ❌ **fails** with the current `deterministic=true`
+infrastructure. Two ArcFace runs with identical Hydra cfg
+(`trainer.optimizer=adam lr=1e-3 momentum=0 mixed_precision=no
+loss.margin=0.2 loss.scale=30 trainer.deterministic=true`) diverged
+already at epoch 1:
+
+| | repro-1 (`d5adc3e4…`) | repro-2 (`36cd1e6c…`) | Δ |
+|---|---|---|---|
+| epoch 1 train/loss | 3.2112 | 3.1031 | 0.108 |
+| test/roc_auc | 0.5284 | 0.5634 | 0.035 |
+| epochs run | 9 | 11 | — |
+
+Both runs called `set_deterministic_mode(seed)` (seeds Python /
+NumPy / Torch CPU+CUDA, enables `use_deterministic_algorithms`,
+disables cuDNN benchmark, sets `CUBLAS_WORKSPACE_CONFIG`). Divergence
+at the very first batch indicates the cause is *not* arithmetic
+non-determinism; it's that the `DataLoader(shuffle=True)` calls in
+`bat_cli.runtime._loader` don't pass an explicit
+`generator=torch.Generator().manual_seed(seed)`. Without it the
+shuffler consumes from the global torch generator state, which has
+already been advanced by model weight init / EMA construction by the
+time the loader iterates — so batch order drifts between runs.
+
+**Recommended follow-up fix** (out of scope for the v2.0.0-pytorch
+release): plumb a deterministic-mode-aware `torch.Generator` through
+`_loader(...)` and the dataset constructors when
+`cfg.trainer.deterministic=true`. Once landed, re-run this check.
+
+---
+
+## Mauritius cross-species data point (2026-05-16)
+
+Built a second manifest under the same identity-disjoint contract to
+test whether arc-margin generalization is a rousettus-only artifact or
+a fundamental small-identity-count issue:
+
+```bash
+uv run bat-cli build-manifest \
+  --input-dir data/processed/mauritius/video/not_augmented/random_bg \
+  --output data/manifests/mauritius_manifest.csv \
+  --species mauritius \
+  --val-fraction 0.25 --test-fraction 0.25 --seed 7
+```
+
+Output: `train=400, val=343, test=376, total=1119`. 11 unique
+identities total (file pattern `m--<timestamp>--<frame>.jpg`); the
+0.25/0.25 split lands ~5/3/3 ids in train/val/test. Manifest hash:
+`cb244075bb8a27cbae92580761441fe95ba1b6ebcc00e5eedf14d15cebbd1d80`.
+
+ArcFace run (`fc43cbaf80c04ce7b4d0897169c30f76`, same tuned HPs as
+rousettus ArcFace v2): 8 epochs, `val/roc_auc` peak `0.7074`,
+`test/roc_auc = 0.5263`, `test/top1 = 0.3619` (chance for 3 test ids
+= 0.33). **Same generalization wall as rousettus** — confirms the
+limitation is small-identity-count (≤ ~12 train identities), not
+species-specific. A meaningfully larger experiment needs a manifest
+with substantially more identities (cross-species combined, or new
+captures).
 
 ---
 
