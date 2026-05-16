@@ -538,6 +538,12 @@ def run_training(
                     root=repo,
                     output_dir=resolved_output / "permutation",
                     n_permutations=permutation_n,
+                    # Use the same Youden-J threshold the eval used. Without
+                    # this, embedding-model cosine scores (typically all
+                    # above 0.5 even for non-match pairs) collapse to
+                    # all-positive predictions and a constant null
+                    # distribution — masking real ROC-AUC signal.
+                    threshold=eval_report.verification.optimal_threshold,
                     seed=permutation_seed,
                     verbose=False,
                 ),

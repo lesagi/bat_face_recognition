@@ -80,10 +80,18 @@ def partial_permute_labels(
 def predictions_from_dataclass(
     preds: Predictions,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Convert a :class:`bat_core.Predictions` to numpy arrays."""
+    """Convert a :class:`bat_core.Predictions` to numpy arrays.
+
+    ``y_score`` is float64 because embedding-model cosine similarities
+    routinely live within a few ULPs of 1.0 — the discriminating bits
+    between match and non-match pairs are lost when cast to float32.
+    ``bat_evaluation.verification`` already uses float64 for the same
+    reason; aligning here keeps the permutation test consistent with
+    the reported ROC-AUC and optimal threshold.
+    """
 
     y_true = np.asarray(preds.y_true, dtype=np.float32)
-    y_score = np.asarray(preds.y_score, dtype=np.float32)
+    y_score = np.asarray(preds.y_score, dtype=np.float64)
     return y_score, y_true
 
 
@@ -134,7 +142,7 @@ def run_inference_permutation_test(
     if isinstance(predictions, Predictions):
         scores, ys = predictions_from_dataclass(predictions)
     else:
-        scores = np.asarray(predictions, dtype=np.float32)
+        scores = np.asarray(predictions, dtype=np.float64)
         if labels is None:
             raise ValueError("labels must be provided when predictions is an array")
         ys = np.asarray(labels, dtype=np.float32)
