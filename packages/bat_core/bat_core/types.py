@@ -125,6 +125,12 @@ class VerificationMetrics:
     optimal_threshold: float
     tar_at_far_1e3: float
     tar_at_far_1e4: float
+    # Operating point at FPR <= 1e-2. Picked for ~hundreds-of-pairs test
+    # splits where FAR=1e-3 budgets <1 negative mistake and the metric
+    # degenerates to noise. Use this as the headline recall when the
+    # biometric framing matters.
+    threshold_at_far_1e2: float = 1.0
+    recall_at_far_1e2: float = 0.0
 
 
 @dataclass(frozen=True)

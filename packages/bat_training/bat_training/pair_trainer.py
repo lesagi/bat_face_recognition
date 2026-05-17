@@ -136,6 +136,7 @@ class PairTrainer:
                 "recall": "max",
                 "precision": "max",
                 "loss": "min",
+                "recall_at_far_1e2": "max",
             }
         )
         self.checkpoints = CheckpointManager(
@@ -374,6 +375,10 @@ class PairTrainer:
             "roc_auc": float(verification.roc_auc),
             "youden_j": float(verification.youden_j),
             "optimal_threshold": float(verification.optimal_threshold),
+            "tar_at_far_1e3": float(verification.tar_at_far_1e3),
+            "tar_at_far_1e4": float(verification.tar_at_far_1e4),
+            "recall_at_far_1e2": float(verification.recall_at_far_1e2),
+            "threshold_at_far_1e2": float(verification.threshold_at_far_1e2),
         }
 
     def _collect_predictions(self, loader: Iterable[Any]) -> Predictions:
@@ -441,7 +446,7 @@ class PairTrainer:
     def _maybe_save_best(self, epoch: int, metrics: dict[str, float]) -> None:
         # ``loss`` is min-mode; the rest are max-mode (handled by the
         # tracker). The CheckpointManager owns the on-disk symlink dance.
-        for key in ("f1", "recall", "precision", "loss"):
+        for key in ("f1", "recall", "precision", "loss", "recall_at_far_1e2"):
             if key not in metrics:
                 continue
             improved = self.best.update(key, metrics[key], epoch=epoch)
@@ -466,6 +471,8 @@ class PairTrainer:
             "optimal_threshold": float(metrics.optimal_threshold),
             "tar_at_far_1e3": float(metrics.tar_at_far_1e3),
             "tar_at_far_1e4": float(metrics.tar_at_far_1e4),
+            "recall_at_far_1e2": float(metrics.recall_at_far_1e2),
+            "threshold_at_far_1e2": float(metrics.threshold_at_far_1e2),
         }
         if classification is not None:
             for key, value in classification.items():

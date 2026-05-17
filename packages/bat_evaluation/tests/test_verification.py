@@ -13,6 +13,7 @@ from bat_evaluation import (
     evaluate_predictions,
     optimize_youden_j,
     tar_at_far,
+    threshold_at_far,
 )
 from sklearn.metrics import roc_curve
 
@@ -62,6 +63,52 @@ def test_tar_at_far_matches_sklearn_directly():
     expected = float(tpr[fpr <= target_far].max())
     auc, our_fpr, our_tpr, _ = compute_roc(y_true, y_score)
     assert tar_at_far(our_fpr, our_tpr, target_far) == pytest.approx(expected)
+
+
+def test_threshold_at_far_matches_tar_at_far():
+    # threshold_at_far's recall return must equal tar_at_far for the same
+    # score distribution -- they describe the same operating point.
+    rng = np.random.default_rng(11)
+    pos = rng.normal(0.7, 0.15, size=400)
+    neg = rng.normal(0.3, 0.15, size=400)
+    y_true = np.concatenate([np.ones_like(pos), np.zeros_like(neg)])
+    y_score = np.concatenate([pos, neg])
+
+    _auc, fpr_arr, tpr_arr, _thr = compute_roc(y_true, y_score)
+    for target in (1e-2, 0.05, 0.1):
+        _thr, recall = threshold_at_far(y_true, y_score, target)
+        assert recall == pytest.approx(tar_at_far(fpr_arr, tpr_arr, target))
+
+
+def test_threshold_at_far_picks_best_tpr_within_budget():
+    # With overlapping pos/neg distributions and budget=0, the eligible
+    # set is the FPR=0 column of the ROC curve. The function should pick
+    # the highest TPR within that column, not the trivial (0,0) anchor.
+    # Here: at threshold >= 0.85 the FPR is 0 and the second-highest
+    # positive (0.8) is captured -> TPR = 0.5.
+    y_true = np.asarray([1.0, 1.0, 0.0])
+    y_score = np.asarray([0.9, 0.5, 0.7])
+    thr, recall = threshold_at_far(y_true, y_score, 0.0)
+    assert recall == pytest.approx(0.5)
+    # Threshold should be between 0.7 (negative) and 0.9 (highest positive).
+    assert 0.7 < thr <= 0.9
+
+
+def test_threshold_at_far_classifies_as_expected_at_returned_threshold():
+    # The contract: predicting `score >= threshold_at_far(...)` produces a
+    # confusion matrix whose FPR is <= target_far. Anchor against confusion_at_threshold.
+    rng = np.random.default_rng(42)
+    pos = rng.normal(0.7, 0.15, size=200)
+    neg = rng.normal(0.3, 0.15, size=200)
+    y_true = np.concatenate([np.ones_like(pos), np.zeros_like(neg)])
+    y_score = np.concatenate([pos, neg])
+    target = 1e-2
+
+    thr, recall_returned = threshold_at_far(y_true, y_score, target)
+    cm = confusion_at_threshold(y_true, y_score, thr)
+    realised_fpr = cm.fp / (cm.fp + cm.tn) if (cm.fp + cm.tn) > 0 else 0.0
+    assert realised_fpr <= target + 1e-9
+    assert cm.recall == pytest.approx(recall_returned)
 
 
 def test_tar_at_far_zero_floor_when_no_point_satisfies_budget():

@@ -1,0 +1,16 @@
+study_name: siamese_recall_search
+n_trials: 30
+direction: maximize
+# Optimize for recall at FAR<=1e-2: the biometric headline metric for
+# small test splits where TAR@FAR=1e-3 budgets <1 false-match (degenerate).
+target_metric: val/recall_at_far_1e2
+pruner: median
+storage: sqlite:///optuna_studies.db
+search_space:
+  # Focal positive-class weight: higher alpha penalises false negatives
+  # harder, biasing toward recall. Search around the default 0.75.
+  loss.alpha: { type: float, low: 0.5, high: 0.95 }
+  # Focal focusing parameter: higher gamma emphasises hard examples.
+  loss.gamma: { type: float, low: 1.0, high: 4.0 }
+  # Optimizer LR around the Siamese default 5e-5, narrow log range.
+  trainer.lr: { type: loguniform, low: 1.0e-5, high: 2.0e-4 }

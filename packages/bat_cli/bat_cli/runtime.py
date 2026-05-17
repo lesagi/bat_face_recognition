@@ -472,7 +472,11 @@ def run_training(
         )
         artifacts = trainer.fit(bundle.train_loader, bundle.val_loader)
 
-        eval_report = _safe("test evaluation", warnings, lambda: _run_test(trainer, bundle))
+        eval_report = _safe(
+            "test evaluation",
+            warnings,
+            lambda: _run_test(trainer, bundle, output_dir=resolved_output, warnings=warnings),
+        )
 
         explanations: ExplanationArtifacts | None = None
         explanations_dir: Path | None = None
@@ -529,6 +533,18 @@ def run_training(
 
         permutation_dir: Path | None = None
         if run_permutation and eval_report is not None and eval_report.predictions is not None:
+            # Pick the threshold the permutation test binarises at. Default
+            # Youden-J reproduces legacy behaviour; ``far_1e2`` uses the
+            # recall-at-FAR=1e-2 operating point. Without honouring this,
+            # embedding-model cosine scores (which cluster within ~1e-7 of
+            # 1.0) collapse to all-positive predictions at threshold=0.5 and
+            # the null distribution flatlines — masking real ROC-AUC signal.
+            eval_cfg = _mapping(bundle.cfg.get("evaluation"))
+            strategy = str(eval_cfg.get("permutation_threshold", "youden_j")).strip()
+            if strategy == "far_1e2":
+                perm_threshold = float(eval_report.verification.threshold_at_far_1e2)
+            else:
+                perm_threshold = float(eval_report.verification.optimal_threshold)
             permutation_result = _safe(
                 "permutation test",
                 warnings,
@@ -538,12 +554,7 @@ def run_training(
                     root=repo,
                     output_dir=resolved_output / "permutation",
                     n_permutations=permutation_n,
-                    # Use the same Youden-J threshold the eval used. Without
-                    # this, embedding-model cosine scores (typically all
-                    # above 0.5 even for non-match pairs) collapse to
-                    # all-positive predictions and a constant null
-                    # distribution — masking real ROC-AUC signal.
-                    threshold=eval_report.verification.optimal_threshold,
+                    threshold=perm_threshold,
                     seed=permutation_seed,
                     verbose=False,
                 ),
@@ -887,6 +898,8 @@ def eval_report_to_dict(report: EvalReport) -> dict[str, Any]:
             "optimal_threshold": verification.optimal_threshold,
             "tar_at_far_1e3": verification.tar_at_far_1e3,
             "tar_at_far_1e4": verification.tar_at_far_1e4,
+            "recall_at_far_1e2": verification.recall_at_far_1e2,
+            "threshold_at_far_1e2": verification.threshold_at_far_1e2,
         }
     }
     if report.identification is not None:
@@ -988,7 +1001,40 @@ class ManifestPairDataset:
         )
 
 
-def _run_test(trainer: Any, bundle: TrainingBundle) -> EvalReport:
+def _run_test(
+    trainer: Any,
+    bundle: TrainingBundle,
+    *,
+    output_dir: Path | None = None,
+    warnings: list[str] | None = None,
+) -> EvalReport:
+    """Run test eval, restoring a best-* checkpoint if ``evaluation.test_checkpoint`` requests it.
+
+    Default (``test_checkpoint: final``) keeps the legacy behaviour of evaluating
+    the in-memory model. Any other value resolves to
+    ``<output_dir>/best_model_<value>.pt`` and is loaded via ``trainer.load``
+    before the test pass. Missing files degrade to "final" with a warning so
+    that pipelines don't crash on a non-existent best checkpoint.
+    """
+    eval_cfg = _mapping(bundle.cfg.get("evaluation"))
+    requested = str(eval_cfg.get("test_checkpoint", "final")).strip()
+    if requested and requested != "final" and output_dir is not None:
+        ckpt = output_dir / f"best_model_{requested}.pt"
+        if ckpt.exists():
+            try:
+                trainer.load(ckpt)
+            except Exception as exc:  # pragma: no cover -- defensive
+                msg = f"failed to restore checkpoint {ckpt.name}: {exc}; using final model"
+                if warnings is not None:
+                    warnings.append(msg)
+        else:
+            msg = (
+                f"evaluation.test_checkpoint={requested!r} requested but "
+                f"{ckpt.name} not found; falling back to final model"
+            )
+            if warnings is not None:
+                warnings.append(msg)
+
     if _model_family(bundle.cfg) == "embedding":
         return trainer.test(manifest=bundle.manifest, split="test")
     if bundle.test_loader is None:

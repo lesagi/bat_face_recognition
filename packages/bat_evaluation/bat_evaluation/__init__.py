@@ -5,6 +5,7 @@ Public surface:
 - :func:`evaluate_predictions` -> :class:`bat_core.VerificationMetrics`
 - :func:`evaluate_identification` -> :class:`bat_core.IdentificationMetrics`
 - :func:`optimize_youden_j` -> ``(threshold, max_J)``
+- :func:`threshold_at_far` -> ``(threshold, recall)`` at a target FAR budget
 - :func:`run_eval_protocol` -> :class:`bat_core.EvalReport`
 - :func:`split_gallery_probe`, :func:`split_manifest_for_identification`
 - :func:`predictions_from_embedding`, :func:`cosine_similarity_matrix`,
@@ -29,7 +30,7 @@ from bat_evaluation.identification import (
     tar_at_far_from_gallery_probe,
 )
 from bat_evaluation.protocols import run_eval_protocol, run_identification, run_verification
-from bat_evaluation.threshold import optimize_youden_j
+from bat_evaluation.threshold import optimize_youden_j, threshold_at_far
 from bat_evaluation.verification import (
     ConfusionAtThreshold,
     compute_roc,
@@ -61,4 +62,5 @@ __all__ = [
     "split_manifest_for_identification",
     "tar_at_far",
     "tar_at_far_from_gallery_probe",
+    "threshold_at_far",
 ]

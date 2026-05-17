@@ -63,4 +63,55 @@ def optimize_youden_j(
     return best_threshold, best_j
 
 
-__all__ = ["optimize_youden_j"]
+def threshold_at_far(
+    y_true: Iterable[float] | NDArray[np.floating],
+    y_score: Iterable[float] | NDArray[np.floating],
+    target_far: float,
+) -> tuple[float, float]:
+    """Return ``(threshold, recall)`` at the most lenient FPR <= target_far.
+
+    Biometric verification convention: budget a maximum false-alarm rate
+    and report the best true-acceptance rate that respects it. Returns
+    ``(inf, 0.0)`` if no operating point satisfies the budget (and
+    ``(0.5, 0.0)`` when ``y_true`` contains a single class, mirroring
+    ``optimize_youden_j``).
+    """
+    if not 0.0 <= target_far <= 1.0:
+        raise ValueError(f"target_far must be in [0, 1], got {target_far}")
+
+    y_true_arr = np.asarray(list(y_true), dtype=np.float64).ravel()
+    y_score_arr = np.asarray(list(y_score), dtype=np.float64).ravel()
+    if y_true_arr.shape != y_score_arr.shape:
+        raise ValueError(
+            f"y_true and y_score have different shapes: "
+            f"{y_true_arr.shape} vs {y_score_arr.shape}"
+        )
+
+    n_pos = int((y_true_arr == 1.0).sum())
+    n_neg = int((y_true_arr == 0.0).sum())
+    if n_pos == 0 or n_neg == 0:
+        return 0.5, 0.0
+
+    fpr, tpr, thresholds = roc_curve(y_true_arr, y_score_arr)
+    mask = fpr <= target_far
+    if not mask.any():
+        return float("inf"), 0.0
+
+    # Among points respecting the budget, pick the highest TPR. Ties: pick
+    # the lowest threshold (most lenient — matches tar_at_far convention).
+    candidates = np.where(mask)[0]
+    best_idx = int(candidates[np.argmax(tpr[candidates])])
+    threshold = float(thresholds[best_idx])
+    recall = float(tpr[best_idx])
+
+    # sklearn synthesises a leading threshold = max(score) + 1 / np.inf to
+    # anchor the ROC curve at (0, 0). If we ended up there, fall back to the
+    # largest real threshold so the value is usable downstream.
+    if not np.isfinite(threshold):
+        finite = thresholds[np.isfinite(thresholds)]
+        threshold = float(finite.max()) if finite.size else 1.0
+
+    return threshold, recall
+
+
+__all__ = ["optimize_youden_j", "threshold_at_far"]
