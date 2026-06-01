@@ -14,15 +14,17 @@ early_stop:
   enabled: true
   patience: 5
   min_delta: 1.0e-3
-  # Recall at FAR<=1e-2 is the biometric headline metric on small test
-  # splits where TAR@FAR=1e-3 budgets <1 mistake. Override per-experiment
-  # to ``val/f1`` if you want legacy behaviour.
-  monitor: val/recall_at_far_1e2
+  # Precision at recall>=0.75 -- the "TPR-floor" biometric framing:
+  # require at least 75% recall, then push precision as high as possible.
+  # Override per-experiment to ``val/recall_at_far_1e2`` for the FPR-budget
+  # framing or ``val/f1`` for legacy.
+  monitor: val/precision_at_recall_0p75
 artifact_retention:
   save_best_f1: true
   save_best_recall: true
   save_best_precision: true
   save_best_loss: true
   save_best_recall_at_far_1e2: true
+  save_best_precision_at_recall_0p75: true
   save_final_model: false
 deterministic: false

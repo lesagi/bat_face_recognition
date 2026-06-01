@@ -5,10 +5,11 @@ far_targets: [1.0e-3, 1.0e-4]
 # eval. ``final`` keeps the in-memory model state from end-of-fit; any other
 # value resolves to ``<output_dir>/best_model_<value>.pt`` and is restored
 # via trainer.load(...) before .test() is called. If the file is missing
-# the pipeline falls back to ``final`` with a warning. Default is the
-# recall-at-FAR=1e-2 best, aligning with the biometric headline metric.
-test_checkpoint: recall_at_far_1e2
+# the pipeline falls back to ``final`` with a warning. Default tracks the
+# trainer.pair monitor: precision at recall>=0.75 (TPR-floor framing).
+test_checkpoint: precision_at_recall_0p75
 # Which threshold the post-train permutation test uses to binarize scores.
 # ``youden_j`` reproduces the legacy behaviour; ``far_1e2`` uses the
-# recall-at-FAR=1e-2 operating point now exposed on VerificationMetrics.
-permutation_threshold: far_1e2
+# recall-at-FAR=1e-2 operating point; ``recall_0p75`` uses the
+# precision-at-recall=0.75 operating point.
+permutation_threshold: recall_0p75

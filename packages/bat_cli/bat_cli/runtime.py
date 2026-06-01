@@ -559,6 +559,8 @@ def run_training(
             strategy = str(eval_cfg.get("permutation_threshold", "youden_j")).strip()
             if strategy == "far_1e2":
                 perm_threshold = float(eval_report.verification.threshold_at_far_1e2)
+            elif strategy == "recall_0p75":
+                perm_threshold = float(eval_report.verification.threshold_at_recall_0p75)
             else:
                 perm_threshold = float(eval_report.verification.optimal_threshold)
             permutation_result = _safe(
