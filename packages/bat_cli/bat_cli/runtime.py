@@ -478,6 +478,22 @@ def run_training(
             lambda: _run_test(trainer, bundle, output_dir=resolved_output, warnings=warnings),
         )
 
+        if eval_report is not None:
+            figures_dir = resolved_output / "figures"
+            from bat_stats import save_test_curves
+
+            written = _safe(
+                "test curves",
+                warnings,
+                lambda: save_test_curves(eval_report, bundle.cfg, figures_dir),
+            )
+            if tracker is not None and written:
+                _safe(
+                    "MLflow test curves upload",
+                    warnings,
+                    lambda: tracker.log_artifact(figures_dir, "figures"),
+                )
+
         explanations: ExplanationArtifacts | None = None
         explanations_dir: Path | None = None
         if run_explanations:
@@ -701,7 +717,12 @@ def run_evaluation(
     )
     if checkpoint is not None:
         trainer.load(checkpoint)
-    return _run_test(trainer, bundle)
+    report = _run_test(trainer, bundle)
+    if report is not None:
+        from bat_stats import save_test_curves
+
+        save_test_curves(report, bundle.cfg, resolved_output / "figures")
+    return report
 
 
 def _build_explanations(

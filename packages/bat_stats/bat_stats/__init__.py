@@ -20,6 +20,12 @@ from bat_stats.permutation_test import (
     PermutationTestResults,
 )
 from bat_stats.runner import run_inference_test, run_retrain_test
+from bat_stats.test_curves import (
+    cmc_curve_figure,
+    recall_vs_far_figure,
+    roc_curve_figure,
+    save_test_curves,
+)
 from bat_stats.trainer_hooks import TrainerProtocol, create_permutation_trainer
 from bat_stats.visualizer import PermutationVisualizer
 
@@ -42,6 +48,11 @@ __all__ = [
     "run_inference_permutation_test",
     # visualizer
     "PermutationVisualizer",
+    # test curves
+    "cmc_curve_figure",
+    "recall_vs_far_figure",
+    "roc_curve_figure",
+    "save_test_curves",
     # orchestration
     "run_inference_test",
     "run_retrain_test",

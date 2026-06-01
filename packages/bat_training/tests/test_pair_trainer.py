@@ -116,8 +116,13 @@ def test_pair_trainer_test_logs_classification_metrics(
     test_calls = [c for c in rec.calls if c[0] == "test"]
     assert len(test_calls) == 1
     payload = test_calls[0][1]
-    for key in ("f1", "precision", "recall", "roc_auc", "optimal_threshold"):
+    for key in ("f1", "precision", "recall", "roc_auc"):
         assert key in payload, f"missing test/{key} in {sorted(payload)}"
+    # Threshold-valued keys are grouped under a threshold/ sub-path so MLflow
+    # renders them separately from the [0, 1] performance metrics.
+    assert (
+        "threshold/optimal_threshold" in payload
+    ), f"missing threshold/optimal_threshold in {sorted(payload)}"
 
 
 def test_pair_trainer_rejects_wrong_family(tiny_pair_model_cls: Any) -> None:

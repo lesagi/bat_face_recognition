@@ -465,14 +465,17 @@ class PairTrainer:
         step: int,
         classification: dict[str, float] | None = None,
     ) -> None:
+        # Performance metrics (all on [0, 1] scale).
         payload: dict[str, float] = {
             "roc_auc": float(metrics.roc_auc),
             "youden_j": float(metrics.youden_j),
-            "optimal_threshold": float(metrics.optimal_threshold),
             "tar_at_far_1e3": float(metrics.tar_at_far_1e3),
             "tar_at_far_1e4": float(metrics.tar_at_far_1e4),
             "recall_at_far_1e2": float(metrics.recall_at_far_1e2),
-            "threshold_at_far_1e2": float(metrics.threshold_at_far_1e2),
+            # Decision thresholds (not on [0, 1] scale — grouped separately
+            # so MLflow keeps them out of the performance-metric charts).
+            "threshold/optimal_threshold": float(metrics.optimal_threshold),
+            "threshold/threshold_at_far_1e2": float(metrics.threshold_at_far_1e2),
         }
         if classification is not None:
             for key, value in classification.items():

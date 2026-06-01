@@ -327,16 +327,21 @@ class EmbeddingTrainer:
             self._log(
                 "test",
                 {
+                    # Performance metrics (all on [0, 1] scale).
                     "roc_auc": float(report.verification.roc_auc),
                     "youden_j": float(report.verification.youden_j),
-                    "optimal_threshold": float(report.verification.optimal_threshold),
                     "tar_at_far_1e3": float(report.verification.tar_at_far_1e3),
                     "tar_at_far_1e4": float(report.verification.tar_at_far_1e4),
                     "recall_at_far_1e2": float(report.verification.recall_at_far_1e2),
-                    "threshold_at_far_1e2": float(report.verification.threshold_at_far_1e2),
                     "top1": float(report.identification.top1) if report.identification else 0.0,
                     "top5": float(report.identification.top5) if report.identification else 0.0,
                     "map": float(report.identification.map) if report.identification else 0.0,
+                    # Decision thresholds (not on [0, 1] scale — grouped separately
+                    # so MLflow keeps them out of the performance-metric charts).
+                    "threshold/optimal_threshold": float(report.verification.optimal_threshold),
+                    "threshold/threshold_at_far_1e2": float(
+                        report.verification.threshold_at_far_1e2
+                    ),
                 },
                 step=0,
             )
