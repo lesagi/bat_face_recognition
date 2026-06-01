@@ -1,0 +1,21 @@
+study_name: siamese_precision_at_recall_search
+n_trials: 10
+direction: maximize
+# Optimise precision at recall>=0.75: the TPR-floor biometric framing.
+# Mirror of siamese_recall.yaml, which optimised the FPR-budget side.
+target_metric: val/precision_at_recall_0p75
+pruner: median
+storage: sqlite:///optuna_studies.db
+search_space:
+  # Focal positive-class weight. The FAR-budget sweep converged on alpha~0.59
+  # for the mirror objective (heavy recall bias). For the TPR-floor objective
+  # the recall floor is already enforced by the threshold helper, so we don't
+  # need to over-bias toward recall via alpha -- search a moderate range.
+  loss.alpha: { type: float, low: 0.3, high: 0.8 }
+  # Focal focusing parameter. The prior sweep landed near the default 2.0;
+  # keep the same range here for cross-comparability.
+  loss.gamma: { type: float, low: 1.0, high: 4.0 }
+  # Optimizer LR. The FAR-budget sweep showed default 5e-5 too low; both
+  # winners landed at lr ~= 1e-4. Re-search the same log range so the
+  # comparison between the two framings is apples-to-apples.
+  trainer.lr: { type: loguniform, low: 1.0e-5, high: 2.0e-4 }
