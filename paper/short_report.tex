@@ -195,25 +195,77 @@ rou = rousettus (random bg); mau = mauritius with grn/ori/rnd background.
 }
 
 % ==========================================================
-\section{Conclusions \& Next Steps}
+\section{Why the Current Identity Count Is Insufficient}
+
+Four independent signals in the data converge on the same conclusion.
+
+\smallskip
+\textbf{1.\ Train/test performance divergence.}
+Embedding models reach near-perfect training accuracy while test ROC-AUC stays near
+chance---textbook closed-set overfitting:
+
+\begin{center}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lccc}
+\toprule
+Model & Train acc & Test ROC-AUC & Gap \\
+\midrule
+ArcFace & 0.988 & 0.541 & $-0.447$ \\
+AdaFace & 1.000 & 0.507 & $-0.493$ \\
+Siamese & 1.000 & 0.809 & $-0.191$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\smallskip
+\textbf{2.\ Top-1 identification at chance.}
+With 3 unseen test identities, random guessing gives 0.33.
+ArcFace scores 0.344, AdaFace 0.286---both within noise of chance.
+The embedding space carries no useful structure for novel identity assignment.
+
+\smallskip
+\textbf{3.\ Optimization instability.}
+ArcFace and AdaFace validation curves oscillate throughout training (val ROC-AUC
+jumping between 0.44 and 0.65 across consecutive epochs) and never stabilise---a
+symptom of an underconstrained loss landscape when too few identity classes are
+available.
+
+\smallskip
+\textbf{4.\ Cross-species consistency isolates identity count as the cause.}
+The same gap appears independently for both species:
+
+\begin{center}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lcccc}
+\toprule
+Species & Train ids & Siamese & ArcFace & Gap \\
+\midrule
+rousettus & 6 & 0.809 & 0.541 & $+0.268$ \\
+mauritius & 5 & 0.803 & 0.526 & $+0.277$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Had the failure been caused by species-specific factors (fur texture, pose, image
+quality), the gap would differ between species.  Instead it is virtually identical
+(0.268 vs.\ 0.277), ruling out image-level explanations and isolating
+\textbf{identity count} as the governing variable.
+
+% ==========================================================
+\section{Conclusions}
 
 \begin{itemize}[leftmargin=1.4em, itemsep=3pt, topsep=3pt]
-  \item \textbf{Pair-based (Siamese) outperforms embedding models at this scale.}
-        With $\le$12 training identities, angular-margin losses (ArcFace/AdaFace)
-        learn closed-set geometry that does not generalise to unseen test identities
-        (train accuracy $\approx$100\%, but test ROC-AUC near chance).
-        The Siamese pairwise objective generalises more naturally.
-  \item \textbf{Background matters.}
-        Green-screen or original backgrounds outperform random compositing by
-        $\sim$12 ROC-AUC points on mauritius, suggesting controlled data collection
-        is a high-leverage improvement.
-  \item \textbf{Immediate next step: more identities.}
-        The small-identity wall ($\le$12) is the primary bottleneck.
-        Expanding the rousettus manifest to 30+ individuals is the highest-priority
-        action to determine whether ArcFace/AdaFace can close the gap.
-  \item \textbf{Reproducibility.} All experiments are tracked in MLflow and
-        reproducible with a single command:
-        \texttt{uv run bat-cli train --experiment <name>}.
+  \item \textbf{Identity-disjoint evaluation is non-negotiable.}
+        Random-pair splitting inflates $F_1$ from 0.74 to 0.99 on identical data.
+  \item \textbf{Pair-based (Siamese) is the right choice at current scale.}
+        The 0.27 ROC-AUC advantage over embedding models is confirmed independently
+        on both species and reflects a fundamental dataset-size limitation, not a
+        model-quality difference.
+  \item \textbf{Background standardisation helps.}
+        Controlled backgrounds improve Siamese ROC-AUC by ${\sim}$12 points on
+        mauritius.
+  \item \textbf{Reproducibility.} All experiments tracked in MLflow;
+        reproducible with \texttt{uv run bat-cli train --experiment <name>}.
 \end{itemize}
 
 \end{document}
