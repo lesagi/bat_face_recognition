@@ -138,6 +138,7 @@ class EmbeddingTrainer:
                 "roc_auc": "max",
                 "top1": "max",
                 "recall_at_far_1e2": "max",
+                "precision_at_recall_0p75": "max",
             }
         )
         self.checkpoints = CheckpointManager(
@@ -333,6 +334,9 @@ class EmbeddingTrainer:
                     "tar_at_far_1e3": float(report.verification.tar_at_far_1e3),
                     "tar_at_far_1e4": float(report.verification.tar_at_far_1e4),
                     "recall_at_far_1e2": float(report.verification.recall_at_far_1e2),
+                    "precision_at_recall_0p75": float(
+                        report.verification.precision_at_recall_0p75
+                    ),
                     "top1": float(report.identification.top1) if report.identification else 0.0,
                     "top5": float(report.identification.top5) if report.identification else 0.0,
                     "map": float(report.identification.map) if report.identification else 0.0,
@@ -341,6 +345,9 @@ class EmbeddingTrainer:
                     "threshold/optimal_threshold": float(report.verification.optimal_threshold),
                     "threshold/threshold_at_far_1e2": float(
                         report.verification.threshold_at_far_1e2
+                    ),
+                    "threshold/threshold_at_recall_0p75": float(
+                        report.verification.threshold_at_recall_0p75
                     ),
                 },
                 step=0,
@@ -474,6 +481,8 @@ class EmbeddingTrainer:
             "youden_j": float(v.youden_j),
             "recall_at_far_1e2": float(v.recall_at_far_1e2),
             "threshold_at_far_1e2": float(v.threshold_at_far_1e2),
+            "precision_at_recall_0p75": float(v.precision_at_recall_0p75),
+            "threshold_at_recall_0p75": float(v.threshold_at_recall_0p75),
         }
 
     def _build_embed_fn(self) -> Callable[[list[Path]], Any]:
@@ -510,7 +519,16 @@ class EmbeddingTrainer:
             return torch.device("cpu")
 
     def _maybe_save_best(self, epoch: int, metrics: dict[str, float]) -> None:
-        for key in ("f1", "recall", "precision", "loss", "roc_auc", "top1", "recall_at_far_1e2"):
+        for key in (
+            "f1",
+            "recall",
+            "precision",
+            "loss",
+            "roc_auc",
+            "top1",
+            "recall_at_far_1e2",
+            "precision_at_recall_0p75",
+        ):
             if key not in metrics:
                 continue
             improved = self.best.update(key, metrics[key], epoch=epoch)

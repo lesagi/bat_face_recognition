@@ -102,6 +102,8 @@ def _default_retention() -> dict[str, bool]:
         "save_best_recall": True,
         "save_best_precision": True,
         "save_best_loss": True,
+        "save_best_recall_at_far_1e2": True,
+        "save_best_precision_at_recall_0p75": True,
         "save_final_model": False,
     }
 
