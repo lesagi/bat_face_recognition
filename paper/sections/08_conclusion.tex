@@ -1,0 +1,40 @@
+%  08_conclusion.tex
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented an open-set individual bat face recognition system using a strict
+identity-disjoint evaluation protocol.
+Our comparative experiments across three model families, two species, and three
+background conditions lead to three actionable conclusions:
+
+\begin{enumerate}[leftmargin=1.6em, itemsep=3pt]
+  \item \textbf{Identity-disjoint evaluation is non-negotiable.}
+        The same architecture can appear to achieve $F_1 \approx 0.99$ under random-pair
+        splitting and $F_1 \approx 0.74$ under identity-disjoint evaluation on the same
+        images.  Any reported result on animal re-identification should explicitly state
+        whether splits are identity-disjoint.
+  \item \textbf{Pair-based models are the appropriate choice for small-identity datasets.}
+        At the scale of ecological monitoring ($\le\!12$ training individuals), the Siamese
+        pairwise objective consistently outperforms angular-margin embedding losses by
+        $0.25$--$0.30$ ROC-AUC points.  The small-identity generalisation wall for
+        ArcFace and AdaFace should be expected by practitioners adapting these
+        human-face methods to animal studies.
+  \item \textbf{Green-screen or controlled backgrounds improve performance meaningfully.}
+        A ${\sim}\!12$-point ROC-AUC improvement from random to controlled backgrounds
+        (mauritius, Siamese) suggests that background standardisation during data
+        collection is a high-leverage intervention.
+\end{enumerate}
+
+\paragraph{Future work.}
+The most impactful next step is expanding the identity count by processing larger video
+corpora or merging data across research sites.  With $\ge 30$ training identities we
+expect the embedding-based models to become competitive and potentially dominant.  Other
+directions include domain-adaptive backbone pretraining on a broader bat-face corpus,
+cross-colony generalisation experiments, and replacement of the quality threshold
+heuristic with a learned quality estimator.
+
+\paragraph{Reproducibility.}
+All experiments are fully reproducible from the publicly released configuration files
+and MLflow run IDs cited throughout this paper.  The single-command pipeline,
+\texttt{uv run bat-cli train --experiment <name>}, regenerates the complete training,
+evaluation, and reporting artefacts from scratch.

@@ -1,0 +1,63 @@
+%  01_introduction.tex
+\section{Introduction}
+\label{sec:intro}
+
+Fruit bats play pivotal roles in tropical and subtropical ecosystems as pollinators and
+seed dispersers, yet the individual-level behaviour of colony members remains poorly
+understood.  Long-term studies of social dynamics, foraging ranges, and roosting fidelity
+require reliable identification of individual animals across repeated observations---a
+task traditionally performed by physical tagging or manual expert annotation, both of
+which are costly, disruptive to the animals, and difficult to scale.
+
+Automated re-identification from facial imagery offers a non-invasive alternative.
+The bat face is sufficiently individuated through pelage patterns, vein geometry, and
+facial proportions to support individual recognition~\cite{ravela2004visual}.
+Advances in deep face recognition for humans~\cite{parkhi2015deep, schroff2015facenet,
+deng2019arcface, kim2022adaface} provide powerful transfer-learning priors, yet animal
+datasets pose three challenges absent in standard human benchmarks:
+(i)~\emph{small identity count}---studies typically monitor tens, not millions, of individuals;
+(ii)~\emph{open-set inference}---a deployed system must handle bats not seen during training;
+and (iii)~\emph{environmental variation}---imaging conditions change across sessions,
+with different backgrounds, lighting, and partial occlusions.
+
+\subsection*{The leakage problem}
+
+A critical but often underappreciated methodological issue in animal re-identification
+research is \emph{identity leakage}: when images are split randomly into train/val/test
+at the image level rather than the identity level, the same individual can appear in all
+three partitions.  The model therefore sees every identity during training and the test
+protocol measures closed-set retrieval rather than genuine open-set generalisation.
+We demonstrate that a Siamese network trained and evaluated under the random-pair protocol
+achieves $F_1 = 0.99$, whereas the same network evaluated under a strict identity-disjoint
+protocol on the same images yields $F_1 = 0.74$.  The lower number is the scientifically
+correct one.
+
+\subsection*{Contributions}
+
+This work makes the following contributions:
+\begin{enumerate}[leftmargin=1.6em, itemsep=2pt]
+  \item We introduce and validate an \textbf{identity-disjoint evaluation framework} for
+        bat face recognition, enforced at the manifest level with cryptographic integrity
+        checking, and demonstrate that it is the correct protocol for open-set individual
+        recognition.
+  \item We conduct a \textbf{systematic multi-factor comparison} of pair-based and
+        embedding-based deep recognition architectures across two bat species, three
+        background conditions, and controlled identity counts, using real video data from
+        tracking studies.
+  \item We characterise the \textbf{small-identity generalisation wall} for angular-margin
+        embedding losses and show that, contrary to standard face-recognition benchmarks,
+        the pair-based Siamese network is the stronger model at the scale of ecological
+        datasets ($\le$12 training identities).
+  \item We release a \textbf{reproducible 13-package pipeline} (\batcli) that automates
+        the full workflow from raw video to PDF experimental report, with Hydra
+        configuration, MLflow tracking, and Optuna hyperparameter search.
+\end{enumerate}
+
+The remainder of this paper is organised as follows.
+Section~\ref{sec:related} reviews related work.
+Section~\ref{sec:dataset} describes the datasets and the identity-disjoint splitter.
+Section~\ref{sec:methods} details the three model families.
+Section~\ref{sec:evaluation} formalises the evaluation protocol and metrics.
+Section~\ref{sec:experiments} presents experimental results.
+Section~\ref{sec:discussion} analyses the findings and limitations.
+Section~\ref{sec:conclusion} concludes.

@@ -1,0 +1,61 @@
+%  02_related_work.tex
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Animal re-identification}
+
+Automated individual identification from imagery has been explored for a range of
+species~\cite{schneider2022reidentification}.
+Early work on sea turtles, whale sharks, and manta rays~\cite{ravela2004visual,
+moskvyak2021robust} used hand-crafted texture descriptors.  More recently, deep
+convolutional networks have been adapted from human face recognition to animal identification,
+typically via fine-tuning on species-specific datasets.  A persistent gap in many published
+systems is the use of identity-leaky evaluation splits, which makes cross-paper comparisons
+unreliable and overstates deployment-ready performance.  Our work explicitly addresses
+this gap.
+
+\subsection{Metric learning and face verification}
+
+The Siamese network, originally proposed for signature verification~\cite{bromley1994signature}
+and popularised for one-shot classification~\cite{koch2015siamese}, learns an embedding
+space where pairs of the same identity are pulled together and different-identity pairs
+are pushed apart.  The similarity score is computed directly from the pair, which aligns
+the training objective with the verification task.
+FaceNet~\cite{schroff2015facenet} extended this idea with triplet mining on large-scale
+human face datasets, achieving strong open-set performance.
+
+\subsection{Angular margin softmax losses}
+
+A parallel line of work treats face recognition as a closed-set classification problem
+at training time and uses the resulting embedding space for open-set retrieval at test time.
+SphereFace~\cite{liu2017sphereface} introduced a multiplicative angular margin;
+CosFace~\cite{wang2018cosface} replaced it with an additive cosine margin;
+ArcFace~\cite{deng2019arcface} used an additive angular margin directly in the angle space,
+giving sharper decision boundaries and better calibration.
+These losses share a common structure: the logit for the ground-truth class is modified
+to require a larger cosine distance from the nearest other class, promoting compact,
+well-separated clusters in the hyperspherical embedding space.
+
+Sub-center ArcFace~\cite{sun2020subcenter} relaxes the assumption of a single clean
+prototype per class, allowing multiple sub-centres to handle noisy labels.
+AdaFace~\cite{kim2022adaface} further adapts the margin magnitude to the estimated quality
+of each image, using the \emph{feature norm} as a proxy: low-quality images (whose
+embeddings have smaller norms) receive a smaller margin, reducing their influence on
+the decision boundary.
+
+While these angular-margin methods dominate public human face benchmarks (where training
+sets contain millions of identities), their behaviour under very few training identities---as
+in ecological datasets---has not been systematically studied.  Our experiments fill this gap.
+
+\subsection{Biometric evaluation metrics}
+
+Standard face recognition benchmarks report rank-1 identification accuracy and
+verification equal-error rate (EER).  For security-critical biometric applications
+the operating metric is \emph{TAR at a fixed FAR} (true acceptance rate at false acceptance
+rate), reflecting real-world deployment constraints.
+In our setting, where test partitions contain at most a few hundred image pairs, FAR
+targets such as $10^{-3}$ are effectively degenerate (budgeting fewer than one false match),
+so we adopt $\mathrm{Recall@FAR{\le}10^{-2}}$ as the headline biometric metric alongside
+ROC-AUC, which provides a threshold-independent summary of discriminative power.
+The Youden index~\cite{youden1950}, $J = \mathrm{TPR} - \mathrm{FPR}$, is used for
+optimal threshold selection.

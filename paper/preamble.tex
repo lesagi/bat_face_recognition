@@ -1,0 +1,145 @@
+% =========================================================
+%  preamble.tex  —  shared setup for all sections
+% =========================================================
+
+% --- typography & page layout ---
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[a4paper, margin=2.5cm, top=2.8cm, bottom=2.8cm]{geometry}
+\usepackage{microtype}
+\usepackage{setspace}
+\onehalfspacing
+
+% --- maths ---
+\usepackage{amsmath, amssymb, bm}
+
+% --- tables ---
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{tabularx}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+
+% --- figures ---
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\captionsetup{font=small, labelfont=bf}
+
+% --- TikZ & pgfplots ---
+\usepackage{tikz}
+\usetikzlibrary{
+  shapes.geometric, shapes.misc,
+  arrows, arrows.meta,
+  positioning, calc,
+  fit, backgrounds,
+  decorations.pathreplacing,
+  matrix
+}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{groupplots, statistics}
+
+% define a consistent colour palette
+\definecolor{colSiamese}{HTML}{2166AC}
+\definecolor{colArcFace}{HTML}{D6604D}
+\definecolor{colAdaFace}{HTML}{4DAC26}
+\definecolor{colGreen}{HTML}{66C2A5}
+\definecolor{colRandom}{HTML}{FC8D62}
+\definecolor{colOriginal}{HTML}{8DA0CB}
+\definecolor{colTrain}{HTML}{F4A582}
+\definecolor{colVal}{HTML}{2166AC}
+\definecolor{boxbg}{HTML}{F5F5F5}
+\definecolor{arrowgray}{HTML}{555555}
+
+% TikZ styles
+\tikzset{
+  block/.style={
+    draw, rectangle, rounded corners=3pt,
+    minimum width=2.6cm, minimum height=0.7cm,
+    font=\small, align=center,
+    fill=boxbg, draw=gray!60
+  },
+  wideblock/.style={
+    block, minimum width=4.2cm
+  },
+  narrowblock/.style={
+    block, minimum width=1.8cm, minimum height=0.65cm
+  },
+  arrow/.style={-Latex, thick, color=arrowgray},
+  dashed arrow/.style={-Latex, dashed, thick, color=arrowgray!70},
+  headbox/.style={
+    draw, rectangle, rounded corners=3pt,
+    minimum width=2.6cm, minimum height=0.65cm,
+    font=\small\bfseries, align=center,
+    fill=colSiamese!20, draw=colSiamese!60
+  },
+  embbox/.style={
+    headbox, fill=colArcFace!15, draw=colArcFace!60
+  },
+  pipeblock/.style={
+    draw, rectangle, rounded corners=2pt,
+    minimum width=3.8cm, minimum height=0.65cm,
+    font=\footnotesize, align=center,
+    fill=white, draw=gray!60
+  }
+}
+
+% pgfplots common style
+\pgfplotsset{
+  batplot/.style={
+    width=\linewidth,
+    height=6cm,
+    grid=both,
+    grid style={line width=0.3pt, draw=gray!30},
+    tick label style={font=\small},
+    label style={font=\small},
+    legend style={font=\footnotesize, draw=none, fill=white, fill opacity=0.9},
+    every axis/.append style={line width=0.8pt}
+  }
+}
+
+% --- colours for text ---
+\usepackage{xcolor}
+
+% --- hyperlinks ---
+\usepackage[hidelinks, colorlinks=true,
+            linkcolor=black, citecolor=black!60,
+            urlcolor=black!50]{hyperref}
+
+% --- references ---
+\usepackage[numbers, sort&compress]{natbib}
+\bibliographystyle{abbrvnat}
+
+% --- misc utilities ---
+\usepackage{enumitem}
+\usepackage{xspace}
+\usepackage{siunitx}
+\sisetup{detect-all, group-separator={,}}
+
+% =========================================================
+%  Macros
+% =========================================================
+\newcommand{\rousettus}{rousettus\xspace}
+\newcommand{\mauritius}{mauritius\xspace}
+\newcommand{\batcli}{\texttt{bat-cli}\xspace}
+\newcommand{\recall}{\ensuremath{\mathrm{Recall@FAR{\le}10^{-2}}}\xspace}
+\newcommand{\rocauc}{\ensuremath{\mathrm{ROC\text{-}AUC}}\xspace}
+\newcommand{\mAP}{\ensuremath{\mathrm{mAP}}\xspace}
+\newcommand{\topone}{\ensuremath{\mathrm{Top\text{-}1}}\xspace}
+\newcommand{\bestval}[1]{\textbf{#1}}
+\newcommand{\etal}{\textit{et~al.}\xspace}
+
+% --- section headings style ---
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing{\section}{0pt}{1.4ex plus 0.4ex}{0.6ex plus 0.2ex}
+\titlespacing{\subsection}{0pt}{1.0ex plus 0.3ex}{0.4ex plus 0.2ex}
+
+% --- paragraph spacing ---
+\setlength{\parskip}{0.45ex}
+\setlength{\parindent}{1.2em}

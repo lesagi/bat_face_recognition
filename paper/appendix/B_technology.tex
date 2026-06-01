@@ -1,0 +1,148 @@
+%  B_technology.tex
+\section{Technology Stack}
+\label{app:technology}
+
+\subsection{Core framework}
+
+All experiments are implemented in \textbf{Python~3.11} using
+\textbf{PyTorch}~\cite{pytorch2019} as the deep learning backend.
+The workspace is managed by \texttt{uv}, a fast Python package installer and resolver that
+replaces \texttt{pip}/\texttt{conda} for dependency management.
+A single \texttt{uv sync --frozen} command restores the full pinned environment from
+\texttt{uv.lock}.
+
+\subsection{Model and training infrastructure}
+
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{PyTorch}~\cite{pytorch2019}: the primary deep learning framework.
+        All model code uses native \texttt{nn.Module} with standard training loops.
+  \item \textbf{Torchvision}: provides the ResNet-50 backbone with
+        ImageNet1K-V2 pretrained weights (\texttt{ResNet50\_\allowbreak Weights.DEFAULT}).
+  \item \textbf{HuggingFace Accelerate}~\cite{huang2022accelerate}: provides
+        device management, AMP (bfloat16) and gradient accumulation;
+        the trainer integrates an \texttt{Accelerator} instance for
+        device-agnostic mixed-precision training.
+  \item \textbf{EMA (Exponential Moving Average)}: the embedding trainers maintain an
+        EMA copy of model weights (decay~$= 0.999$) using a lightweight in-house
+        implementation; the EMA model is used for all validation and test inference.
+  \item \textbf{Early stopping}: implemented with configurable patience and minimum delta;
+        the monitored metric is \recall for pair-based models and val/ROC-AUC for
+        embedding models.
+\end{itemize}
+
+\subsection{Configuration management}
+
+Experiments are configured via \textbf{Hydra}~\cite{yadan2019hydra}, a framework for
+hierarchical configuration composition.  Each run composes one YAML file from each of
+seven configuration groups:
+
+\begin{center}
+\ttfamily\small
+\textup{data} / \textup{model} / \textup{loss} / \textup{trainer} /
+\textup{evaluation} / \textup{preprocessing} / \textup{sweep}
+\end{center}
+
+Pre-composed experiment stacks are stored in \texttt{configs/experiment/} (10 files
+covering all species$\times$background$\times$model combinations).  The global seed
+(default 42) is propagated to all random operations.
+
+\subsection{Experiment tracking}
+
+\textbf{MLflow}~\cite{mlflow2018} is used for experiment tracking.  The
+\texttt{bat\_tracking} façade logs:
+\begin{itemize}[itemsep=2pt]
+  \item All training hyperparameters (model, loss, trainer, data params from an
+        allow-list to avoid Hydra internals).
+  \item Per-epoch train/val metrics including loss, accuracy, F\textsubscript{1},
+        ROC-AUC, TAR@FAR values, and \recall.
+  \item Test-set metrics after training.
+  \item Artefacts: the unified PDF report, saliency images, and permutation test outputs.
+\end{itemize}
+The local MLflow tracking server stores data in \texttt{mlruns/} at the repository root.
+Run IDs (quoted throughout Section~\ref{sec:experiments}) uniquely identify each
+experimental result.
+
+\subsection{Hyperparameter optimisation}
+
+\textbf{Optuna}~\cite{akiba2019optuna} provides hyperparameter search over validation
+metrics only.  The search space for ArcFace covers:
+margin $m \in [0.3,\,0.6]$, scale $s \in [32,\,96]$, and
+$\mathrm{lr} \in \log\text{-unif}[10^{-3},\,3{\times}10^{-1}]$, over 20 trials.
+The Siamese recall sweep covers Focal $\alpha\in[0.5,0.95]$, $\gamma\in[1,4]$,
+and $\mathrm{lr}\in\log\text{-unif}[10^{-5},\,2{\times}10^{-4}]$, over 30 trials.
+Trial state is persisted to \texttt{optuna\_studies.db} (SQLite).
+The test split is never accessed during sweeps (enforced by a unit test mock).
+
+\subsection{Preprocessing}
+
+Face images are extracted from raw video by the \textbf{YOLO}-based
+pipeline~\cite{redmon2016yolo, jocher2022yolov8}:
+\begin{enumerate}[leftmargin=1.5em, itemsep=1pt]
+  \item \texttt{YOLOPoseEstimator} (\texttt{face\_pose.pt}) detects facial keypoints.
+  \item \texttt{FaceAligner} (NumPy/OpenCV) rotates the image so that the two primary
+        keypoints are horizontal, standardising pose.
+  \item \texttt{YOLOSegmenter} (\texttt{face\_seg.pt}) produces a binary face mask.
+  \item Square crop around the mask bounding box with outer margin ratio 0.1; canvas
+        padding ensures out-of-bounds crops remain valid.
+  \item Optional \texttt{BackgroundGenerator} replaces or composites the background.
+  \item Resize to target resolution and normalise to $[0, 1]$.
+\end{enumerate}
+Predictions are cached (512~MB in-memory LRU cache) to avoid redundant YOLO inference
+during repeated runs.  Frame quality is scored by Laplacian variance (OpenCV) and stored
+in the manifest.
+
+\subsection{Interpretability and reporting}
+
+Post-training interpretability is provided by three adapters in \texttt{bat\_interpretability}:
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{\texttt{SiameseSaliencyAdapter}}: gradient-based input saliency for the
+        pair network.
+  \item \textbf{\texttt{GradCAMAdapter}}: class activation maps~\cite{he2016resnet} for
+        embedding models, highlighting regions most discriminative for a given identity.
+  \item \textbf{\texttt{EmbeddingProjectionAdapter}}: t-SNE and UMAP projections of
+        test-set embeddings, coloured by identity, providing a 2-D snapshot of the
+        embedding space geometry.
+\end{itemize}
+The unified PDF report is assembled by \textbf{reportlab} (pure-Python PDF generation)
+and uploaded to MLflow as a run artefact.
+
+\subsection{CLI surface}
+
+Table~\ref{tab:cli} lists the complete \batcli command surface.
+
+\begin{table}[h]
+\centering
+\caption{\batcli command surface.}
+\label{tab:cli}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lp{8.5cm}}
+\toprule
+Command & Purpose \\
+\midrule
+\texttt{train}        & Compose config $\to$ train $\to$ test eval $\to$ interpretability $\to$ PDF $\to$ MLflow $\to$ permutation test $\to$ optional promote \\
+\texttt{sweep}        & Optuna search on validation split \\
+\texttt{evaluate}     & Re-run test evaluation against a saved checkpoint \\
+\texttt{permutation-test} & Inference-mode permutation test on a configured run \\
+\texttt{compare}      & Side-by-side MLflow run comparison HTML \\
+\texttt{compare-champion} & Same report, left column auto-resolved via \texttt{bat\_tracking.get\_champion} \\
+\texttt{promote}      & Promote a registered model if criterion beats incumbent \\
+\texttt{build-manifest} & Walk a directory tree $\to$ split + write manifest CSV \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Invoked without arguments, \batcli presents an interactive picker (powered by
+\texttt{InquirerPy}) from which any action can be selected.
+
+\subsection{Quality assurance}
+
+The sole quality gate is \texttt{pre-commit} (no CI), configured with:
+\begin{itemize}[itemsep=1pt]
+  \item \texttt{ruff} for linting and import sorting.
+  \item \texttt{mypy} for incremental static type checking.
+  \item Standard hooks (trailing whitespace, end-of-file, YAML/TOML syntax).
+\end{itemize}
+Unit tests are co-located with packages and run via \texttt{uv run pytest packages/}.
+The test suite covers the identity-disjoint splitter (including the mock that confirms
+the test split is never accessed by sweeps), manifest hash integrity, metric computations,
+and named edge cases in the verification/identification protocols.

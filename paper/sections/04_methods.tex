@@ -1,0 +1,244 @@
+%  04_methods.tex
+\section{Methods}
+\label{sec:methods}
+
+We compare two families of face recognition models distinguished by their training
+objective: \emph{pair-based} models that learn directly from same/different pairs, and
+\emph{embedding-based} models that learn a compact hyperspherical representation via
+closed-set classification with an angular margin.  Both families share a common inference
+interface: given two images, cosine similarity of L2-normalised embeddings is computed and
+compared to a learned threshold.
+
+\subsection{Pair-based: Siamese Convolutional Network}
+
+The Siamese network~\cite{bromley1994signature, koch2015siamese} consists of two weight-tied
+embedding towers and a pairwise decision head.
+
+\paragraph{Embedding tower.}
+The tower processes $105\!\times\!105$ RGB images through four convolutional stages with
+``valid'' (zero-padding-free) convolutions:
+\begin{enumerate}[leftmargin=1.5em, itemsep=1pt, parsep=0pt]
+  \item Conv $64 @ 10{\times}10$, ReLU $\rightarrow$ MaxPool $2{\times}2$ (stride 2):
+        $105\!\to\!96\!\to\!48$
+  \item Conv $128 @ 7{\times}7$, ReLU $\rightarrow$ MaxPool $2{\times}2$:
+        $48\!\to\!42\!\to\!21$
+  \item Conv $128 @ 4{\times}4$, ReLU $\rightarrow$ MaxPool $2{\times}2$:
+        $21\!\to\!18\!\to\!9$
+  \item Conv $256 @ 4{\times}4$, ReLU: $9\!\to\!6$
+  \item Flatten $(256 \cdot 6 \cdot 6 = 9\,216)$ $\rightarrow$ Linear$(9\,216, 4\,096)$ $\rightarrow$ Sigmoid
+\end{enumerate}
+Producing a 4\,096-dimensional embedding with values in $[0, 1]$.
+
+\paragraph{Pair head.}
+The absolute L1 distance between the two embeddings, $|\mathbf{e}_a - \mathbf{e}_b|$, is
+passed through a final linear layer (4\,096~$\to$~1) followed by a sigmoid, producing a
+similarity score $s \in [0, 1]$.  L2 regularisation with weight $10^{-4}$ is applied via
+the optimiser, replicating the Keras \texttt{l2(1e-4)} behaviour.
+
+\paragraph{Loss.}
+Siamese networks are trained with the Focal
+loss~\cite{lin2017focal}: $\mathrm{FL}(p_t) = -\alpha_t (1-p_t)^\gamma \log p_t$,
+with $\alpha = 0.75$, $\gamma = 2.0$.  Focal loss down-weights easy negatives that
+dominate pairwise training sets, improving calibration of the decision boundary.
+
+\paragraph{Inference.}
+At inference time only the embedding tower is used; the trained pair-head is discarded.
+Verification scores are computed as the cosine similarity of L2-normalised embeddings,
+providing a consistent metric space across all three model families.
+
+Figure~\ref{fig:architectures} (left) illustrates the Siamese architecture.
+
+\subsection{Embedding-based: ArcFace and AdaFace}
+
+Both embedding models share a common backbone and projection block, differing only in their
+classification head.  The architecture maps $112\!\times\!112$ RGB images to a
+512-dimensional hyperspherical embedding.
+
+\paragraph{Backbone.}
+A ResNet-50~\cite{he2016resnet} initialised with ImageNet1K-V2 weights serves as the
+feature extractor.  The original fully connected classification head is replaced by
+\texttt{nn.Identity()}, yielding a 2\,048-dimensional feature vector.
+
+\paragraph{Projection block.}
+Following standard practice~\cite{deng2019arcface}, the 2\,048-d backbone output is
+compressed by:
+$\mathrm{BN}(2048) \!\to\! \mathrm{Dropout}(0.0) \!\to\! \mathrm{Linear}(2048, 512,
+\text{bias=False}) \!\to\! \mathrm{BN}(512)$.
+This produces a 512-d embedding $\mathbf{z} \in \mathbb{R}^{512}$ (unnormalised).
+
+\paragraph{ArcFace head~\cite{deng2019arcface}.}
+Let $\hat{\mathbf{z}} = \mathbf{z}/\|\mathbf{z}\|$ be the L2-normalised embedding and
+$\hat{\mathbf{w}}_k$ the L2-normalised class weight for identity $k$.  Define the angle
+$\theta_{y}$ between the embedding and the ground-truth class weight.  The ArcFace logit is:
+\begin{equation}
+  \ell_y = s \cdot \cos(\theta_y + m), \qquad \ell_{k \ne y} = s \cdot \cos \theta_k
+  \label{eq:arcface}
+\end{equation}
+where $m = 0.2$ (margin, radians) and $s = 30$ (scale) in the tuned configuration used in
+our experiments; logits are passed through cross-entropy.
+
+\paragraph{AdaFace head~\cite{kim2022adaface}.}
+AdaFace augments the ArcFace formulation with an image-quality proxy derived from
+$\|\mathbf{z}\|$, the feature norm of the unnormalised embedding.
+A per-batch running mean $\mu_b$ and standard deviation $\sigma_b$ of feature norms are
+maintained via exponential moving average (EMA momentum $\alpha = 0.01$).
+The margin is then adapted per sample:
+\begin{align}
+  g_{\text{margin}} &= \operatorname{clip}\!\left(\frac{\|\mathbf{z}\| - \mu_b}
+                                                {\sigma_b + \varepsilon} \cdot h,\,
+                                                -1, 1\right), \\
+  \ell_y &= s \cdot \bigl[\cos(\theta_y - m \cdot g_{\text{margin}}) - m \cdot
+                          g_{\text{margin}}\bigr]
+  \label{eq:adaface}
+\end{align}
+with $h = 0.333$, $m = 0.2$, $s = 30$.  Images with below-average feature norms (low
+quality) receive a reduced margin, lessening their influence on the decision boundary.
+
+\paragraph{Inference.}
+At test time both ArcFace and AdaFace return the L2-normalised embedding
+$\hat{\mathbf{z}} = \mathbf{z}/\|\mathbf{z}\|$ without the classification head.
+Verification uses cosine similarity as in the Siamese case.
+
+Figure~\ref{fig:architectures} summarises both training topologies.
+
+\begin{figure}[t]
+\centering
+% Two sub-figures side by side, each with its own tikzpicture
+\begin{subfigure}[t]{0.46\linewidth}
+\centering
+\begin{tikzpicture}[node distance=0.42cm]
+  % --- Siamese pair topology ---
+  \node[block, fill=colSiamese!10, draw=colSiamese!50,
+        minimum width=1.45cm, font=\small] (imgA) {Image $A$};
+  \node[block, fill=colSiamese!10, draw=colSiamese!50,
+        minimum width=1.45cm, font=\small,
+        right=1.0cm of imgA] (imgB) {Image $B$};
+
+  \node[block, fill=colSiamese!20, draw=colSiamese!60,
+        minimum width=1.45cm, minimum height=1.1cm,
+        align=center, font=\scriptsize,
+        below=of imgA] (towerA) {Conv\\Tower};
+  \node[block, fill=colSiamese!20, draw=colSiamese!60,
+        minimum width=1.45cm, minimum height=1.1cm,
+        align=center, font=\scriptsize,
+        below=of imgB] (towerB) {Conv\\Tower};
+
+  % tie arrow between towers
+  \draw[<->, thick, dashed, colSiamese!60]
+    ([yshift=2pt]towerA.north east) -- ([yshift=2pt]towerB.north west)
+    node[midway, above, font=\tiny, colSiamese]{shared};
+
+  \node[block, fill=colSiamese!15, draw=colSiamese!50,
+        minimum width=1.45cm, font=\scriptsize,
+        below=of towerA] (embA) {$\mathbf{e}_A$};
+  \node[block, fill=colSiamese!15, draw=colSiamese!50,
+        minimum width=1.45cm, font=\scriptsize,
+        below=of towerB] (embB) {$\mathbf{e}_B$};
+
+  % L1 node: centred horizontally between the two embedding nodes
+  \coordinate (midEmb) at ($(embA.south)!0.5!(embB.south)$);
+  \node[block, draw=gray!50, font=\scriptsize,
+        minimum width=3.2cm, below=0.7cm of midEmb] (l1)
+    {$|\mathbf{e}_A - \mathbf{e}_B|$};
+  \node[block, draw=gray!50, font=\scriptsize,
+        minimum width=3.2cm, below=0.4cm of l1] (head)
+    {Linear$(4096,1)$ + $\sigma$};
+  \node[block, fill=colArcFace!10, draw=colArcFace!40, font=\scriptsize,
+        minimum width=3.2cm, below=0.4cm of head] (loss)
+    {Focal Loss};
+
+  \draw[arrow] (imgA) -- (towerA);
+  \draw[arrow] (imgB) -- (towerB);
+  \draw[arrow] (towerA) -- (embA);
+  \draw[arrow] (towerB) -- (embB);
+  \draw[arrow] (embA.south) -- ++(0,-0.35) -| (l1.north west);
+  \draw[arrow] (embB.south) -- ++(0,-0.35) -| (l1.north east);
+  \draw[arrow] (l1)   -- (head);
+  \draw[arrow] (head) -- (loss);
+\end{tikzpicture}
+\caption{Pair family (Siamese)}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.46\linewidth}
+\centering
+\begin{tikzpicture}[node distance=0.42cm]
+  % --- Embedding topology ---
+  \node[block, fill=colArcFace!10, draw=colArcFace!50,
+        minimum width=3.2cm, font=\small] (img)
+    {Image $\mathbf{x}$};
+  \node[block, fill=colArcFace!15, draw=colArcFace!50,
+        minimum width=3.2cm, minimum height=0.75cm,
+        font=\scriptsize, below=of img] (bb)
+    {ResNet-50 backbone};
+  \node[block, draw=gray!50, minimum width=3.2cm, font=\scriptsize,
+        below=of bb] (proj)
+    {BN $\!\to\!$ Drop $\!\to\!$ FC(512) $\!\to\!$ BN};
+  \node[block, fill=colArcFace!15, draw=colArcFace!50,
+        minimum width=3.2cm, font=\scriptsize,
+        below=of proj] (emb)
+    {$\mathbf{z}\in\mathbb{R}^{512}$};
+  \node[block, fill=colArcFace!20, draw=colArcFace!60,
+        minimum width=3.2cm, minimum height=0.9cm,
+        align=center, font=\scriptsize, below=of emb] (headE)
+    {Angular Margin Head\\(ArcFace or AdaFace)};
+  \node[block, fill=colArcFace!10, draw=colArcFace!40,
+        minimum width=3.2cm, font=\scriptsize,
+        below=of headE] (lossE)
+    {Cross-entropy Loss};
+
+  \draw[arrow] (img)   -- (bb);
+  \draw[arrow] (bb)    -- (proj);
+  \draw[arrow] (proj)  -- (emb);
+  \draw[arrow] (emb)   -- (headE);
+  \draw[arrow] (headE) -- (lossE);
+
+  % inference side note
+  \draw[dashed arrow] (emb.east) -- ++(0.9,0)
+    node[right, font=\tiny, align=left]{infer:\\$\hat{\mathbf{z}}$};
+  \node[font=\tiny, gray, below=0.1cm of lossE]
+    {(head removed at inference)};
+\end{tikzpicture}
+\caption{Embedding family (ArcFace / AdaFace)}
+\end{subfigure}
+\caption{Training topologies for the two model families.
+\emph{Left}: the Siamese pair-based network uses weight-tied towers and an L1+sigmoid
+decision head trained with Focal loss.
+\emph{Right}: the embedding-based network uses a ResNet-50 backbone with a projection
+block and an angular-margin head.  At inference the head is discarded and cosine
+similarity on L2-normalised embeddings drives verification.}
+\label{fig:architectures}
+\end{figure}
+
+\subsection{Hyperparameter tuning}
+
+Table~\ref{tab:hparams} summarises the final training configurations.
+The embedding-model default configuration (SGD, $\eta=0.1$, $m=0.5$, $s=64$) collapsed
+completely on our small datasets (ROC-AUC $= 0.50$, Section~\ref{sec:experiments}), as the
+paper-scale learning rate destroyed the ImageNet pretrained backbone before meaningful
+features were learned.  The tuned configuration (Adam, $\eta=10^{-3}$, $m=0.2$, $s=30$)
+was selected by Optuna~\cite{akiba2019optuna} hyperparameter search on the validation split.
+
+\begin{table}[h]
+\centering
+\caption{Training hyperparameters.}
+\label{tab:hparams}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lll}
+\toprule
+Hyperparameter & Siamese & ArcFace / AdaFace \\
+\midrule
+Optimiser        & Adam           & Adam \\
+Learning rate    & $5\times10^{-5}$ & $1\times10^{-3}$ \\
+Weight decay     & $0.0$          & $5\times10^{-4}$ \\
+LR schedule      & constant       & cosine + 1 warmup epoch \\
+Max epochs       & 80             & 40 \\
+Early-stop monitor & \recall      & val ROC-AUC \\
+Early-stop patience & 5           & 7 \\
+Mixed precision  & bf16           & bf16 \\
+EMA decay        & 0.0            & 0.999 \\
+Loss margin ($m$)& ---            & 0.2 \\
+Loss scale ($s$) & ---            & 30 \\
+Focal $\alpha / \gamma$ & 0.75 / 2.0 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}

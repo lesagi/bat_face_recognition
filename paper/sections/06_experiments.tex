@@ -1,0 +1,307 @@
+%  06_experiments.tex
+\section{Experiments and Results}
+\label{sec:experiments}
+
+\subsection{Leaky vs.\ honest evaluation}
+
+We first quantify the impact of the evaluation protocol.  A Siamese network was trained on
+the rousettus random-background dataset once under a \emph{random-pair} split (all
+identities available in all partitions) and once under the \emph{identity-disjoint}
+protocol.  Results are reported in Table~\ref{tab:leakage}.
+
+\begin{table}[h]
+\centering
+\caption{Impact of evaluation protocol.  Both rows use the same Siamese architecture on
+rousettus data; only the splitting strategy differs.}
+\label{tab:leakage}
+\begin{tabular}{lccc}
+\toprule
+Protocol   & ROC-AUC & F\textsubscript{1} & Recall \\
+\midrule
+Random-pair (leaky)        & 0.982 & 0.987 & 0.986 \\
+Identity-disjoint (correct) & \bestval{0.805} & \bestval{0.742} & \bestval{0.734} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The 18-point drop in ROC-AUC and 24-point drop in F\textsubscript{1} confirm that
+random-pair splitting substantially overstates real-world performance.  All results
+below use the identity-disjoint protocol exclusively.
+
+\subsection{Model family comparison on rousettus}
+
+Table~\ref{tab:rousettus} presents test-set results for the three model families on the
+rousettus dataset (random background, 230 test images, 3 unseen test identities).
+
+\begin{table}[h]
+\centering
+\caption{Test results on \rousettus (random background, identity-disjoint).
+ArcFace v1 = paper-scale hyperparameters; ArcFace v2 / AdaFace = tuned hyperparameters.
+``---'' indicates metric not applicable for that model family.
+Best value in each column in \textbf{bold}.}
+\label{tab:rousettus}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccccc}
+\toprule
+Model & Config & ROC-AUC & F\textsubscript{1} & \topone & \mAP & TAR@\(10^{-3}\) \\
+\midrule
+Siamese  & tuned & \bestval{0.809} & \bestval{0.747} & --- & --- & 0.017 \\
+ArcFace  & v2 (tuned) & 0.541 & --- & 0.344 & 0.634 & 0.000 \\
+AdaFace  & tuned & 0.507 & --- & 0.286 & 0.609 & 0.004 \\
+ArcFace  & v1 (default) & 0.500 & --- & 0.326 & 0.633 & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Siamese network achieves a test ROC-AUC of $0.809$, substantially outperforming both
+ArcFace ($0.541$) and AdaFace ($0.507$).  Notably, ArcFace v1 with paper-scale
+hyperparameters collapses to ROC-AUC $= 0.50$ (chance level), with training accuracy
+also at zero, indicating that the large learning rate ($\eta = 0.1$) destroyed the
+ImageNet features before any face-specific knowledge was acquired.
+
+\subsection{Model family comparison on mauritius}
+
+Table~\ref{tab:mauritius} extends the comparison to the mauritius species across three
+background conditions.
+
+\begin{table}[h]
+\centering
+\caption{Test results on \mauritius by background condition (identity-disjoint).
+``Siamese'' uses Focal loss; ``ArcFace'' and ``AdaFace'' use respective angular losses.}
+\label{tab:mauritius}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llccccc}
+\toprule
+Model & BG & ROC-AUC & F\textsubscript{1} & \topone & \mAP & TAR@\(10^{-3}\) \\
+\midrule
+Siamese  & green    & \bestval{0.925} & \bestval{0.864} & --- & --- & 0.083 \\
+Siamese  & original & 0.922 & 0.872 & --- & --- & 0.041 \\
+Siamese  & random   & 0.803 & 0.759 & --- & --- & 0.001 \\
+ArcFace  & green    & 0.761 & --- & \bestval{0.706} & \bestval{0.841} & 0.044 \\
+AdaFace  & green    & 0.704 & --- & 0.566 & 0.778 & 0.022 \\
+ArcFace  & random   & 0.526 & --- & 0.362 & 0.618 & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Several findings stand out.  First, the Siamese network remains dominant by ROC-AUC across
+all background conditions ($0.803$--$0.925$).  Second, the green-screen and original-background
+conditions consistently outperform random-background compositing, suggesting that coherent
+backgrounds aid the pair-based decision surface.  Third, the embedding-based models are
+more competitive on the identification metrics (\topone, \mAP) under the green-screen
+condition, where ArcFace reaches Top-1 of $0.706$ compared to the Siamese network's
+verification-oriented design (identification is computed post-hoc from embeddings).
+
+\subsection{ArcFace hyperparameter sensitivity}
+
+Figure~\ref{fig:arcface_collapse} illustrates the training dynamics under the two ArcFace
+configurations.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  name=collapseA,
+  batplot,
+  height=5cm, width=0.46\linewidth,
+  title={\small ArcFace v1 (collapsed, SGD $\eta{=}0.1$)},
+  xlabel={Epoch},
+  ylabel={Metric},
+  ymin=0, ymax=1,
+  xtick={1,5,10,15,17},
+  legend pos=south east
+]
+\addplot[thick, colArcFace, mark=*, mark size=1.5]
+  coordinates {(1,0.0)(2,0.0)(3,0.0)(4,0.0)(5,0.0)(6,0.0)(7,0.0)(8,0.0)(9,0.0)(10,0.0)
+               (11,0.0)(12,0.0)(13,0.0)(14,0.0)(15,0.0)(16,0.0)(17,0.0)};
+\addlegendentry{train acc}
+\addplot[thick, colSiamese, dashed, mark=square*, mark size=1.5]
+  coordinates {(1,0.50)(2,0.50)(3,0.50)(4,0.50)(5,0.50)(6,0.50)(7,0.50)(8,0.50)
+               (9,0.50)(10,0.50)(11,0.50)(12,0.50)(13,0.50)(14,0.50)(15,0.50)
+               (16,0.50)(17,0.50)};
+\addlegendentry{val ROC-AUC}
+\end{axis}
+
+\begin{axis}[
+  at={(collapseA.outer north east)}, anchor=outer north west,
+  xshift=1.0cm,
+  batplot,
+  height=5cm, width=0.46\linewidth,
+  title={\small ArcFace v2 (tuned, Adam $\eta{=}10^{-3}$)},
+  xlabel={Epoch},
+  ymin=0, ymax=1,
+  xtick={1,5,10,15,17},
+  legend pos=south east
+]
+\addplot[thick, colArcFace, mark=*, mark size=1.5]
+  coordinates {(1,0.407)(2,0.953)(3,0.988)(4,0.961)(5,0.955)(6,0.951)(7,0.975)
+               (8,0.963)(9,0.951)(10,0.969)(11,0.984)(12,0.973)(13,0.979)
+               (14,0.981)(15,0.996)(16,0.994)(17,0.988)};
+\addlegendentry{train acc}
+\addplot[thick, colSiamese, dashed, mark=square*, mark size=1.5]
+  coordinates {(1,0.423)(2,0.532)(3,0.588)(4,0.624)(5,0.442)(6,0.488)(7,0.507)
+               (8,0.476)(9,0.552)(10,0.629)(11,0.530)(12,0.574)(13,0.591)
+               (14,0.564)(15,0.600)(16,0.612)(17,0.588)};
+\addlegendentry{val ROC-AUC}
+\end{axis}
+\end{tikzpicture}
+\caption{Training dynamics of ArcFace on rousettus.
+\emph{Left}: the default (paper-scale) SGD configuration fails to train---both train
+accuracy and val ROC-AUC remain at chance level throughout.
+\emph{Right}: the tuned Adam configuration converges, but val ROC-AUC plateaus around
+$0.63$ despite train accuracy near $1.0$, revealing the generalisation gap to unseen
+test identities.}
+\label{fig:arcface_collapse}
+\end{figure}
+
+\subsection{Learning curves}
+
+Figure~\ref{fig:learning_curves} shows per-epoch validation curves for all three models on
+rousettus (random background).
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  batplot,
+  height=6cm,
+  width=0.92\linewidth,
+  xlabel={Epoch},
+  ylabel={Val ROC-AUC},
+  ymin=0.3, ymax=1.0,
+  legend pos=south east,
+  title={\small Validation ROC-AUC during training --- Rousettus (random background)}
+]
+
+% Siamese (13 epochs)
+\addplot[thick, colSiamese, mark=*, mark size=2]
+  coordinates {
+    (1,0.759)(2,0.857)(3,0.862)(4,0.868)(5,0.859)(6,0.858)
+    (7,0.813)(8,0.894)(9,0.878)(10,0.871)(11,0.867)(12,0.865)(13,0.875)
+  };
+\addlegendentry{Siamese (Focal)}
+
+% ArcFace v2 (17 epochs)
+\addplot[thick, colArcFace, dashed, mark=square*, mark size=2]
+  coordinates {
+    (1,0.423)(2,0.532)(3,0.588)(4,0.624)(5,0.442)(6,0.488)(7,0.507)
+    (8,0.476)(9,0.552)(10,0.629)(11,0.530)(12,0.574)(13,0.591)
+    (14,0.564)(15,0.600)(16,0.612)(17,0.588)
+  };
+\addlegendentry{ArcFace (tuned)}
+
+% AdaFace (23 epochs)
+\addplot[thick, colAdaFace, dotted, mark=triangle*, mark size=2]
+  coordinates {
+    (1,0.442)(2,0.540)(3,0.392)(4,0.457)(5,0.574)(6,0.622)(7,0.535)
+    (8,0.643)(9,0.604)(10,0.623)(11,0.615)(12,0.609)(13,0.539)(14,0.563)
+    (15,0.650)(16,0.654)(17,0.632)(18,0.637)(19,0.640)(20,0.644)
+    (21,0.646)(22,0.652)(23,0.650)
+  };
+\addlegendentry{AdaFace (tuned)}
+
+\end{axis}
+\end{tikzpicture}
+\caption{Validation ROC-AUC per training epoch on rousettus (random background).  The
+Siamese network converges quickly and stably to ${\sim}0.87$--$0.89$.  ArcFace and
+AdaFace show high epoch-to-epoch variance and plateau significantly lower, reflecting
+the difficulty of learning transferable angular geometry from $\le 6$ training identities.
+Early stopping (patience = 7) terminates ArcFace/AdaFace training after
+${\sim}17$--$23$ epochs.}
+\label{fig:learning_curves}
+\end{figure}
+
+\subsection{Family and background comparison (summary bar chart)}
+
+Figure~\ref{fig:bar_summary} provides a visual summary of ROC-AUC across all experimental
+conditions.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+% --- LEFT: Rousettus ---
+\begin{axis}[
+  name=ax1,
+  ybar, bar width=11pt,
+  height=5.5cm, width=0.44\linewidth,
+  title={\small Rousettus (random BG)},
+  ylabel={Test ROC-AUC},
+  symbolic x coords={Siamese,ArcFace,AdaFace},
+  xtick=data,
+  ymin=0.4, ymax=0.95,
+  ymajorgrids=true,
+  grid style={line width=0.3pt, draw=gray!30},
+  tick label style={font=\small},
+  label style={font=\small},
+  nodes near coords,
+  nodes near coords style={font=\tiny,
+    /pgf/number format/fixed,
+    /pgf/number format/precision=3}
+]
+\addplot[fill=colSiamese!70, draw=colSiamese]
+  coordinates {(Siamese,0.809) (ArcFace,0.541) (AdaFace,0.507)};
+\end{axis}
+
+% --- RIGHT: Mauritius ---
+\begin{axis}[
+  at={(ax1.outer north east)}, anchor=outer north west,
+  xshift=1.2cm,
+  ybar, bar width=8pt,
+  height=5.5cm, width=0.52\linewidth,
+  title={\small Mauritius (all conditions)},
+  xlabel={Model / Condition},
+  symbolic x coords={Siam-grn,Siam-ori,Siam-rnd,Arc-grn,Ada-grn,Arc-rnd},
+  xtick=data,
+  xticklabel style={font=\tiny, rotate=30, anchor=north east},
+  ymin=0.4, ymax=1.05,
+  ymajorgrids=true,
+  grid style={line width=0.3pt, draw=gray!30},
+  tick label style={font=\small},
+  label style={font=\small},
+  nodes near coords,
+  nodes near coords style={font=\tiny,
+    /pgf/number format/fixed,
+    /pgf/number format/precision=3}
+]
+\addplot[fill=colSiamese!70, draw=colSiamese]
+  coordinates {
+    (Siam-grn,0.925) (Siam-ori,0.922) (Siam-rnd,0.803)
+    (Arc-grn,0.761) (Ada-grn,0.704) (Arc-rnd,0.526)
+  };
+\end{axis}
+
+\end{tikzpicture}
+\caption{Test ROC-AUC for all major conditions.
+\emph{Left}: rousettus, random background.
+\emph{Right}: mauritius across background conditions and model families.
+``Siam'' = Siamese, ``Arc'' = ArcFace, ``Ada'' = AdaFace; suffixes grn/ori/rnd indicate
+green/original/random backgrounds.}
+\label{fig:bar_summary}
+\end{figure}
+
+\subsection{Reproducibility}
+
+Table~\ref{tab:repro} documents the effect of the DataLoader seeding fix on run-to-run
+reproducibility for ArcFace.  Without an explicit \texttt{torch.Generator} in the
+\texttt{DataLoader}, the global RNG state (already advanced by model initialisation and
+EMA setup) causes non-deterministic batch ordering even with \texttt{deterministic=True}.
+
+\begin{table}[h]
+\centering
+\caption{Run-to-run reproducibility for ArcFace (rousettus, random BG).
+Repro-1/2: before DataLoader seed fix; Repro-3/4: after fix.}
+\label{tab:repro}
+\begin{tabular}{lcc}
+\toprule
+Run & test ROC-AUC & test Top-1 \\
+\midrule
+repro-1 (pre-fix)   & 0.528 & 0.326 \\
+repro-2 (pre-fix)   & 0.563 & 0.405 \\
+repro-3 (post-fix)  & 0.552 & 0.361 \\
+repro-4 (post-fix)  & 0.552 & 0.361 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Post-fix, the two identical runs (repro-3 and repro-4) produce bit-exact identical metrics,
+confirming that the fix resolves non-determinism.

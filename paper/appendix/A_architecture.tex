@@ -1,0 +1,193 @@
+%  A_architecture.tex
+\section{Software Architecture}
+\label{app:architecture}
+
+\subsection{Workspace layout}
+
+The codebase is structured as a \textbf{monorepo of 13 single-purpose Python packages},
+all sharing a \texttt{uv} workspace~\cite{yadan2019hydra} under the root directory.
+Table~\ref{tab:packages} lists all packages and their roles.
+
+\begin{table}[h]
+\centering
+\caption{The 13 packages of the bat face recognition workspace.}
+\label{tab:packages}
+\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\linewidth}{lX}
+\toprule
+Package & Responsibility \\
+\midrule
+\texttt{bat\_core}           & Types, Protocols, dataclass definitions; no I/O, no torch at import time \\
+\texttt{bat\_data}           & Manifest management, identity-disjoint splitter, \texttt{BatDataset}, pair miners \\
+\texttt{bat\_preprocessing}  & YOLO segmentation/pose, frame extraction, background generation, quality scoring \\
+\texttt{bat\_models}         & Siamese, ArcFace, AdaFace \texttt{nn.Module}s and their backbone/head sub-modules \\
+\texttt{bat\_losses}         & BCE, Focal, Triplet (pair); ArcFace, AdaFace, CosFace, SubCenter (embedding) \\
+\texttt{bat\_training}       & \texttt{PairTrainer} and \texttt{EmbeddingTrainer} training loops (no eval, no MLflow) \\
+\texttt{bat\_evaluation}     & Verification and identification protocols; dataclass-only outputs \\
+\texttt{bat\_interpretability} & Saliency, GradCAM, embedding projection (t-SNE/UMAP) adapters \\
+\texttt{bat\_stats}          & Permutation tests, experiment-aware visualiser, naming helpers \\
+\texttt{bat\_tracking}       & MLflow façade with sectioned metrics and hyperparameter allow-list \\
+\texttt{bat\_reporting}      & Unified post-training PDF (reportlab) and run-comparison HTML \\
+\texttt{bat\_sweeps}         & Optuna val-only hyperparameter search (test split never touched) \\
+\texttt{bat\_cli}            & Single entry-point CLI (\batcli) with InquirerPy interactive picker \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Dependency graph and invariants}
+
+The workspace enforces a strict \textbf{no-upward-dependency} rule: a package may only
+import from \texttt{bat\_core} or from packages strictly lower in the dependency order.
+Figure~\ref{fig:dep_graph} shows the dependency graph.
+
+\begin{figure}[h]
+\centering
+% Layered dep graph using a simple grid — one row per layer, arrows only go down one level
+\begin{tikzpicture}[
+  pkg/.style={draw, rectangle, rounded corners=3pt,
+              font=\footnotesize\ttfamily, minimum width=2.7cm, minimum height=0.6cm,
+              align=center, fill=boxbg, draw=gray!55},
+  pkgcore/.style={pkg, fill=colSiamese!18, draw=colSiamese!60},
+  a/.style={-Latex, gray!55, thin},
+  layerlabel/.style={font=\tiny\itshape, gray, anchor=east}
+]
+
+% --- Layer 0: foundation ---
+\node[pkgcore] (core) at (0,0) {bat\_core};
+\node[layerlabel] at (-3.8,0) {L0};
+
+% --- Layer 1: data / preprocessing / models ---
+\node[pkg] (data) at (-2.8, 1.1) {bat\_data};
+\node[pkg] (prep) at (0,    1.1) {bat\_preprocessing};
+\node[pkg] (mod)  at (2.8,  1.1) {bat\_models};
+\node[layerlabel] at (-3.8, 1.1) {L1};
+
+% --- Layer 2: losses / evaluation ---
+\node[pkg] (loss) at (-2.0, 2.2) {bat\_losses};
+\node[pkg] (eval) at (2.0,  2.2) {bat\_evaluation};
+\node[layerlabel] at (-3.8, 2.2) {L2};
+
+% --- Layer 3: training / interpretability / stats ---
+\node[pkg] (train)  at (-2.8, 3.3) {bat\_training};
+\node[pkg] (interp) at (0,    3.3) {bat\_interpretability};
+\node[pkg] (stats)  at (2.8,  3.3) {bat\_stats};
+\node[layerlabel] at (-3.8, 3.3) {L3};
+
+% --- Layer 4: tracking / reporting ---
+\node[pkg] (track) at (-1.4, 4.4) {bat\_tracking};
+\node[pkg] (rep)   at (1.4,  4.4) {bat\_reporting};
+\node[layerlabel] at (-3.8, 4.4) {L4};
+
+% --- Layer 5: sweeps / CLI ---
+\node[pkg] (sweep) at (-1.4, 5.5) {bat\_sweeps};
+\node[pkg] (cli)   at (1.4,  5.5) {bat\_cli};
+\node[layerlabel] at (-3.8, 5.5) {L5};
+
+% --- Edges (all downward, no crossing) ---
+% L1 → L0
+\draw[a] (data) -- (core);
+\draw[a] (prep) -- (core);
+\draw[a] (mod)  -- (core);
+% L2 → L1
+\draw[a] (loss) -- (mod);
+\draw[a] (loss) -- (data);
+\draw[a] (eval) -- (data);
+% L3 → L2
+\draw[a] (train)  -- (loss);
+\draw[a] (interp) -- (mod);
+\draw[a] (stats)  -- (eval);
+% L4 → L3
+\draw[a] (track) -- (train);
+\draw[a] (rep)   -- (eval);
+% L5 → L4
+\draw[a] (sweep) -- (track);
+\draw[a] (cli)   -- (track);
+\draw[a] (cli)   -- (rep);
+% all → core (dashed, light)
+\foreach \n in {loss,eval,train,interp,stats,track,rep,sweep,cli} {
+  \draw[-Latex, gray!30, very thin, dashed] (\n.south) to[out=270,in=90] (core.north);
+}
+
+\end{tikzpicture}
+\caption{Package dependency graph (layers L0--L5).  Solid arrows show the primary
+inter-layer dependencies.  Dashed lines indicate that every package ultimately
+imports \texttt{bat\_core} (L0, blue).  \texttt{bat\_core} itself imports nothing
+from the workspace.  The CLI at L5 orchestrates the full stack.}
+\label{fig:dep_graph}
+\end{figure}
+
+Key invariants maintained by the architecture:
+
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{\texttt{bat\_core} stays import-light.}  It type-annotates
+        \texttt{torch.Tensor} only under \texttt{TYPE\_CHECKING}; runtime import never
+        triggers PyTorch loading.
+  \item \textbf{Trainers are loops, not god-classes.}  Data wiring belongs to
+        \texttt{bat\_data}; MLflow logging to \texttt{bat\_tracking}; eval to
+        \texttt{bat\_evaluation}.  The trainers only own the optimiser, scheduler,
+        AMP, EMA, checkpointing, and callbacks.
+  \item \textbf{Test split is sacred.}  The Optuna sweep (\texttt{bat\_sweeps})
+        accesses only validation metrics; the objective function never calls
+        \texttt{trainer.test}.  This is enforced by a unit-test mock.
+  \item \textbf{No CSV output.}  All evaluation results are returned as typed
+        dataclasses and rendered directly to the unified PDF.
+  \item \textbf{Consistent naming.}  All plot titles, filenames, and axis labels
+        route through \texttt{bat\_stats\allowbreak.naming\allowbreak.experiment\_name},
+        which encodes the species/background/model/loss into every output for
+        unambiguous traceability.
+\end{itemize}
+
+\subsection{Automated post-training pipeline}
+
+A single \texttt{bat-cli train --experiment \textit{name}} command executes the full
+post-training workflow depicted in Figure~\ref{fig:pipeline}.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=0.35cm and 0.2cm]
+
+\node[pipeblock, fill=colSiamese!10, draw=colSiamese!50]
+  (cfg) {Hydra cfg composition};
+\node[pipeblock, below=of cfg]
+  (train) {Trainer.fit(train, val)};
+\node[pipeblock, below=of train]
+  (eval) {run\_eval\_protocol(test)};
+\node[pipeblock, below=of eval]
+  (interp) {Interpretability\\(Saliency / GradCAM / UMAP)};
+\node[pipeblock, below=of interp]
+  (pdf) {build\_unified\_pdf $\to$ report.pdf};
+\node[pipeblock, below=of pdf]
+  (mlflow) {MLflow upload (metrics + artefacts)};
+\node[pipeblock, below=of mlflow]
+  (perm) {Permutation test (inference-mode, $n=100$)};
+\node[pipeblock, fill=colAdaFace!10, draw=colAdaFace!50, below=of perm]
+  (promo) {Optional champion promotion};
+
+\foreach \a/\b in {cfg/train, train/eval, eval/interp, interp/pdf,
+                   pdf/mlflow, mlflow/perm, perm/promo} {
+  \draw[arrow] (\a) -- (\b);
+}
+
+% skip flags on the right
+\node[font=\tiny, gray, right=0.3cm of interp] {--no-explanations};
+\node[font=\tiny, gray, right=0.3cm of mlflow] {--no-mlflow};
+\node[font=\tiny, gray, right=0.3cm of perm]   {--no-permutation};
+
+% step failure note
+\node[font=\tiny, gray, align=center, left=0.3cm of eval]
+  {each step\\failure-safe};
+
+\end{tikzpicture}
+\caption{The automated post-training pipeline executed by \texttt{bat-cli train}.
+Each step is wrapped in a safety handler; a failure logs a warning but downstream
+steps still run.  Skip flags (shown in grey) allow selective execution.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{PDF report structure}
+
+The unified post-training PDF generated by \texttt{bat\_reporting} contains eight sections:
+title page, training curves, confusion matrix, ROC curve, identification metrics table,
+saliency composite, t-SNE/UMAP projection, and permutation test summary.  It provides a
+single self-contained artefact for each experimental run, uploaded to MLflow alongside
+the model checkpoint.

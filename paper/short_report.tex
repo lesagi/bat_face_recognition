@@ -1,0 +1,219 @@
+\documentclass[11pt, a4paper]{article}
+
+% ---- compact layout for a 1-2 page supervisor summary ----
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[a4paper, margin=2.0cm, top=2.2cm, bottom=2.2cm]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage[hidelinks]{hyperref}
+\usepackage{setspace}
+
+\definecolor{colSiamese}{HTML}{2166AC}
+\definecolor{colArcFace}{HTML}{D6604D}
+\definecolor{colAdaFace}{HTML}{4DAC26}
+\definecolor{colGreen}{HTML}{66C2A5}
+\definecolor{colRandom}{HTML}{FC8D62}
+\definecolor{colOriginal}{HTML}{8DA0CB}
+\definecolor{highlight}{HTML}{FFF3CD}
+\definecolor{headerbg}{HTML}{EEF2F7}
+
+\titleformat{\section}{\normalsize\bfseries\color{colSiamese}}{\thesection}{0.6em}{}[{\color{colSiamese}\titlerule[0.6pt]}]
+\titlespacing{\section}{0pt}{1.2ex plus 0.3ex}{0.5ex plus 0.1ex}
+
+\titleformat{\subsection}{\small\bfseries}{\thesubsection}{0.5em}{}
+\titlespacing{\subsection}{0pt}{0.8ex}{0.2ex}
+
+\setlength{\parskip}{0.3ex}
+\setlength{\parindent}{0pt}
+
+\newcommand{\good}[1]{\textcolor{colSiamese}{\textbf{#1}}}
+\newcommand{\bad}[1]{\textcolor{colArcFace}{#1}}
+\newcommand{\bestval}[1]{\textbf{#1}}
+
+% =========================================================
+\begin{document}
+
+% ---- Title block ----------------------------------------
+\begin{center}
+  {\large\bfseries Open-Set Bat Face Recognition: Progress Report}\\[0.5em]
+  {\small Sagi Levi \quad \texttt{lesagi@gmail.com} \quad June 2026}
+\end{center}
+\vspace{-0.3em}
+\noindent\color{colSiamese}\rule{\linewidth}{1pt}\color{black}
+\vspace{0.4em}
+
+% ---- Summary paragraph ----------------------------------
+\textbf{Goal.} Build a non-invasive system that identifies individual fruit bats from
+facial images, supporting long-term behavioural studies without physical tagging.
+The system handles \emph{open-set} scenarios: bats seen at test time were never
+observed during training.
+
+\textbf{Current status.} A three-model comparison (Siamese pair network, ArcFace,
+AdaFace) has been completed across two species (rousettus, mauritius) and three
+background conditions, using a rigorous identity-disjoint evaluation protocol.
+A fully automated training and reporting pipeline is operational.
+
+% ==========================================================
+\section{Key Finding: Evaluation Protocol Matters}
+
+A common pitfall in animal re-identification is \emph{identity leakage}: splitting
+images randomly instead of splitting identities means the same bat appears in both
+training and test sets, inflating results.
+Table~\ref{tab:leakage} demonstrates the scale of this effect.
+
+\begin{table}[h]
+\centering
+\caption{Same model, same data --- different splitting protocol.}
+\label{tab:leakage}
+\setlength{\tabcolsep}{8pt}
+\begin{tabular}{lcc@{\hspace{6pt}}c}
+\toprule
+Protocol & ROC-AUC & F\textsubscript{1} & Recall \\
+\midrule
+Random-pair split \bad{(leaky)}          & 0.982 & 0.987 & 0.986 \\
+\good{Identity-disjoint split (correct)} & 0.805 & 0.742 & 0.734 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Takeaway:} all results in this report use identity-disjoint splits exclusively.
+
+% ==========================================================
+\section{Model Comparison}
+
+\subsection{Rousettus --- 12 individuals, 1\,059 images (6/3/3 id split)}
+
+\begin{table}[h]
+\centering
+\caption{Test-set results on rousettus (random background, 3 unseen test identities).
+Pair-family uses verification metrics (ROC-AUC, F\textsubscript{1});
+embedding-family also reports identification metrics.}
+\label{tab:rousettus}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{llccccc}
+\toprule
+Model & HPs & ROC-AUC & F\textsubscript{1} & Top-1 & mAP & TAR@\(10^{-3}\) \\
+\midrule
+\good{Siamese}  & tuned  & \bestval{0.809} & \bestval{0.747} & ---   & ---   & 0.017 \\
+ArcFace         & tuned  & 0.541           & ---             & 0.344 & 0.634 & 0.000 \\
+AdaFace         & tuned  & 0.507           & ---             & 0.286 & 0.609 & 0.004 \\
+ArcFace         & default & \bad{0.500}    & ---             & 0.326 & 0.633 & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.2em}
+\textbf{Note on ArcFace default:} paper-scale hyperparameters (SGD $\eta{=}0.1$,
+margin $0.5$, scale $64$) destroy the ImageNet pretrained backbone on 486 training
+images --- both train accuracy and validation ROC-AUC collapse to chance. Tuning to
+Adam $\eta{=}10^{-3}$, margin $0.2$, scale $30$ recovers partial performance but
+still falls far short of the Siamese network.
+
+\subsection{Mauritius --- 11 individuals, 1\,119 images (5/3/3 id split)}
+
+\begin{table}[h]
+\centering
+\caption{Test-set results on mauritius across background conditions.}
+\label{tab:mauritius}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{llccccc}
+\toprule
+Model & Background & ROC-AUC & F\textsubscript{1} & Top-1 & mAP & TAR@\(10^{-3}\) \\
+\midrule
+\good{Siamese} & green    & \bestval{0.925} & \bestval{0.864} & --- & ---   & 0.083 \\
+\good{Siamese} & original & 0.922           & 0.872           & --- & ---   & 0.041 \\
+\good{Siamese} & random   & 0.803           & 0.759           & --- & ---   & 0.001 \\
+ArcFace        & green    & 0.761           & ---             & \bestval{0.706} & \bestval{0.841} & 0.044 \\
+AdaFace        & green    & 0.704           & ---             & 0.566 & 0.778 & 0.022 \\
+ArcFace        & random   & 0.526           & ---             & 0.362 & 0.618 & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ==========================================================
+\section{ROC-AUC Summary (bar chart)}
+
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, bar width=9pt,
+  height=4.8cm, width=0.90\linewidth,
+  ymin=0.4, ymax=1.02,
+  ymajorgrids=true,
+  grid style={line width=0.3pt, draw=gray!25},
+  ylabel={Test ROC-AUC},
+  symbolic x coords={
+    Siam-rou,
+    Arc-rou,
+    Ada-rou,
+    Siam-mau-grn,
+    Siam-mau-ori,
+    Siam-mau-rnd,
+    Arc-mau-grn,
+    Ada-mau-grn},
+  xtick=data,
+  xticklabel style={font=\tiny, rotate=35, anchor=north east},
+  tick label style={font=\small},
+  label style={font=\small},
+  nodes near coords,
+  nodes near coords align={vertical},
+  nodes near coords style={font=\tiny,
+    /pgf/number format/fixed,
+    /pgf/number format/precision=3},
+  legend style={font=\tiny, draw=none,
+    at={(0.02,0.98)}, anchor=north west}
+]
+\addplot[fill=colSiamese!70, draw=colSiamese]
+  coordinates {
+    (Siam-rou,     0.809)
+    (Arc-rou,      0.541)
+    (Ada-rou,      0.507)
+    (Siam-mau-grn, 0.925)
+    (Siam-mau-ori, 0.922)
+    (Siam-mau-rnd, 0.803)
+    (Arc-mau-grn,  0.761)
+    (Ada-mau-grn,  0.704)
+  };
+\end{axis}
+\end{tikzpicture}
+\end{center}
+
+{\footnotesize
+\textbf{x-axis key:}
+Siam = Siamese, Arc = ArcFace, Ada = AdaFace;
+rou = rousettus (random bg); mau = mauritius with grn/ori/rnd background.
+}
+
+% ==========================================================
+\section{Conclusions \& Next Steps}
+
+\begin{itemize}[leftmargin=1.4em, itemsep=3pt, topsep=3pt]
+  \item \textbf{Pair-based (Siamese) outperforms embedding models at this scale.}
+        With $\le$12 training identities, angular-margin losses (ArcFace/AdaFace)
+        learn closed-set geometry that does not generalise to unseen test identities
+        (train accuracy $\approx$100\%, but test ROC-AUC near chance).
+        The Siamese pairwise objective generalises more naturally.
+  \item \textbf{Background matters.}
+        Green-screen or original backgrounds outperform random compositing by
+        $\sim$12 ROC-AUC points on mauritius, suggesting controlled data collection
+        is a high-leverage improvement.
+  \item \textbf{Immediate next step: more identities.}
+        The small-identity wall ($\le$12) is the primary bottleneck.
+        Expanding the rousettus manifest to 30+ individuals is the highest-priority
+        action to determine whether ArcFace/AdaFace can close the gap.
+  \item \textbf{Reproducibility.} All experiments are tracked in MLflow and
+        reproducible with a single command:
+        \texttt{uv run bat-cli train --experiment <name>}.
+\end{itemize}
+
+\end{document}

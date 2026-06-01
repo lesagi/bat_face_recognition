@@ -1,0 +1,76 @@
+%  05_evaluation.tex
+\section{Evaluation Protocol}
+\label{sec:evaluation}
+
+\subsection{Gallery and probe construction}
+
+For each test split we designate one image per identity as the \emph{gallery} (the
+enrolment reference) and treat the remaining images as \emph{probes}.  Gallery entries are
+selected deterministically by sorting by file path and taking the first image; this ensures
+reproducibility.  Identities with fewer than $g + 1$ images (gallery size $g=1$ plus at
+least one probe) are excluded from evaluation.
+
+\subsection{Verification}
+
+Verification asks: \emph{do two images show the same individual?}
+All $\binom{N_g + N_p}{2}$ unordered pairs are generated from the combined gallery and
+probe pool; a pair is labelled positive if both images share the same identity.
+The similarity score for each pair is the cosine similarity of L2-normalised embeddings:
+\begin{equation}
+  s(\mathbf{x}_i, \mathbf{x}_j) = \frac{\hat{\mathbf{z}}_i \cdot \hat{\mathbf{z}}_j}
+                                         {\max(\|\hat{\mathbf{z}}_i\|, \varepsilon)
+                                          \max(\|\hat{\mathbf{z}}_j\|, \varepsilon)},
+  \quad \varepsilon = 10^{-12}.
+  \label{eq:cosine}
+\end{equation}
+The following metrics are computed:
+
+\paragraph{ROC-AUC.}  Area under the receiver operating characteristic curve, computed via
+\texttt{sklearn\discretionary{.}{}{.}metrics\discretionary{.}{}{.}roc\_auc\_score}.
+Provides a threshold-independent measure of discriminative power.
+
+\paragraph{Youden's J and optimal threshold.}  $J = \mathrm{TPR} - \mathrm{FPR}$
+(equivalently, sensitivity + specificity $- 1$)~\cite{youden1950}, maximised over the ROC
+curve to yield an optimal decision threshold.  This is used for F\textsubscript{1},
+precision, recall, and specificity computation.
+
+\paragraph{TAR@FAR.}  The True Acceptance Rate at a fixed False Acceptance Rate (FAR) budget,
+defined as the maximum TPR among ROC operating points with $\mathrm{FPR} \le
+\mathrm{FAR}_{\text{target}}$.  We report TAR at $\mathrm{FAR} = 10^{-3}$ and $10^{-4}$.
+
+\paragraph{Recall@FAR$\le 10^{-2}$ (headline metric).}
+With test partitions of at most a few hundred pairs, a FAR budget of $10^{-3}$ permits
+fewer than one false match and degenerates to noise.  We therefore adopt
+$\mathrm{Recall@FAR} \le 10^{-2}$ as the primary biometric operating metric.  This
+corresponds to the TAR at the most lenient operating point not exceeding a 1\% false
+positive rate, offering a meaningful trade-off between security and usability at the
+current dataset scale.
+
+\subsection{Identification}
+
+Identification asks: \emph{given a probe image, which gallery identity does it belong to?}
+For each probe, cosine similarities to all gallery entries are ranked in descending order.
+Identification metrics are:
+
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{Top-1 / Top-5 accuracy}: fraction of probes for which the correct identity
+        is ranked first (or within the top 5).
+  \item \textbf{CMC curve}: cumulative match characteristic up to rank $k = 10$,
+        $\mathrm{CMC}[k] = $ fraction of probes with first correct match at rank $\le k$.
+  \item \textbf{mAP}: mean average precision in the information-retrieval sense, averaging
+        the per-probe average precision (AP) over all probes.
+\end{itemize}
+
+\subsection{Statistical significance: permutation test}
+
+To assess whether observed performance exceeds chance, we run an \emph{inference-mode
+permutation test}: identity labels in the test manifest are permuted $n = 100$ times; for
+each permutation, embeddings are re-computed (no retraining) and the target metric is
+evaluated.  The one-sided p-value with continuity correction is:
+\begin{equation}
+  p = \frac{\#\{\mathrm{null} \ge \mathrm{observed}\} + 1}{n + 1}.
+  \label{eq:pvalue}
+\end{equation}
+Significance threshold $\alpha = 0.05$.  The inference-mode variant is substantially faster
+than full-retrain permutation testing while still providing a valid null distribution for
+the embedding quality.

@@ -1,0 +1,164 @@
+%  03_dataset.tex
+\section{Dataset}
+\label{sec:dataset}
+
+\subsection{Species and capture conditions}
+
+We work with two fruit-bat species from active research colonies:
+
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{\rousettus (Egyptian fruit bat)}: 12 individuals, 1\,059 images.
+        Images were extracted from close-range video recordings; each frame was
+        independently processed by the preprocessing pipeline.  All images were captured
+        with randomised background compositing.
+  \item \textbf{\mauritius (Mauritian flying fox, \emph{Pteropus niger})}: 11 individuals,
+        1\,119 images.  Three background conditions are available for this species:
+        \emph{green screen} (green-screen chroma key replacement), \emph{original}
+        (natural enclosure background), and \emph{random} (composited random textures).
+        This provides a controlled study of background-invariance.
+\end{itemize}
+
+\subsection{Preprocessing pipeline}
+
+Raw video frames undergo a five-stage preprocessing pipeline before storage.
+First, a YOLO-v8 pose estimator (custom weights \texttt{face\_pose.pt}) detects facial
+keypoints; the face is then rotated so that the eyes are horizontally aligned, providing
+pose-normalised crops.  A second YOLO-v8 model (\texttt{face\_seg.pt}) segments the bat
+face region; the bounding box of the predicted mask drives a square crop with a
+configurable outer margin (default $10\%$).  Optional background replacement composites
+one of several procedurally generated backgrounds (blur, gradient, random noise, or
+downloaded textures).  Finally, images are resized to the model's input resolution and
+normalised to $[0, 1]$.
+
+Image \emph{quality} is quantified per frame as the variance of the Laplacian
+$\sigma^2_\Delta = \mathrm{Var}(\Delta I)$, a standard focus measure; this score is stored
+in the manifest and can be used to filter low-quality frames during dataset construction.
+
+\subsection{Manifest structure}
+
+All dataset metadata is stored in a \emph{manifest}: a CSV file with the following
+columns: \texttt{path}, \texttt{identity}, \texttt{species}, \texttt{background},
+\texttt{source}, \texttt{augmented}, \texttt{split}, \texttt{quality}.
+Each manifest is accompanied by a SHA-256 hash sidecar; loading a manifest with a
+mismatched hash raises an error, preventing silent data-version drift.
+
+\subsection{Identity-disjoint splitting}
+
+The central methodological contribution of this work is the enforcement of
+\emph{identity-disjoint} splits.  Given a set of $N$ unique individual identities,
+the splitter assigns each identity to exactly one of \{train, val, test\} before any
+images are allocated.  This guarantees that the model never observes images of a test
+identity during training or validation---the protocol required for honest open-set
+evaluation.
+
+Formally, let $\mathcal{I}$ be the set of identities.  The splitter draws
+$(n_{\mathrm{val}}, n_{\mathrm{test}})$ identities as
+$n_{\mathrm{val}} = \lfloor |\mathcal{I}| \cdot r_{\mathrm{val}} \rceil$,
+$n_{\mathrm{test}} = \lfloor |\mathcal{I}| \cdot r_{\mathrm{test}} \rceil$,
+with the remainder assigned to training.  The shuffle is seeded (seed 42) over an
+alphabetically sorted identity list, making the split fully deterministic.
+
+Figure~\ref{fig:split_comparison} contrasts the random-pair protocol with the
+identity-disjoint protocol.
+
+\begin{figure}[t]
+\centering
+\begin{subfigure}[t]{0.46\linewidth}
+\centering
+\begin{tikzpicture}[
+  idnode/.style={draw, circle, minimum size=0.52cm, font=\small\bfseries, inner sep=0pt,
+                 fill=gray!12},
+  splitbox/.style={draw, rounded corners=3pt, minimum width=1.8cm, minimum height=0.5cm,
+                   font=\scriptsize, align=center}
+]
+  % identities column
+  \node[idnode] (a) at (0, 1.5) {A};
+  \node[idnode] (b) at (0, 0.75) {B};
+  \node[idnode] (c) at (0, 0)   {C};
+
+  % split boxes
+  \node[splitbox, fill=colSiamese!20, draw=colSiamese!60]
+    (tr) at (2.6, 1.5) {Train};
+  \node[splitbox, fill=colAdaFace!20, draw=colAdaFace!60]
+    (va) at (2.6, 0.75) {Val};
+  \node[splitbox, fill=colArcFace!20, draw=colArcFace!60]
+    (te) at (2.6, 0) {Test};
+
+  % every identity connects to every split (leaky)
+  \foreach \src in {a, b, c} {
+    \draw[->, gray!55, thin] (\src.east) to[out=5,in=175] (tr.west);
+    \draw[->, gray!55, thin] (\src.east) to[out=0,in=180] (va.west);
+    \draw[->, gray!55, thin] (\src.east) to[out=-5,in=185] (te.west);
+  }
+
+  \node[font=\tiny, red!70!black] at (1.3, -0.55) {\textbf{Leakage: all ids in all splits}};
+\end{tikzpicture}
+\caption{Random-pair split (leaky)}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.46\linewidth}
+\centering
+\begin{tikzpicture}[
+  idnode/.style={draw, circle, minimum size=0.52cm, font=\small\bfseries, inner sep=0pt},
+  splitbox/.style={draw, rounded corners=3pt, minimum width=1.8cm, minimum height=0.5cm,
+                   font=\scriptsize, align=center}
+]
+  % identities column: 2 train, 1 val, 1 test
+  \node[idnode, fill=colSiamese!30, draw=colSiamese] (a) at (0, 2.0) {A};
+  \node[idnode, fill=colSiamese!30, draw=colSiamese] (b) at (0, 1.3) {B};
+  \node[idnode, fill=colAdaFace!30, draw=colAdaFace](c) at (0, 0.6) {C};
+  \node[idnode, fill=colArcFace!30, draw=colArcFace](d) at (0, -0.1){D};
+
+  % split boxes
+  \node[splitbox, fill=colSiamese!20, draw=colSiamese!60]
+    (tr) at (2.6, 1.65) {Train};
+  \node[splitbox, fill=colAdaFace!20, draw=colAdaFace!60]
+    (va) at (2.6, 0.6) {Val};
+  \node[splitbox, fill=colArcFace!20, draw=colArcFace!60]
+    (te) at (2.6, -0.1) {Test};
+
+  % each identity to exactly one split
+  \draw[->, colSiamese, semithick] (a.east) to[out=0,in=180] (tr.west);
+  \draw[->, colSiamese, semithick] (b.east) to[out=0,in=180] (tr.west);
+  \draw[->, colAdaFace, semithick] (c.east) -- (va.west);
+  \draw[->, colArcFace, semithick] (d.east) -- (te.west);
+
+  \node[font=\tiny, colAdaFace!80!black] at (1.3, -0.65)
+    {\textbf{No leakage: each id in one split only}};
+\end{tikzpicture}
+\caption{Identity-disjoint split (correct)}
+\end{subfigure}
+\caption{Splitting strategies.  (a)~The random-pair protocol assigns images without
+regard to identity: every individual (A, B, C) contributes images to all three partitions.
+(b)~The identity-disjoint protocol assigns each individual to exactly one partition, so
+test identities (D) are never seen during training.}
+\label{fig:split_comparison}
+\end{figure}
+
+\subsection{Dataset statistics}
+
+Table~\ref{tab:dataset} summarises the final partition statistics.
+
+\begin{table}[h]
+\centering
+\caption{Dataset split statistics under the identity-disjoint protocol (seed 42, val/test
+fractions 25\%/25\%). BG~=~background condition.}
+\label{tab:dataset}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{llccccccc}
+\toprule
+Species & BG & Total & Identities & \multicolumn{2}{c}{Train} & \multicolumn{2}{c}{Val} & Test \\
+\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+ & & imgs & total & ids & imgs & ids & imgs & imgs \\
+\midrule
+\rousettus       & random   & 1\,059 & 12 & 6 & 486 & 3 & 343 & 230 \\
+\mauritius       & random   & 1\,119 & 11 & 5 & 400 & 3 & 343 & 376 \\
+\mauritius       & green    & 1\,598 & 11 & 5 & 1229& 3 & 230 & 139 \\
+\mauritius       & original & 1\,038 & 11 & 5 & ---&3 & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The small identity counts---fewer than twelve training identities in all conditions---are
+representative of typical ecological monitoring studies and define the challenge regime
+analysed in Section~\ref{sec:experiments}.
