@@ -251,21 +251,5 @@ quality), the gap would differ between species.  Instead it is virtually identic
 (0.268 vs.\ 0.277), ruling out image-level explanations and isolating
 \textbf{identity count} as the governing variable.
 
-% ==========================================================
-\section{Conclusions}
-
-\begin{itemize}[leftmargin=1.4em, itemsep=3pt, topsep=3pt]
-  \item \textbf{Identity-disjoint evaluation is non-negotiable.}
-        Random-pair splitting inflates $F_1$ from 0.74 to 0.99 on identical data.
-  \item \textbf{Pair-based (Siamese) is the right choice at current scale.}
-        The 0.27 ROC-AUC advantage over embedding models is confirmed independently
-        on both species and reflects a fundamental dataset-size limitation, not a
-        model-quality difference.
-  \item \textbf{Background standardisation helps.}
-        Controlled backgrounds improve Siamese ROC-AUC by ${\sim}$12 points on
-        mauritius.
-  \item \textbf{Reproducibility.} All experiments tracked in MLflow;
-        reproducible with \texttt{uv run bat-cli train --experiment <name>}.
-\end{itemize}
 
 \end{document}
