@@ -6,6 +6,8 @@ Public surface:
 - :func:`evaluate_identification` -> :class:`bat_core.IdentificationMetrics`
 - :func:`optimize_youden_j` -> ``(threshold, max_J)``
 - :func:`threshold_at_far` -> ``(threshold, recall)`` at a target FAR budget
+- :func:`neg_log_1_minus`, :func:`arccos_scale` -- monotone score
+  transformations for visualising cosine-similarity scores; semantics-free.
 - :func:`run_eval_protocol` -> :class:`bat_core.EvalReport`
 - :func:`split_gallery_probe`, :func:`split_manifest_for_identification`
 - :func:`predictions_from_embedding`, :func:`cosine_similarity_matrix`,
@@ -30,6 +32,7 @@ from bat_evaluation.identification import (
     tar_at_far_from_gallery_probe,
 )
 from bat_evaluation.protocols import run_eval_protocol, run_identification, run_verification
+from bat_evaluation.scaling import arccos_scale, inv_neg_log_1_minus, neg_log_1_minus
 from bat_evaluation.threshold import optimize_youden_j, threshold_at_far
 from bat_evaluation.verification import (
     ConfusionAtThreshold,
@@ -60,6 +63,9 @@ __all__ = [
     "run_verification",
     "split_gallery_probe",
     "split_manifest_for_identification",
+    "arccos_scale",
+    "inv_neg_log_1_minus",
+    "neg_log_1_minus",
     "tar_at_far",
     "tar_at_far_from_gallery_probe",
     "threshold_at_far",
