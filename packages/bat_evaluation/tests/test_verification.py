@@ -15,6 +15,7 @@ from bat_evaluation import (
     tar_at_far,
     threshold_at_far,
 )
+from bat_evaluation.threshold import threshold_at_min_recall
 from sklearn.metrics import roc_curve
 
 
@@ -78,6 +79,57 @@ def test_threshold_at_far_matches_tar_at_far():
     for target in (1e-2, 0.05, 0.1):
         _thr, recall = threshold_at_far(y_true, y_score, target)
         assert recall == pytest.approx(tar_at_far(fpr_arr, tpr_arr, target))
+
+
+def test_threshold_at_min_recall_realises_at_least_min_recall():
+    # Contract: at the returned threshold the realised recall must satisfy
+    # the requested floor; precision should equal what the function returned.
+    rng = np.random.default_rng(101)
+    pos = rng.normal(0.7, 0.15, size=300)
+    neg = rng.normal(0.3, 0.15, size=600)
+    y_true = np.concatenate([np.ones_like(pos), np.zeros_like(neg)])
+    y_score = np.concatenate([pos, neg])
+
+    for min_recall in (0.5, 0.75, 0.9):
+        thr, precision_returned = threshold_at_min_recall(y_true, y_score, min_recall)
+        cm = confusion_at_threshold(y_true, y_score, thr)
+        assert cm.recall >= min_recall - 1e-9, (
+            f"min_recall={min_recall}: realised recall {cm.recall} below floor"
+        )
+        # Precision_recall_curve and confusion_at_threshold may differ by an
+        # epsilon when scores are tied at the threshold (`>=` vs `>` semantics
+        # in the two libraries). Accept a small absolute tolerance.
+        assert cm.precision == pytest.approx(precision_returned, abs=0.05)
+
+
+def test_threshold_at_min_recall_picks_best_precision():
+    # Among operating points satisfying the recall floor, the chosen threshold
+    # must achieve the maximum precision sklearn's PR curve would report.
+    from sklearn.metrics import precision_recall_curve
+
+    rng = np.random.default_rng(202)
+    pos = rng.normal(0.65, 0.15, size=250)
+    neg = rng.normal(0.35, 0.15, size=500)
+    y_true = np.concatenate([np.ones_like(pos), np.zeros_like(neg)])
+    y_score = np.concatenate([pos, neg])
+
+    min_recall = 0.75
+    _thr, precision_returned = threshold_at_min_recall(y_true, y_score, min_recall)
+
+    precision, recall, _ = precision_recall_curve(y_true, y_score)
+    eligible = precision[:-1][recall[:-1] >= min_recall]
+    expected_best = float(eligible.max())
+    assert precision_returned == pytest.approx(expected_best)
+
+
+def test_threshold_at_min_recall_single_class_returns_default():
+    # Mirror of optimize_youden_j: when only one class is present we can't
+    # define the operating point, so we return the legacy (0.5, 0.0).
+    y_true = np.zeros(10)
+    y_score = np.random.default_rng(0).uniform(size=10)
+    thr, precision = threshold_at_min_recall(y_true, y_score, 0.75)
+    assert thr == 0.5
+    assert precision == 0.0
 
 
 def test_threshold_at_far_picks_best_tpr_within_budget():

@@ -18,7 +18,7 @@ from collections.abc import Iterable
 
 import numpy as np
 from numpy.typing import NDArray
-from sklearn.metrics import roc_curve
+from sklearn.metrics import precision_recall_curve, roc_curve
 
 
 def optimize_youden_j(
@@ -114,4 +114,65 @@ def threshold_at_far(
     return threshold, recall
 
 
-__all__ = ["optimize_youden_j", "threshold_at_far"]
+def threshold_at_min_recall(
+    y_true: Iterable[float] | NDArray[np.floating],
+    y_score: Iterable[float] | NDArray[np.floating],
+    min_recall: float,
+) -> tuple[float, float]:
+    """Return ``(threshold, precision)`` at the strictest threshold with recall >= min_recall.
+
+    Biometric "TPR-floor" framing -- the mirror of :func:`threshold_at_far`.
+    Caller declares a minimum recall they will accept; we pick the operating
+    point that respects the floor and maximises precision. Ties on precision
+    are broken by picking the lower threshold (i.e., the more lenient point
+    that still hits the recall floor, matching ``threshold_at_far``'s
+    "most lenient" convention).
+
+    Returns ``(0.5, 0.0)`` when ``y_true`` is single-class (consistent with
+    ``optimize_youden_j``). Returns ``(-inf, 0.0)`` when no operating point
+    achieves the recall floor (e.g., ``min_recall = 1.0`` on a degenerate
+    classifier).
+    """
+    if not 0.0 <= min_recall <= 1.0:
+        raise ValueError(f"min_recall must be in [0, 1], got {min_recall}")
+
+    y_true_arr = np.asarray(list(y_true), dtype=np.float64).ravel()
+    y_score_arr = np.asarray(list(y_score), dtype=np.float64).ravel()
+    if y_true_arr.shape != y_score_arr.shape:
+        raise ValueError(
+            f"y_true and y_score have different shapes: "
+            f"{y_true_arr.shape} vs {y_score_arr.shape}"
+        )
+
+    n_pos = int((y_true_arr == 1.0).sum())
+    n_neg = int((y_true_arr == 0.0).sum())
+    if n_pos == 0 or n_neg == 0:
+        return 0.5, 0.0
+
+    # ``precision_recall_curve`` returns (precision, recall, thresholds) where
+    # precision/recall have length N+1 and thresholds has length N -- the last
+    # (precision, recall) is the "predict everything negative" point at
+    # (1.0, 0.0), which has no associated threshold. Discard it so all three
+    # arrays align.
+    precision, recall, thresholds = precision_recall_curve(y_true_arr, y_score_arr)
+    precision = precision[:-1]
+    recall = recall[:-1]
+
+    mask = recall >= min_recall
+    if not mask.any():
+        return float("-inf"), 0.0
+
+    # ``precision_recall_curve`` returns thresholds sorted ascending. Among
+    # eligible points we pick the one with max precision; ``np.argmax`` returns
+    # the first occurrence -> lowest threshold among precision ties, matching
+    # ``threshold_at_far``'s "most lenient" convention.
+    candidates = np.where(mask)[0]
+    best_in_candidates = int(np.argmax(precision[candidates]))
+    best_idx = int(candidates[best_in_candidates])
+    threshold = float(thresholds[best_idx])
+    realised_precision = float(precision[best_idx])
+
+    return threshold, realised_precision
+
+
+__all__ = ["optimize_youden_j", "threshold_at_far", "threshold_at_min_recall"]

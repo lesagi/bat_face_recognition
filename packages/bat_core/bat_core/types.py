@@ -131,6 +131,15 @@ class VerificationMetrics:
     # biometric framing matters.
     threshold_at_far_1e2: float = 1.0
     recall_at_far_1e2: float = 0.0
+    # Operating point at recall >= 0.75 -- the mirror of the FAR=1e-2 budget.
+    # Fix a recall floor (catch at least 75% of true matches) and report the
+    # best precision achievable under that constraint. Useful when the cost
+    # of *missing* a match dominates the cost of a false match (typical
+    # individual-tracking research framing). 1.0 / 0.0 defaults mean
+    # "predict everything negative" -- the trivial fallback when no
+    # operating point hits the recall floor.
+    threshold_at_recall_0p75: float = 1.0
+    precision_at_recall_0p75: float = 0.0
 
 
 @dataclass(frozen=True)

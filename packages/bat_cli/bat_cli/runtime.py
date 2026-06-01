@@ -921,6 +921,8 @@ def eval_report_to_dict(report: EvalReport) -> dict[str, Any]:
             "tar_at_far_1e4": verification.tar_at_far_1e4,
             "recall_at_far_1e2": verification.recall_at_far_1e2,
             "threshold_at_far_1e2": verification.threshold_at_far_1e2,
+            "precision_at_recall_0p75": verification.precision_at_recall_0p75,
+            "threshold_at_recall_0p75": verification.threshold_at_recall_0p75,
         }
     }
     if report.identification is not None:

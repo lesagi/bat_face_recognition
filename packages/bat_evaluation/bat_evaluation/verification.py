@@ -19,7 +19,11 @@ from dataclasses import dataclass
 
 import numpy as np
 from bat_core import Predictions, VerificationMetrics
-from bat_evaluation.threshold import optimize_youden_j, threshold_at_far
+from bat_evaluation.threshold import (
+    optimize_youden_j,
+    threshold_at_far,
+    threshold_at_min_recall,
+)
 from numpy.typing import NDArray
 from sklearn.metrics import roc_auc_score, roc_curve
 
@@ -155,6 +159,7 @@ def evaluate_predictions(predictions: Predictions) -> VerificationMetrics:
     tar_1e3 = tar_at_far(fpr, tpr, 1e-3)
     tar_1e4 = tar_at_far(fpr, tpr, 1e-4)
     thr_1e2, recall_1e2 = threshold_at_far(y_true, y_score, 1e-2)
+    thr_recall_0p75, precision_recall_0p75 = threshold_at_min_recall(y_true, y_score, 0.75)
 
     return VerificationMetrics(
         roc_auc=float(auc) if not np.isnan(auc) else float("nan"),
@@ -164,6 +169,8 @@ def evaluate_predictions(predictions: Predictions) -> VerificationMetrics:
         tar_at_far_1e4=float(tar_1e4),
         threshold_at_far_1e2=float(thr_1e2),
         recall_at_far_1e2=float(recall_1e2),
+        threshold_at_recall_0p75=float(thr_recall_0p75),
+        precision_at_recall_0p75=float(precision_recall_0p75),
     )
 
 
