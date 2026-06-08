@@ -7,9 +7,11 @@ import pytest
 from bat_cli.__main__ import main
 from bat_cli.runtime import (
     PermutationResult,
+    TrainingBundle,
     _audit_params,
     _build_train_generator,
     _maybe_promote,
+    _run_test,
     _sample_explanation_records,
     _sample_projection_records,
     build_trainer_config,
@@ -17,6 +19,76 @@ from bat_cli.runtime import (
 )
 from bat_core import ImageRecord, Manifest
 from click.testing import CliRunner
+
+
+def test_run_test_auto_resolves_to_early_stop_monitor(tmp_path: Path) -> None:
+    """``test_checkpoint: auto`` restores the checkpoint matching the trainer's
+    early-stop monitor (here ``roc_auc``) instead of falling back to final.
+    """
+    from bat_training._common import TrainerConfig
+
+    (tmp_path / "best_model_roc_auc.pt").write_bytes(b"stub")
+
+    loaded: dict[str, Path] = {}
+
+    class _FakeTrainer:
+        def __init__(self) -> None:
+            self.cfg = TrainerConfig(early_stopping_monitor="val/roc_auc")
+
+        def load(self, path: Path) -> None:
+            loaded["path"] = Path(path)
+
+        def test(self, manifest: object = None, split: str | None = None) -> str:
+            return "REPORT"
+
+    bundle = TrainingBundle(
+        cfg={"evaluation": {"test_checkpoint": "auto"}, "model": {"family": "embedding"}},
+        manifest=object(),
+        model=object(),
+        loss=object(),
+        trainer_cfg=TrainerConfig(),
+        train_loader=None,
+        val_loader=None,
+        test_loader=None,
+        trainer_kwargs={},
+    )
+
+    report = _run_test(_FakeTrainer(), bundle, output_dir=tmp_path, warnings=[])
+
+    assert report == "REPORT"
+    assert loaded["path"].name == "best_model_roc_auc.pt"
+
+
+def test_run_test_auto_warns_when_monitor_checkpoint_missing(tmp_path: Path) -> None:
+    """If the monitor checkpoint is absent, ``auto`` degrades to final + warns."""
+    from bat_training._common import TrainerConfig
+
+    class _FakeTrainer:
+        def __init__(self) -> None:
+            self.cfg = TrainerConfig(early_stopping_monitor="val/roc_auc")
+
+        def load(self, path: Path) -> None:  # pragma: no cover - must not run
+            raise AssertionError("load should not be called when checkpoint is missing")
+
+        def test(self, manifest: object = None, split: str | None = None) -> str:
+            return "REPORT"
+
+    bundle = TrainingBundle(
+        cfg={"evaluation": {"test_checkpoint": "auto"}, "model": {"family": "embedding"}},
+        manifest=object(),
+        model=object(),
+        loss=object(),
+        trainer_cfg=TrainerConfig(),
+        train_loader=None,
+        val_loader=None,
+        test_loader=None,
+        trainer_kwargs={},
+    )
+    warnings: list[str] = []
+    report = _run_test(_FakeTrainer(), bundle, output_dir=tmp_path, warnings=warnings)
+
+    assert report == "REPORT"
+    assert any("roc_auc" in w for w in warnings)
 
 
 def test_help_lists_core_commands() -> None:

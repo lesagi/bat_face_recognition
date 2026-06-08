@@ -1043,13 +1043,21 @@ def _run_test(
     """Run test eval, restoring a best-* checkpoint if ``evaluation.test_checkpoint`` requests it.
 
     Default (``test_checkpoint: final``) keeps the legacy behaviour of evaluating
-    the in-memory model. Any other value resolves to
+    the in-memory model. ``auto`` resolves to the trainer's early-stop monitor
+    metric (e.g. ``roc_auc`` for embedding, ``precision_at_recall_0p75`` for
+    pair), so test eval uses the same checkpoint training actually selected --
+    not the post-early-stop final/EMA weights. Any other value resolves to
     ``<output_dir>/best_model_<value>.pt`` and is loaded via ``trainer.load``
     before the test pass. Missing files degrade to "final" with a warning so
     that pipelines don't crash on a non-existent best checkpoint.
     """
     eval_cfg = _mapping(bundle.cfg.get("evaluation"))
     requested = str(eval_cfg.get("test_checkpoint", "final")).strip()
+    if requested == "auto":
+        # Resolve to whatever metric early stopping monitored, so the test
+        # checkpoint matches the model selection criterion used in training.
+        monitor = str(getattr(getattr(trainer, "cfg", None), "early_stopping_monitor", "") or "")
+        requested = monitor.rsplit("/", 1)[-1].strip() or "final"
     if requested and requested != "final" and output_dir is not None:
         ckpt = output_dir / f"best_model_{requested}.pt"
         if ckpt.exists():
