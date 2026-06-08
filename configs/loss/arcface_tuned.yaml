@@ -1,0 +1,7 @@
+family: embedding
+type: arcface
+# Tuned margin/scale (Optuna on val). The paper-scale defaults (m=0.5, s=64)
+# overpower the angular space at <=12 training identities; the gentler
+# m=0.2, s=30 is what the paper's tuned ArcFace rows use.
+margin: 0.2
+scale: 30.0

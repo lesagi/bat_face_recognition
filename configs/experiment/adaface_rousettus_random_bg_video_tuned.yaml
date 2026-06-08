@@ -1,0 +1,15 @@
+# @package _global_
+# Tuned AdaFace on rousettus video frames, random backgrounds (Adam lr=1e-3,
+# m=0.2, s=30). Reproduces the paper's "AdaFace (tuned)" rousettus rows:
+#   bat-cli train --experiment adaface_rousettus_random_bg_video_tuned
+defaults:
+  - override /data: manifest_rousettus
+  - override /model: adaface
+  - override /loss: adaface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: random
+  source: video

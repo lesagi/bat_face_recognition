@@ -1,0 +1,27 @@
+family: embedding
+# Tuned embedding-model recipe (ArcFace/AdaFace) selected via Optuna on the
+# validation split. The default embedding trainer (SGD, lr=0.1) is the
+# paper-scale recipe that collapses the ImageNet-pretrained backbone on these
+# small datasets; this Adam/lr=1e-3 recipe is what the paper's "tuned" rows use.
+optimizer: adam
+lr: 1.0e-3
+weight_decay: 5.0e-4
+beta_1: 0.9
+beta_2: 0.999
+epochs: 40
+gradient_accumulation_steps: 1
+mixed_precision: bf16
+ema_decay: 0.999
+val_verification: true
+warmup_epochs: 1
+lr_schedule: cosine
+early_stop:
+  enabled: true
+  patience: 7
+  min_delta: 1.0e-3
+  monitor: val/roc_auc
+artifact_retention:
+  save_best_roc_auc: true
+  save_best_top1: true
+  save_final_model: false
+deterministic: false
