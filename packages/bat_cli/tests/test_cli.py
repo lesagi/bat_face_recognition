@@ -568,8 +568,16 @@ def test_build_explanations_routes_image_size_to_both_adapters(tmp_path: Path) -
         return _CaptureAdapter()
 
     class _FakeProjection:
-        def __init__(self, *, method: str, output_dir: Path, input_size: int) -> None:
+        def __init__(
+            self,
+            *,
+            method: str,
+            output_dir: Path,
+            input_size: int,
+            normalize: str | None = None,
+        ) -> None:
             captured_inputs["projection"] = input_size
+            captured_inputs["projection_normalize"] = normalize
 
         def explain(self, _model, _samples):  # noqa: ANN001 - mock
             return []

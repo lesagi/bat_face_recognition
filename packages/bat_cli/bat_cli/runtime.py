@@ -200,9 +200,22 @@ def build_bundle(
     else:
         from bat_data import BatDataset
 
-        train_ds = BatDataset(manifest, split="train", image_size=image_size)
-        val_ds = _optional_embedding_dataset(manifest, "val", image_size=image_size)
-        test_ds = _optional_embedding_dataset(manifest, "test", image_size=image_size)
+        # Pretrained torchvision backbones expect ImageNet-normalised inputs;
+        # apply the same normalisation in training and every eval path.
+        normalize = (
+            "imagenet"
+            if _is_pretrained(_mapping(cfg_dict.get("model")).get("pretrained", True))
+            else None
+        )
+        train_ds = BatDataset(
+            manifest, split="train", image_size=image_size, normalize=normalize
+        )
+        val_ds = _optional_embedding_dataset(
+            manifest, "val", image_size=image_size, normalize=normalize
+        )
+        test_ds = _optional_embedding_dataset(
+            manifest, "test", image_size=image_size, normalize=normalize
+        )
         train_loader = _loader(
             train_ds,
             batch_size=batch_size,
@@ -238,8 +251,9 @@ def build_bundle(
             "eval_manifest": manifest,
             "eval_split": "test",
             # Eval/val/permutation embeddings must use the same edge length
-            # the model trained at, not the loader's 224 default.
+            # and channel normalisation the model trained at.
             "image_size": image_size,
+            "normalize": normalize,
         }
 
     resolved_output = output_dir or default_output_dir(cfg_dict, root=repo)
@@ -507,6 +521,14 @@ def run_training(
             explanation_image_size = int(
                 _mapping(bundle.cfg.get("model")).get("input_edge_length", 224)
             )
+            explanation_normalize = (
+                "imagenet"
+                if (
+                    _model_family(bundle.cfg) == "embedding"
+                    and _is_pretrained(_mapping(bundle.cfg.get("model")).get("pretrained", True))
+                )
+                else None
+            )
             explanations = _safe(
                 "explanations",
                 warnings,
@@ -517,6 +539,7 @@ def run_training(
                     samples_per_split=explanations_per_split,
                     projection_cap=explanations_projection_cap,
                     image_size=explanation_image_size,
+                    normalize=explanation_normalize,
                 ),
             )
 
@@ -741,6 +764,7 @@ def _build_explanations(
     samples_per_split: int = 2,
     projection_cap: int = 30,
     image_size: int,
+    normalize: str | None = None,
 ) -> ExplanationArtifacts:
     """Generate saliency + projection artifacts spanning train/val/test splits.
 
@@ -777,7 +801,10 @@ def _build_explanations(
 
     projection_samples = _sample_projection_records(manifest, projection_cap)
     projection_adapter = EmbeddingProjectionAdapter(
-        method="both", output_dir=output_dir, input_size=image_size
+        method="both",
+        output_dir=output_dir,
+        input_size=image_size,
+        normalize=normalize,
     )
     projection_images = (
         list(projection_adapter.explain(model, projection_samples)) if projection_samples else []
@@ -1082,11 +1109,13 @@ def _run_test(
     return trainer.test(bundle.test_loader)
 
 
-def _optional_embedding_dataset(manifest: Manifest, split: str, *, image_size: int) -> Any | None:
+def _optional_embedding_dataset(
+    manifest: Manifest, split: str, *, image_size: int, normalize: str | None = None
+) -> Any | None:
     from bat_data import BatDataset
 
     try:
-        return BatDataset(manifest, split=split, image_size=image_size)
+        return BatDataset(manifest, split=split, image_size=image_size, normalize=normalize)
     except ValueError:
         return None
 

@@ -50,6 +50,11 @@ class EmbeddingProjectionAdapter:
     input_size:
         Image edge length used when computing embeddings from ``ImageRecord``
         samples (default ``224``).
+    normalize:
+        Channel normalisation for embedding computation: ``None`` keeps
+        ``[0, 1]``, ``"imagenet"`` applies ImageNet mean/std. Must match the
+        normalisation the model was trained with, otherwise the projected
+        embeddings come from a different input distribution than training.
     """
 
     method: ProjectionMethod = "both"
@@ -59,6 +64,7 @@ class EmbeddingProjectionAdapter:
     random_state: int = 42
     figsize: tuple[float, float] = (10.0, 8.0)
     input_size: int = 224
+    normalize: str | None = None
     _produced: list[Path] = field(default_factory=list, init=False, repr=False)
 
     # ------------------------------------------------------------------ #
@@ -71,7 +77,9 @@ class EmbeddingProjectionAdapter:
     ) -> list[SaliencyImage]:
         """Compute embeddings for ``samples`` and project them to 2-D."""
 
-        embeddings, identities = _compute_embeddings(model, samples, size=self.input_size)
+        embeddings, identities = _compute_embeddings(
+            model, samples, size=self.input_size, normalize=self.normalize
+        )
         out_dir = self._resolve_output_dir()
 
         results: list[SaliencyImage] = []
@@ -227,6 +235,7 @@ def _compute_embeddings(
     model: FaceModel,
     samples: list[ImageRecord],
     size: int,
+    normalize: str | None = None,
 ) -> tuple[np.ndarray, list[str]]:
     """Run ``forward_embedding`` over each image; return (N, D), [identity]."""
     import torch
@@ -241,12 +250,22 @@ def _compute_embeddings(
     model.eval()
     device = next(model.parameters()).device
 
+    mean = std = None
+    if normalize == "imagenet":
+        mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(3, 1, 1)
+    elif normalize is not None:
+        raise ValueError(f"unknown normalize mode {normalize!r}; expected None or 'imagenet'")
+
     tensors: list[torch.Tensor] = []
     identities: list[str] = []
     for record in samples:
         img = Image.open(str(record.path)).convert("RGB").resize((size, size), Image.BILINEAR)
         arr = np.asarray(img, dtype=np.float32) / 255.0
-        tensors.append(torch.from_numpy(arr).permute(2, 0, 1))
+        tensor = torch.from_numpy(arr).permute(2, 0, 1)
+        if mean is not None and std is not None:
+            tensor = (tensor - mean) / std
+        tensors.append(tensor)
         identities.append(record.identity)
 
     batch = torch.stack(tensors).to(device)

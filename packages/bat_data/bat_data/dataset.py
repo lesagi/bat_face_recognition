@@ -28,11 +28,29 @@ else:
 __all__ = ["BatDataset", "default_image_loader"]
 
 
-def default_image_loader(path: Path, image_size: int = 224) -> torch.Tensor:
-    """Load an image as a ``float32`` ``(3, H, W)`` tensor in ``[0, 1]``.
+# ImageNet1K channel statistics for torchvision-pretrained backbones.
+IMAGENET_MEAN: tuple[float, float, float] = (0.485, 0.456, 0.406)
+IMAGENET_STD: tuple[float, float, float] = (0.229, 0.224, 0.225)
+
+
+def default_image_loader(
+    path: Path,
+    image_size: int = 224,
+    normalize: str | None = None,
+) -> torch.Tensor:
+    """Load an image as a ``float32`` ``(3, H, W)`` tensor.
 
     Falls back gracefully if torchvision is missing — uses OpenCV +
     NumPy directly. Both branches resize to ``image_size``.
+
+    ``normalize`` controls post-scaling channel normalisation:
+
+    - ``None`` (default): values stay in ``[0, 1]`` (Siamese is trained from
+      scratch on this range).
+    - ``"imagenet"``: subtract ImageNet mean and divide by ImageNet std, as
+      torchvision's pretrained ResNet weights expect. The embedding models
+      (ArcFace/AdaFace) use this so train/eval inputs match the pretrained
+      backbone's distribution.
     """
     import numpy as np  # local: keep top-level import light
     import torch
@@ -54,7 +72,14 @@ def default_image_loader(path: Path, image_size: int = 224) -> torch.Tensor:
 
     tensor = torch.from_numpy(img.astype("float32") / 255.0)
     # (H, W, C) -> (C, H, W)
-    return tensor.permute(2, 0, 1).contiguous()
+    tensor = tensor.permute(2, 0, 1).contiguous()
+    if normalize == "imagenet":
+        mean = torch.tensor(IMAGENET_MEAN, dtype=tensor.dtype).view(3, 1, 1)
+        std = torch.tensor(IMAGENET_STD, dtype=tensor.dtype).view(3, 1, 1)
+        tensor = (tensor - mean) / std
+    elif normalize is not None:
+        raise ValueError(f"unknown normalize mode {normalize!r}; expected None or 'imagenet'")
+    return tensor
 
 
 class BatDataset(_DatasetBase):
@@ -72,6 +97,10 @@ class BatDataset(_DatasetBase):
     image_size:
         Spatial size passed to the default loader. Ignored if a custom
         ``loader`` is provided.
+    normalize:
+        Channel normalisation for the default loader: ``None`` keeps ``[0, 1]``
+        (Siamese), ``"imagenet"`` applies ImageNet mean/std (ArcFace/AdaFace on
+        a pretrained backbone). Ignored if a custom ``loader`` is provided.
     transform:
         Optional ``Tensor -> Tensor`` (e.g. albumentations / torchvision
         v2) applied after loading.
@@ -84,6 +113,7 @@ class BatDataset(_DatasetBase):
         *,
         loader: Callable[[Path], torch.Tensor] | None = None,
         image_size: int = 224,
+        normalize: str | None = None,
         transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
         if split not in ("train", "val", "test"):
@@ -96,9 +126,10 @@ class BatDataset(_DatasetBase):
 
         self._split = split
         self._image_size = image_size
+        self._normalize = normalize
         self._transform = transform
         if loader is None:
-            self._loader = lambda p: default_image_loader(p, image_size)
+            self._loader = lambda p: default_image_loader(p, image_size, normalize)
         else:
             self._loader = loader
 

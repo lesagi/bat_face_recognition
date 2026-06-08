@@ -119,7 +119,9 @@ def test_embedding_trainer_embed_fn_uses_configured_image_size(
 
     captured_sizes: list[int] = []
 
-    def _fake_loader(path: Path, image_size: int = 224) -> torch.Tensor:
+    def _fake_loader(
+        path: Path, image_size: int = 224, normalize: str | None = None
+    ) -> torch.Tensor:
         captured_sizes.append(int(image_size))
         return torch.zeros(8)
 

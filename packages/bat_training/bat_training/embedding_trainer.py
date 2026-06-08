@@ -73,6 +73,7 @@ class EmbeddingTrainer:
         eval_manifest: Manifest | None = None,
         eval_split: str = "test",
         image_size: int = 224,
+        normalize: str | None = None,
         tracker: Tracker | None = None,
         accelerator: Accelerator | None = None,
         run_id: str | None = None,
@@ -107,6 +108,9 @@ class EmbeddingTrainer:
         # be computed at the same resolution (otherwise ArcFace/AdaFace are
         # scored at a different input size than they were trained at).
         self.image_size = int(image_size)
+        # Channel normalisation used at train time; eval embeddings must match
+        # (e.g. "imagenet" for a pretrained ResNet backbone).
+        self.normalize = normalize
         self.callbacks: list[Any] = list(callbacks or [])
 
         # ArcFace/AdaFace baselines benefit from non-zero weight_decay
@@ -503,11 +507,12 @@ class EmbeddingTrainer:
         model = self.model
         device = self._infer_device()
         image_size = self.image_size
+        normalize = self.normalize
 
         def _embed(paths: list[Path]) -> Any:
             import torch
 
-            tensors = [default_image_loader(Path(p), image_size) for p in paths]
+            tensors = [default_image_loader(Path(p), image_size, normalize) for p in paths]
             stacked = torch.stack(tensors, dim=0).to(device)
             model.eval()
             with torch.no_grad():

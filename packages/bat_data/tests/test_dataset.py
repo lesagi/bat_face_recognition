@@ -30,6 +30,41 @@ def _stub_loader(_: Path) -> torch.Tensor:
     return torch.zeros(3, 8, 8, dtype=torch.float32)
 
 
+def test_default_image_loader_imagenet_normalization(tmp_path: Path) -> None:
+    """``normalize='imagenet'`` applies (x/255 - mean)/std; default keeps [0,1]."""
+    np = pytest.importorskip("numpy")
+    Image = pytest.importorskip("PIL.Image")
+
+    from bat_data.dataset import IMAGENET_MEAN, IMAGENET_STD, default_image_loader
+
+    # Solid mid-grey image: every pixel is 128 -> 128/255 in [0,1].
+    arr = np.full((16, 16, 3), 128, dtype="uint8")
+    img_path = tmp_path / "grey.png"
+    Image.fromarray(arr).save(img_path)
+
+    raw = default_image_loader(img_path, image_size=8)
+    assert raw.shape == (3, 8, 8)
+    assert torch.allclose(raw, torch.full_like(raw, 128.0 / 255.0), atol=1e-3)
+
+    norm = default_image_loader(img_path, image_size=8, normalize="imagenet")
+    base = 128.0 / 255.0
+    for c in range(3):
+        expected = (base - IMAGENET_MEAN[c]) / IMAGENET_STD[c]
+        assert torch.allclose(norm[c], torch.full((8, 8), expected), atol=1e-3)
+
+
+def test_default_image_loader_rejects_unknown_normalize(tmp_path: Path) -> None:
+    np = pytest.importorskip("numpy")
+    Image = pytest.importorskip("PIL.Image")
+
+    from bat_data.dataset import default_image_loader
+
+    img_path = tmp_path / "x.png"
+    Image.fromarray(np.zeros((4, 4, 3), dtype="uint8")).save(img_path)
+    with pytest.raises(ValueError, match="unknown normalize"):
+        default_image_loader(img_path, image_size=4, normalize="zscore")
+
+
 def test_basic_indexing() -> None:
     records = [
         _record(0, "A", "train"),
