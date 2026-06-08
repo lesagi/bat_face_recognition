@@ -1,15 +1,23 @@
 """AdaFace head — Kim et al., CVPR 2022.
 
-AdaFace adapts the angular margin to feature-norm-derived "image quality":
+AdaFace adapts the angular margin to feature-norm-derived "image quality".
+With ``g`` the standardised, clipped feature norm in ``[-1, 1]`` (Eq. 19 of
+Kim 2022):
 
-    g_angle    = -m * (||z|| / batch_mean)_clipped
-    g_additive = +m * (||z|| / batch_mean)_clipped
-    cos'(theta_y) = cos(theta_y + g_angle) - g_additive
+    g_angle = -m * g
+    g_add   =  m * g + m          (note the constant ``+ m`` term)
+    cos'(theta_y) = cos(theta_y + g_angle) - g_add
     final logit   = scale * cos'(...)
 
-The norm is normalised by an exponential moving mean ``batch_mean`` updated
-per-batch and clipped to a window of width ``h``. Reference implementation:
-https://github.com/mk-minchul/AdaFace
+The constant ``+ m`` in ``g_add`` is essential: at ``g = 0`` (average-quality
+sample) AdaFace must reduce to CosFace with additive margin ``m``, not to a
+plain-softmax logit. The limit cases are: ``g = -1`` -> ArcFace
+(``cos(theta + m)``), ``g = 0`` -> CosFace (``cos(theta) - m``), ``g = 1`` ->
+negative angular margin with a shift.
+
+The norm is standardised by exponential-moving-average ``batch_mean`` /
+``batch_std`` updated per-batch and scaled/clipped by ``h``. Reference
+implementation: https://github.com/mk-minchul/AdaFace
 
 When called without labels (or in eval mode) the head returns plain cosine
 logits scaled by ``scale``.
@@ -97,9 +105,12 @@ class AdaFaceHead(nn.Module):
         margin_scaler = (norms - self.batch_mean) / (self.batch_std + self.eps)
         margin_scaler = (margin_scaler * self.h).clamp(-1.0, 1.0)
 
-        # g_angle is broadcast over classes.
+        # g_angle / g_add are broadcast over classes (Kim 2022, Eq. 19).
+        # g_add carries the constant ``+ m`` so that g=0 -> CosFace (margin m),
+        # not plain softmax. Omitting it silently disables the average-quality
+        # margin and makes AdaFace collapse toward softmax.
         g_angle = -self.margin * margin_scaler  # shape (B, 1)
-        g_add = self.margin * margin_scaler  # shape (B, 1)
+        g_add = self.margin * (1.0 + margin_scaler)  # = m + m * margin_scaler
 
         # Apply margin only on the ground-truth class.
         one_hot = functional.one_hot(labels.long(), num_classes=self.num_classes).to(cosine.dtype)

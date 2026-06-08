@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -34,21 +36,65 @@ def test_adaface_model_forward_embedding_shape() -> None:
     assert emb.shape == (4, 512)
 
 
-def test_adaface_head_h_zero_collapses_margin_to_zero() -> None:
-    """``h = 0`` zeros the norm-modulated margin -> baseline cosine logits."""
+def test_adaface_head_h_zero_collapses_to_cosface() -> None:
+    """``h = 0`` forces the standardised norm ``g`` to 0, so AdaFace reduces to
+    CosFace: the ground-truth logit is ``s * (cos(theta) - m)`` (NOT plain
+    cosine). This pins the constant ``+ m`` term in ``g_add`` (Kim 2022 Eq. 19);
+    omitting it would make ``h = 0`` collapse to plain softmax instead.
+    """
     torch.manual_seed(1)
-    head_no_h = AdaFaceHead(embedding_dim=32, num_classes=5, margin=0.4, h=0.0, scale=10.0)
-    head_no_h.train()
-    head_baseline = AdaFaceHead(embedding_dim=32, num_classes=5, margin=0.0, h=0.0, scale=10.0)
-    head_baseline.train()
-    # Force the two heads to share weights so the cosine logits agree.
-    head_baseline.weight.data.copy_(head_no_h.weight.data)
+    margin, scale = 0.4, 10.0
+    head = AdaFaceHead(embedding_dim=32, num_classes=5, margin=margin, h=0.0, scale=scale)
+    head.train()
 
     emb = torch.randn(6, 32) * 5.0
     labels = torch.randint(0, 5, (6,))
-    out_no_h = head_no_h(emb, labels)
-    out_baseline = head_baseline(emb, None)  # plain scaled cosine
-    assert torch.allclose(out_no_h, out_baseline, atol=1e-4)
+
+    # Reference cosine using the same weights/normalisation as the head.
+    w_norm = torch.nn.functional.normalize(head.weight, p=2, dim=1)
+    cos = (emb / emb.norm(dim=1, keepdim=True)) @ w_norm.t()
+    cos = cos.clamp(-1.0 + 1e-7, 1.0 - 1e-7)
+
+    out = head(emb, labels)
+
+    expected = cos * scale
+    gt = torch.nn.functional.one_hot(labels, num_classes=5).bool()
+    expected = expected.clone()
+    expected[gt] = (cos[gt] - margin) * scale
+    assert torch.allclose(out, expected, atol=1e-3)
+
+
+def test_adaface_head_arcface_limit_at_low_norm() -> None:
+    """When the standardised norm ``g`` clips to -1 (feature norm far below the
+    running mean), AdaFace reduces to ArcFace: the GT logit is
+    ``s * cos(theta + m)`` (with AdaFace's ``[eps, pi-eps]`` angle clamp).
+    """
+    torch.manual_seed(0)
+    margin, scale = 0.4, 10.0
+    head = AdaFaceHead(embedding_dim=16, num_classes=5, margin=margin, h=0.333, scale=scale)
+    head.train()
+    # Small std + norm far below mean drives ``g`` to the -1 clip.
+    head.batch_mean.fill_(20.0)
+    head.batch_std.fill_(1.0)
+
+    directions = torch.randn(8, 16)
+    directions = directions / directions.norm(dim=1, keepdim=True)
+    emb = directions * 10.0
+    labels = torch.randint(0, 5, (8,))
+
+    w_norm = torch.nn.functional.normalize(head.weight, p=2, dim=1)
+    cos = (emb / emb.norm(dim=1, keepdim=True)) @ w_norm.t()
+    cos = cos.clamp(-1.0 + 1e-7, 1.0 - 1e-7)
+
+    out = head(emb, labels)
+
+    theta = torch.acos(cos)
+    theta_y = (theta + margin).clamp(min=1e-7, max=math.pi - 1e-7)
+    arc = torch.cos(theta_y)
+    expected = (cos * scale).clone()
+    gt = torch.nn.functional.one_hot(labels, num_classes=5).bool()
+    expected[gt] = arc[gt] * scale
+    assert torch.allclose(out, expected, atol=1e-3)
 
 
 def test_adaface_head_larger_h_changes_logits() -> None:
