@@ -447,7 +447,7 @@ def run_training(
     permutation_seed: int = 42,
     run_explanations: bool = True,
     explanations_per_split: int = 2,
-    explanations_projection_cap: int = 30,
+    explanations_max_per_identity: int = 8,
 ) -> TrainResult:
     """Train, evaluate, render a PDF, and optionally log to MLflow."""
 
@@ -537,7 +537,7 @@ def run_training(
                     bundle.manifest,
                     output_dir=explanations_dir,
                     samples_per_split=explanations_per_split,
-                    projection_cap=explanations_projection_cap,
+                    max_samples_per_identity=explanations_max_per_identity,
                     image_size=explanation_image_size,
                     normalize=explanation_normalize,
                 ),
@@ -762,7 +762,7 @@ def _build_explanations(
     *,
     output_dir: Path,
     samples_per_split: int = 2,
-    projection_cap: int = 30,
+    max_samples_per_identity: int = 8,
     image_size: int,
     normalize: str | None = None,
 ) -> ExplanationArtifacts:
@@ -771,7 +771,8 @@ def _build_explanations(
     Picks ``samples_per_split`` distinct identities per split (deterministic:
     sorted by record path), takes one record each, runs the family-appropriate
     saliency adapter on the union, then runs the embedding projection adapter
-    on a wider pool capped at ``projection_cap``.
+    on up to ``max_samples_per_identity`` records per identity (every identity
+    stays represented).
 
     ``image_size`` is the edge length the model was trained at (Siamese: 105,
     embedding ResNet backbones: 112, read from ``model.input_edge_length``).
@@ -799,7 +800,7 @@ def _build_explanations(
         for img in raw
     ]
 
-    projection_samples = _sample_projection_records(manifest, projection_cap)
+    projection_samples = _sample_projection_records(manifest, max_samples_per_identity)
     projection_adapter = EmbeddingProjectionAdapter(
         method="both",
         output_dir=output_dir,
@@ -839,19 +840,28 @@ def _sample_explanation_records(
     return samples, path_to_split
 
 
-def _sample_projection_records(manifest: Manifest, cap: int) -> list[ImageRecord]:
-    """Pool records across splits for the t-SNE/UMAP projection."""
+def _sample_projection_records(manifest: Manifest, max_per_identity: int) -> list[ImageRecord]:
+    """Sample up to ``max_per_identity`` records per identity for the projection.
 
-    pool: list[ImageRecord] = []
+    The old global stride-cap could drop entire identities (and routinely left
+    only one point per identity), making the t-SNE/UMAP clusters impossible to
+    read. Sampling per identity keeps every identity represented with a small,
+    even number of points. Selection is deterministic (sorted by path) so the
+    same manifest always yields the same projection.
+    """
+
+    by_identity: dict[str, list[ImageRecord]] = defaultdict(list)
     for split in ("train", "val", "test"):
-        pool.extend(manifest.filter_split(split))  # type: ignore[arg-type]
-    if not pool:
+        for r in manifest.filter_split(split):  # type: ignore[arg-type]
+            by_identity[r.identity].append(r)
+    if not by_identity:
         return []
-    if len(pool) <= cap:
-        return pool
-    # Spread evenly: stride sample to keep identity diversity.
-    stride = max(1, len(pool) // cap)
-    return list(pool[::stride])[:cap]
+    cap = max(1, int(max_per_identity))
+    samples: list[ImageRecord] = []
+    for identity in sorted(by_identity):
+        records = sorted(by_identity[identity], key=lambda r: str(r.path))
+        samples.extend(records[:cap])
+    return samples
 
 
 def run_permutation_test(

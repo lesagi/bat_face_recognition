@@ -185,16 +185,20 @@ class EmbeddingProjectionAdapter:
         cmap = plt.get_cmap("tab20", max(1, len(unique)))
         for idx, ident in enumerate(unique):
             mask = np.array([i == ident for i in identities])
+            count = int(mask.sum())
             ax.scatter(
                 coords[mask, 0],
                 coords[mask, 1],
                 s=24,
                 color=cmap(idx),
-                label=str(ident),
+                label=f"{ident} (n={count})",
                 alpha=0.8,
                 edgecolor="none",
             )
-        ax.set_title(f"{tag.upper()} embedding projection (n={len(identities)})")
+        ax.set_title(
+            f"{tag.upper()} embedding projection "
+            f"({len(unique)} identities, n={len(identities)})"
+        )
         ax.set_xlabel("dim 1")
         ax.set_ylabel("dim 2")
         if len(unique) <= 20:

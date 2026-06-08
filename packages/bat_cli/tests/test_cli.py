@@ -470,20 +470,31 @@ def test_sample_explanation_records_skips_empty_splits() -> None:
     assert splits == {"train", "test"}  # val is silently skipped
 
 
-def test_sample_projection_records_caps_at_limit() -> None:
-    records = [_record_for("train", f"id{i:02d}") for i in range(60)]
+def test_sample_projection_records_caps_per_identity() -> None:
+    # 3 identities, 20 records each; cap of 5 keeps 5 per identity = 15 total.
+    records = [
+        _record_for("train", ident, idx)
+        for ident in ("A", "B", "C")
+        for idx in range(20)
+    ]
     manifest = Manifest.from_records(records)
-    sample = _sample_projection_records(manifest, cap=10)
+    sample = _sample_projection_records(manifest, max_per_identity=5)
 
-    assert len(sample) == 10
+    assert len(sample) == 15
+    by_identity: dict[str, int] = {}
+    for r in sample:
+        by_identity[r.identity] = by_identity.get(r.identity, 0) + 1
+    assert by_identity == {"A": 5, "B": 5, "C": 5}
 
 
-def test_sample_projection_records_returns_all_when_under_cap() -> None:
+def test_sample_projection_records_keeps_every_identity() -> None:
+    # Every identity must stay represented even when it has few records.
     records = [_record_for("train", "A"), _record_for("val", "B")]
     manifest = Manifest.from_records(records)
-    sample = _sample_projection_records(manifest, cap=30)
+    sample = _sample_projection_records(manifest, max_per_identity=8)
 
     assert len(sample) == 2
+    assert {r.identity for r in sample} == {"A", "B"}
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +614,7 @@ def test_build_explanations_routes_image_size_to_both_adapters(tmp_path: Path) -
             fake_manifest,
             output_dir=tmp_path,
             samples_per_split=1,
-            projection_cap=1,
+            max_samples_per_identity=1,
             image_size=105,
         )
 
