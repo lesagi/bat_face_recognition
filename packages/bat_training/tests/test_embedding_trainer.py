@@ -106,6 +106,36 @@ def test_embedding_trainer_fit_reduces_loss(tmp_path: Path) -> None:
     assert "loss" in artifacts.best_metrics
 
 
+def test_embedding_trainer_embed_fn_uses_configured_image_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_build_embed_fn`` must load images at the trained ``image_size``.
+
+    Regression for the eval/train resolution mismatch: embeddings used for
+    val/test/permutation were loaded at the loader's 224 default rather than
+    the model's trained edge length (112 for ArcFace/AdaFace).
+    """
+    import bat_data
+
+    captured_sizes: list[int] = []
+
+    def _fake_loader(path: Path, image_size: int = 224) -> torch.Tensor:
+        captured_sizes.append(int(image_size))
+        return torch.zeros(8)
+
+    monkeypatch.setattr(bat_data, "default_image_loader", _fake_loader)
+
+    model = _ToyArcFaceModel(embedding_dim=4, num_classes=3)
+    cfg = TrainerConfig(epochs=1, ema_decay=0.0, output_dir=tmp_path / "run")
+    trainer = EmbeddingTrainer(model=model, loss=ArcFaceLoss(), cfg=cfg, image_size=112)
+
+    embed_fn = trainer._build_embed_fn()
+    with torch.no_grad():
+        embed_fn([Path("a.jpg"), Path("b.jpg")])
+
+    assert captured_sizes == [112, 112]
+
+
 def test_embedding_trainer_steps_partial_gradient_accumulation_tail(tmp_path: Path) -> None:
     """A short final accumulation window must still update parameters."""
     torch.manual_seed(0)

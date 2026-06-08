@@ -234,7 +234,13 @@ def build_bundle(
             else None
         )
         num_classes = train_ds.num_classes
-        trainer_kwargs = {"eval_manifest": manifest, "eval_split": "test"}
+        trainer_kwargs = {
+            "eval_manifest": manifest,
+            "eval_split": "test",
+            # Eval/val/permutation embeddings must use the same edge length
+            # the model trained at, not the loader's 224 default.
+            "image_size": image_size,
+        }
 
     resolved_output = output_dir or default_output_dir(cfg_dict, root=repo)
     trainer_cfg = build_trainer_config(cfg_dict, output_dir=resolved_output)
@@ -744,10 +750,11 @@ def _build_explanations(
     on a wider pool capped at ``projection_cap``.
 
     ``image_size`` is the edge length the model was trained at (Siamese: 105,
-    embedding ResNet backbones: 224). Both adapters resize inputs to that
-    edge before invoking the model, since their dataclass defaults
-    (``EmbeddingProjectionAdapter.input_size=224``) silently mismatch a
-    pair-family Siamese head and cascade-fail the entire explanation block.
+    embedding ResNet backbones: 112, read from ``model.input_edge_length``).
+    Both adapters resize inputs to that edge before invoking the model, since
+    their dataclass defaults (``EmbeddingProjectionAdapter.input_size=224``)
+    silently mismatch the trained resolution and cascade-fail the explanation
+    block.
 
     Identity strings on the resulting :class:`bat_core.SaliencyImage` are
     prefixed with the source split (``"train:W"``, ``"val:H"``, ``"test:R"``)

@@ -72,6 +72,7 @@ class EmbeddingTrainer:
         *,
         eval_manifest: Manifest | None = None,
         eval_split: str = "test",
+        image_size: int = 224,
         tracker: Tracker | None = None,
         accelerator: Accelerator | None = None,
         run_id: str | None = None,
@@ -102,6 +103,10 @@ class EmbeddingTrainer:
         self._promote_criterion = promote_criterion
         self.eval_manifest = eval_manifest
         self.eval_split = eval_split
+        # Edge length the model trains at; eval/val/permutation embeddings must
+        # be computed at the same resolution (otherwise ArcFace/AdaFace are
+        # scored at a different input size than they were trained at).
+        self.image_size = int(image_size)
         self.callbacks: list[Any] = list(callbacks or [])
 
         # ArcFace/AdaFace baselines benefit from non-zero weight_decay
@@ -497,11 +502,12 @@ class EmbeddingTrainer:
 
         model = self.model
         device = self._infer_device()
+        image_size = self.image_size
 
         def _embed(paths: list[Path]) -> Any:
             import torch
 
-            tensors = [default_image_loader(Path(p)) for p in paths]
+            tensors = [default_image_loader(Path(p), image_size) for p in paths]
             stacked = torch.stack(tensors, dim=0).to(device)
             model.eval()
             with torch.no_grad():
