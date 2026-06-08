@@ -91,6 +91,46 @@ def test_run_test_auto_warns_when_monitor_checkpoint_missing(tmp_path: Path) -> 
     assert any("roc_auc" in w for w in warnings)
 
 
+def test_val_threshold_selects_strategy() -> None:
+    from types import SimpleNamespace
+
+    from bat_cli.runtime import _val_threshold
+
+    verification = SimpleNamespace(
+        optimal_threshold=0.11,
+        threshold_at_far_1e2=0.22,
+        threshold_at_recall_0p75=0.33,
+    )
+    report = SimpleNamespace(verification=verification)
+
+    assert _val_threshold(report, "youden_j") == 0.11
+    assert _val_threshold(report, "far_1e2") == 0.22
+    assert _val_threshold(report, "recall_0p75") == 0.33
+    # No val report -> None so the pipeline falls back to the test-fit threshold.
+    assert _val_threshold(None, "youden_j") is None
+
+
+def test_comparable_cosine_report_none_without_embedding() -> None:
+    """A model lacking forward_embedding yields no comparable cosine report."""
+    from types import SimpleNamespace
+
+    from bat_cli.runtime import _comparable_cosine_report
+
+    trainer = SimpleNamespace(model=object())
+    bundle = TrainingBundle(
+        cfg={"model": {"family": "pair", "input_edge_length": 105}},
+        manifest=object(),
+        model=object(),
+        loss=object(),
+        trainer_cfg=None,
+        train_loader=None,
+        val_loader=None,
+        test_loader=None,
+        trainer_kwargs={},
+    )
+    assert _comparable_cosine_report(trainer, bundle) is None
+
+
 def test_help_lists_core_commands() -> None:
     result = CliRunner().invoke(main, ["--help"])
 

@@ -576,6 +576,55 @@ def run_training(
                 lambda: tracker.log_artifact(report_path, "reports"),
             )
 
+        # Val-selected operating threshold + comparable cosine metric (PR6).
+        # Computing them once here lets the permutation test use the
+        # validation-derived threshold (rather than a test-fit one) and lets
+        # the pair family report a cosine metric directly comparable to the
+        # embedding families.
+        val_report = _safe("val eval", warnings, lambda: _val_eval_report(trainer, bundle))
+        if eval_report is not None and eval_report.predictions is not None:
+            eval_cfg = _mapping(bundle.cfg.get("evaluation"))
+            strategy = str(eval_cfg.get("permutation_threshold", "youden_j")).strip()
+            val_thr = _val_threshold(val_report, strategy)
+            if val_thr is not None and tracker is not None:
+                from bat_evaluation import confusion_at_threshold
+
+                c = confusion_at_threshold(
+                    eval_report.predictions.y_true, eval_report.predictions.y_score, val_thr
+                )
+                _safe(
+                    "val-threshold test metrics",
+                    warnings,
+                    lambda: tracker.log_metrics(
+                        "test_val_threshold",
+                        {"f1": c.f1, "precision": c.precision, "recall": c.recall},
+                        0,
+                    ),
+                )
+        if _model_family(bundle.cfg) == "pair" and tracker is not None:
+            cos = _safe(
+                "comparable cosine eval",
+                warnings,
+                lambda: _comparable_cosine_report(trainer, bundle),
+            )
+            if cos is not None:
+                _safe(
+                    "MLflow comparable cosine",
+                    warnings,
+                    lambda: tracker.log_metrics(
+                        "test_cosine",
+                        {
+                            "roc_auc": float(cos.verification.roc_auc),
+                            "youden_j": float(cos.verification.youden_j),
+                            "recall_at_far_1e2": float(cos.verification.recall_at_far_1e2),
+                            "precision_at_recall_0p75": float(
+                                cos.verification.precision_at_recall_0p75
+                            ),
+                        },
+                        0,
+                    ),
+                )
+
         permutation_dir: Path | None = None
         if run_permutation and eval_report is not None and eval_report.predictions is not None:
             # Pick the threshold the permutation test binarises at. Default
@@ -584,14 +633,18 @@ def run_training(
             # embedding-model cosine scores (which cluster within ~1e-7 of
             # 1.0) collapse to all-positive predictions at threshold=0.5 and
             # the null distribution flatlines — masking real ROC-AUC signal.
+            # Prefer the validation-derived threshold (PR6); fall back to the
+            # test-fit threshold only when no val report is available.
             eval_cfg = _mapping(bundle.cfg.get("evaluation"))
             strategy = str(eval_cfg.get("permutation_threshold", "youden_j")).strip()
-            if strategy == "far_1e2":
-                perm_threshold = float(eval_report.verification.threshold_at_far_1e2)
-            elif strategy == "recall_0p75":
-                perm_threshold = float(eval_report.verification.threshold_at_recall_0p75)
-            else:
-                perm_threshold = float(eval_report.verification.optimal_threshold)
+            perm_threshold = _val_threshold(val_report, strategy)
+            if perm_threshold is None:
+                if strategy == "far_1e2":
+                    perm_threshold = float(eval_report.verification.threshold_at_far_1e2)
+                elif strategy == "recall_0p75":
+                    perm_threshold = float(eval_report.verification.threshold_at_recall_0p75)
+                else:
+                    perm_threshold = float(eval_report.verification.optimal_threshold)
             permutation_result = _safe(
                 "permutation test",
                 warnings,
@@ -1068,6 +1121,73 @@ class ManifestPairDataset:
             self.loader(other.path),
             torch.tensor(label, dtype=torch.float32),
         )
+
+
+def _val_eval_report(trainer: Any, bundle: TrainingBundle) -> EvalReport | None:
+    """Best-effort validation EvalReport, used to source operating-point
+    thresholds that are then applied to test (val-selected threshold policy).
+
+    Returns ``None`` if a val report cannot be produced (e.g. no val loader for
+    the pair family, or the val split lacks gallery/probe minimums).
+    """
+    try:
+        if _model_family(bundle.cfg) == "embedding":
+            return trainer.test(manifest=bundle.manifest, split="val")
+        if bundle.val_loader is None:
+            return None
+        return trainer.test(bundle.val_loader)
+    except Exception:  # pragma: no cover -- best-effort enrichment
+        return None
+
+
+def _val_threshold(report: EvalReport | None, strategy: str) -> float | None:
+    """Pick the val operating threshold for ``strategy`` (youden_j/far_1e2/recall_0p75)."""
+    if report is None:
+        return None
+    v = report.verification
+    if strategy == "far_1e2":
+        return float(v.threshold_at_far_1e2)
+    if strategy == "recall_0p75":
+        return float(v.threshold_at_recall_0p75)
+    return float(v.optimal_threshold)
+
+
+def _comparable_cosine_report(trainer: Any, bundle: TrainingBundle) -> EvalReport | None:
+    """Cosine gallery/probe verification on ``forward_embedding`` for any model.
+
+    For the pair family (Siamese) this provides the metric the paper claims all
+    families share -- directly comparable to the embedding models -- alongside
+    the native pair-head report. Returns ``None`` on any failure.
+    """
+    model = getattr(trainer, "model", None)
+    if model is None or not hasattr(model, "forward_embedding"):
+        return None
+    image_size = int(_mapping(bundle.cfg.get("model")).get("input_edge_length", 224))
+    normalize = (
+        "imagenet"
+        if (
+            _model_family(bundle.cfg) == "embedding"
+            and _is_pretrained(_mapping(bundle.cfg.get("model")).get("pretrained", True))
+        )
+        else None
+    )
+    try:
+        import torch
+        from bat_data import default_image_loader
+        from bat_evaluation.protocols import run_eval_protocol
+
+        device = next(model.parameters()).device
+        model.eval()
+
+        def _embed(paths: list[Path]) -> Any:
+            tensors = [default_image_loader(Path(p), image_size, normalize) for p in paths]
+            stacked = torch.stack(tensors, dim=0).to(device)
+            with torch.no_grad():
+                return model.forward_embedding(stacked).detach().cpu()
+
+        return run_eval_protocol(bundle.manifest, split="test", embed_fn=_embed)
+    except Exception:  # pragma: no cover -- best-effort enrichment
+        return None
 
 
 def _run_test(
