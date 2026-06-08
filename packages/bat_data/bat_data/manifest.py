@@ -260,10 +260,16 @@ def build_manifest(
                 continue
             raise InvalidManifestError(f"unparseable filename: {path.name}")
 
+        # Include the root's own path components, not just the parts *below*
+        # the root: when ``--input-dir`` points directly at a background folder
+        # (e.g. ``.../green_bg``), that token is the root itself and would
+        # otherwise be excluded, silently defaulting every record to
+        # background="original".
         rel_parts = path.relative_to(root).parts[:-1]
-        background = _infer_background(rel_parts)
-        source = _infer_source(rel_parts)
-        dir_aug = _infer_dir_augmented(rel_parts)
+        search_parts = (*root.parts, *rel_parts)
+        background = _infer_background(search_parts)
+        source = _infer_source(search_parts)
+        dir_aug = _infer_dir_augmented(search_parts)
         # Filename-level aug always wins; otherwise fall back to dir hint
         # (or False when neither says anything).
         augmented = parsed.is_augmented or bool(dir_aug)

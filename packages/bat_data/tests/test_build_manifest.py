@@ -58,6 +58,23 @@ def test_build_manifest_walks_tree(tmp_path) -> None:
     assert by_path["r--W--001.png"].identity == "W"
 
 
+def test_build_manifest_infers_background_from_root_dir(tmp_path) -> None:
+    """When --input-dir points directly at a background folder, the background
+    token is the root itself and must still be inferred (regression: it used to
+    default to 'original' because only sub-paths were inspected).
+    """
+    from bat_data.manifest import build_manifest
+
+    root = tmp_path / "mauritius" / "video" / "not_augmented" / "green_bg"
+    _touch(root / "m--A--001.png")
+    _touch(root / "m--B--002.png")
+
+    manifest = build_manifest(root, species="mauritius", compute_quality_fn=_stub_quality)
+
+    assert {r.background for r in manifest.records} == {"green"}
+    assert {r.source for r in manifest.records} == {"video"}
+
+
 def test_build_manifest_missing_root(tmp_path) -> None:
     from bat_data.manifest import build_manifest
 
