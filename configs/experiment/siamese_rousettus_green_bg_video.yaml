@@ -1,0 +1,15 @@
+# @package _global_
+# Siamese on rousettus video frames, green backgrounds (12 IDs, 6/3/3 split;
+# same identity split as the random-bg manifest, so background is the only
+# variable for the within-species background-effect comparison).
+defaults:
+  - override /data: manifest_rousettus_green
+  - override /model: siamese
+  - override /loss: focal
+  - override /trainer: pair
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green
+  source: video

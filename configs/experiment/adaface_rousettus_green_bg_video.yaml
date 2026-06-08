@@ -1,0 +1,15 @@
+# @package _global_
+# AdaFace on rousettus video frames, green backgrounds (12 IDs, 6/3/3 split).
+# Base recipe -- see adaface_rousettus_green_bg_video_tuned for the tuned recipe.
+# Uses the corrected AdaFace additive margin (see PR1).
+defaults:
+  - override /data: manifest_rousettus_green
+  - override /model: adaface
+  - override /loss: adaface
+  - override /trainer: embedding
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green
+  source: video

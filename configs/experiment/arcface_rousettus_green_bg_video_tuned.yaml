@@ -1,0 +1,15 @@
+# @package _global_
+# Tuned ArcFace on rousettus video frames, green backgrounds (Adam lr=1e-3,
+# m=0.2, s=30).
+#   bat-cli train --experiment arcface_rousettus_green_bg_video_tuned
+defaults:
+  - override /data: manifest_rousettus_green
+  - override /model: arcface
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green
+  source: video

@@ -1,0 +1,15 @@
+# @package _global_
+# ArcFace on rousettus video frames, green backgrounds (12 IDs, 6/3/3 split;
+# same identity split as the random-bg manifest). Base recipe -- see
+# arcface_rousettus_green_bg_video_tuned for the tuned (Adam/m=0.2/s=30) recipe.
+defaults:
+  - override /data: manifest_rousettus_green
+  - override /model: arcface
+  - override /loss: arcface
+  - override /trainer: embedding
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green
+  source: video
