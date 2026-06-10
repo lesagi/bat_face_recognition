@@ -34,6 +34,16 @@ Provides a threshold-independent measure of discriminative power.
 curve to yield an optimal decision threshold.  This is used for F\textsubscript{1},
 precision, recall, and specificity computation.
 
+\paragraph{Threshold-selection policy.}
+All operating-point thresholds (Youden's J, $\mathrm{Recall@FAR}\le10^{-2}$, and the
+TAR@FAR budgets) are selected on the \emph{validation} split and then applied
+unchanged to the test split; the resulting test operating points are reported under
+the \texttt{test\_val\_threshold/*} prefix.  Thresholds re-fit directly on the test
+ROC curve are retained only as diagnostic upper bounds, never as headline numbers, to
+avoid optimistic bias from tuning the decision boundary on the evaluation set.  The
+permutation test below likewise uses the validation-derived threshold so that the null
+distribution reflects a deployable, test-blind operating point.
+
 \paragraph{TAR@FAR.}  The True Acceptance Rate at a fixed False Acceptance Rate (FAR) budget,
 defined as the maximum TPR among ROC operating points with $\mathrm{FPR} \le
 \mathrm{FAR}_{\text{target}}$.  We report TAR at $\mathrm{FAR} = 10^{-3}$ and $10^{-4}$.

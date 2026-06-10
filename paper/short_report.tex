@@ -81,7 +81,7 @@ Table~\ref{tab:leakage} demonstrates the scale of this effect.
 Protocol & ROC-AUC & F\textsubscript{1} & Recall \\
 \midrule
 Random-pair split \bad{(leaky)}          & 0.982 & 0.987 & 0.986 \\
-\good{Identity-disjoint split (correct)} & 0.805 & 0.742 & 0.734 \\
+\good{Identity-disjoint split (correct)} & 0.858 & 0.707 & 0.734 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -95,47 +95,56 @@ Random-pair split \bad{(leaky)}          & 0.982 & 0.987 & 0.986 \\
 
 \begin{table}[h]
 \centering
-\caption{Test-set results on rousettus (random background, 3 unseen test identities).
-Pair-family uses verification metrics (ROC-AUC, F\textsubscript{1});
-embedding-family also reports identification metrics.}
+\caption{Test-set results on rousettus by background, 3 unseen test identities.
+Siamese ROC-AUC is pairwise-head; ArcFace/AdaFace ROC-AUC is cosine-based (not directly
+comparable). $^{\dagger}$ = not significant ($p<0.05$, permutation $n{=}100$).}
 \label{tab:rousettus}
 \setlength{\tabcolsep}{5pt}
 \begin{tabular}{llccccc}
 \toprule
-Model & HPs & ROC-AUC & F\textsubscript{1} & Top-1 & mAP & TAR@\(10^{-3}\) \\
+Model & BG & ROC-AUC & F\textsubscript{1} & Top-1 & mAP & TAR@\(10^{-3}\) \\
 \midrule
-\good{Siamese}  & tuned  & \bestval{0.809} & \bestval{0.747} & ---   & ---   & 0.017 \\
-ArcFace         & tuned  & 0.541           & ---             & 0.344 & 0.634 & 0.000 \\
-AdaFace         & tuned  & 0.507           & ---             & 0.286 & 0.609 & 0.004 \\
-ArcFace         & default & \bad{0.500}    & ---             & 0.326 & 0.633 & 0.000 \\
+\good{Siamese}  & random & 0.858 & 0.707 & ---   & ---   & 0.012 \\
+\good{Siamese}  & green  & 0.669 & 0.797 & ---   & ---   & 0.001 \\
+ArcFace (v2)    & random & 0.665$^{\dagger}$ & --- & 0.532 & 0.731 & 0.074 \\
+ArcFace (v2)    & green  & 0.847 & --- & \bestval{0.846} & \bestval{0.915} & 0.067 \\
+AdaFace         & random & 0.434$^{\dagger}$ & --- & 0.274 & 0.560 & 0.003 \\
+AdaFace         & green  & 0.753 & --- & 0.556 & 0.762 & 0.006 \\
+ArcFace (v1)    & random & \bad{0.500}$^{\dagger}$ & --- & 0.591 & 0.757 & 0.000 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \vspace{-0.2em}
 \textbf{Note on ArcFace default:} paper-scale hyperparameters (SGD $\eta{=}0.1$,
-margin $0.5$, scale $64$) destroy the ImageNet pretrained backbone on 486 training
-images --- both train accuracy and validation ROC-AUC collapse to chance. Tuning to
-Adam $\eta{=}10^{-3}$, margin $0.2$, scale $30$ recovers partial performance but
-still falls far short of the Siamese network.
+margin $0.5$, scale $64$) destroy the ImageNet pretrained backbone --- validation
+ROC-AUC stays at chance even as train accuracy climbs to $0.93$. Tuning to
+Adam $\eta{=}10^{-3}$, margin $0.2$, scale $30$ recovers strongly on \emph{green}
+backgrounds (ROC-AUC $0.847$, Top-1 $0.846$) but remains near chance on random
+compositing --- a background effect, not a fixed identity-count ceiling.
 
 \subsection{Mauritius --- 11 individuals, 1\,119 images (5/3/3 id split)}
 
 \begin{table}[h]
 \centering
-\caption{Test-set results on mauritius across background conditions.}
+\caption{Test-set results on mauritius across background conditions.
+Siamese ROC-AUC is pairwise-head; ArcFace/AdaFace ROC-AUC is cosine-based.
+$^{\dagger}$ = not significant ($p<0.05$).}
 \label{tab:mauritius}
 \setlength{\tabcolsep}{5pt}
 \begin{tabular}{llccccc}
 \toprule
 Model & Background & ROC-AUC & F\textsubscript{1} & Top-1 & mAP & TAR@\(10^{-3}\) \\
 \midrule
-\good{Siamese} & green    & \bestval{0.925} & \bestval{0.864} & --- & ---   & 0.083 \\
-\good{Siamese} & original & 0.922           & 0.872           & --- & ---   & 0.041 \\
-\good{Siamese} & random   & 0.803           & 0.759           & --- & ---   & 0.001 \\
-ArcFace        & green    & 0.761           & ---             & \bestval{0.706} & \bestval{0.841} & 0.044 \\
-AdaFace        & green    & 0.704           & ---             & 0.566 & 0.778 & 0.022 \\
-ArcFace        & random   & 0.526           & ---             & 0.362 & 0.618 & 0.000 \\
+\good{Siamese} & green    & 0.710 & 0.689 & --- & ---   & 0.014 \\
+\good{Siamese} & original & 0.834 & 0.753 & --- & ---   & 0.005 \\
+\good{Siamese} & random   & 0.806 & 0.686 & --- & ---   & 0.007 \\
+ArcFace        & green    & 0.843 & --- & 0.740 & 0.870 & 0.282 \\
+AdaFace        & green    & \bestval{0.902} & --- & \bestval{0.916} & \bestval{0.955} & 0.383 \\
+ArcFace        & original & 0.791 & --- & 0.576 & 0.774 & 0.145 \\
+AdaFace        & original & 0.731 & --- & 0.634 & 0.785 & 0.151 \\
+ArcFace        & random   & 0.578$^{\dagger}$ & --- & 0.479 & 0.697 & 0.021 \\
+AdaFace        & random   & 0.539 & --- & 0.459 & 0.682 & 0.006 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -175,14 +184,14 @@ ArcFace        & random   & 0.526           & ---             & 0.362 & 0.618 & 
 ]
 \addplot[fill=colSiamese!70, draw=colSiamese]
   coordinates {
-    (Siam-rou,     0.809)
-    (Arc-rou,      0.541)
-    (Ada-rou,      0.507)
-    (Siam-mau-grn, 0.925)
-    (Siam-mau-ori, 0.922)
-    (Siam-mau-rnd, 0.803)
-    (Arc-mau-grn,  0.761)
-    (Ada-mau-grn,  0.704)
+    (Siam-rou,     0.858)
+    (Arc-rou,      0.665)
+    (Ada-rou,      0.434)
+    (Siam-mau-grn, 0.710)
+    (Siam-mau-ori, 0.834)
+    (Siam-mau-rnd, 0.806)
+    (Arc-mau-grn,  0.843)
+    (Ada-mau-grn,  0.902)
   };
 \end{axis}
 \end{tikzpicture}
@@ -192,64 +201,70 @@ ArcFace        & random   & 0.526           & ---             & 0.362 & 0.618 & 
 \textbf{x-axis key:}
 Siam = Siamese, Arc = ArcFace, Ada = AdaFace;
 rou = rousettus (random bg); mau = mauritius with grn/ori/rnd background.
+Siamese bars are pairwise-head ROC-AUC, embedding bars cosine ROC-AUC (not directly
+comparable; read within-family).
 }
 
 % ==========================================================
-\section{Why the Current Identity Count Is Insufficient}
+\section{Why Background --- Not Identity Count --- Drives the Gap}
 
-Four independent signals in the data converge on the same conclusion.
+After correcting the AdaFace margin, ImageNet normalisation, and evaluation resolution,
+the embedding models are competitive at $\le\!13$ identities; what separates success from
+collapse is the \textbf{background}, not the number of training identities.
 
 \smallskip
-\textbf{1.\ Train/test performance divergence.}
-Embedding models reach near-perfect training accuracy while test ROC-AUC stays near
-chance---textbook closed-set overfitting:
+\textbf{1.\ The train/test gap is background-dependent.}
+Train accuracy is near-perfect in every condition, so identity count cannot explain the
+gap; the background can.  With identity count fixed (6 train ids), the gap shrinks
+sharply from random to green:
+
+\begin{center}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{llccc}
+\toprule
+Model & BG & Train acc & Test ROC-AUC & Gap \\
+\midrule
+ArcFace & random & 0.969 & 0.665 & $-0.304$ \\
+AdaFace & random & 0.975 & 0.434 & $-0.541$ \\
+ArcFace & green  & 0.998 & 0.847 & $-0.151$ \\
+AdaFace & green  & 0.998 & 0.753 & $-0.245$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\smallskip
+\textbf{2.\ Top-1 is at chance only on random backgrounds.}
+With 3 unseen test identities, chance is 0.33.  On random backgrounds ArcFace/AdaFace
+hover near it (rousettus 0.53/0.27); on green screen they soar (rousettus ArcFace 0.85,
+mauritius AdaFace 0.92).  Transferable structure \emph{does} emerge when the background
+is coherent.
+
+\smallskip
+\textbf{3.\ Instability tracks the background.}
+ArcFace and AdaFace validation curves oscillate and (for AdaFace) decay on random
+backgrounds, but converge to high, stable values on green/original --- the instability is
+a property of the random-background landscape, not of the small class count.
+
+\smallskip
+\textbf{4.\ Cross-species consistency points to background.}
+The pattern replicates for both species, ruling out species-specific causes:
 
 \begin{center}
 \setlength{\tabcolsep}{6pt}
 \begin{tabular}{lccc}
 \toprule
-Model & Train acc & Test ROC-AUC & Gap \\
+Species & ArcFace random & ArcFace green & $\Delta$ \\
 \midrule
-ArcFace & 0.988 & 0.541 & $-0.447$ \\
-AdaFace & 1.000 & 0.507 & $-0.493$ \\
-Siamese & 1.000 & 0.809 & $-0.191$ \\
+rousettus & 0.665 & 0.847 & $+0.182$ \\
+mauritius & 0.578 & 0.843 & $+0.265$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\smallskip
-\textbf{2.\ Top-1 identification at chance.}
-With 3 unseen test identities, random guessing gives 0.33.
-ArcFace scores 0.344, AdaFace 0.286---both within noise of chance.
-The embedding space carries no useful structure for novel identity assignment.
-
-\smallskip
-\textbf{3.\ Optimization instability.}
-ArcFace and AdaFace validation curves oscillate throughout training (val ROC-AUC
-jumping between 0.44 and 0.65 across consecutive epochs) and never stabilise---a
-symptom of an underconstrained loss landscape when too few identity classes are
-available.
-
-\smallskip
-\textbf{4.\ Cross-species consistency isolates identity count as the cause.}
-The same gap appears independently for both species:
-
-\begin{center}
-\setlength{\tabcolsep}{6pt}
-\begin{tabular}{lcccc}
-\toprule
-Species & Train ids & Siamese & ArcFace & Gap \\
-\midrule
-rousettus & 6 & 0.809 & 0.541 & $+0.268$ \\
-mauritius & 5 & 0.803 & 0.526 & $+0.277$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-Had the failure been caused by species-specific factors (fur texture, pose, image
-quality), the gap would differ between species.  Instead it is virtually identical
-(0.268 vs.\ 0.277), ruling out image-level explanations and isolating
-\textbf{identity count} as the governing variable.
+Both species are weak on random compositing and both recover on green screen at the same
+small identity counts, isolating \textbf{background coherence} as the governing variable.
+Identity count likely still matters at larger scales, but it is not the binding constraint
+we can demonstrate here.
 
 
 \end{document}

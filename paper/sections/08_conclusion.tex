@@ -10,25 +10,31 @@ background conditions lead to three conclusions:
 \begin{enumerate}[leftmargin=1.6em, itemsep=3pt]
   \item \textbf{Identity-disjoint evaluation is non-negotiable.}
         The same architecture can appear to achieve $F_1 \approx 0.99$ under random-pair
-        splitting and $F_1 \approx 0.74$ under identity-disjoint evaluation on the same
+        splitting and $F_1 \approx 0.71$ under identity-disjoint evaluation on the same
         images.  Any reported result on animal re-identification should explicitly state
         whether splits are identity-disjoint.
 
-  \item \textbf{Pair-based models are the appropriate choice at the current dataset scale.}
-        At $\le\!12$ training individuals, the Siamese pairwise objective consistently
-        outperforms angular-margin embedding losses by $0.27$ ROC-AUC points.
-        Four independent signals confirm that this is a dataset-scale limitation rather
-        than a model-family limitation: embedding models reach near-perfect training
-        accuracy while test ROC-AUC stays near chance; Top-1 identification is at random
-        for both models; optimisation is unstable throughout training; and crucially, the
-        same gap (${\approx}0.27$ ROC-AUC) appears independently for rousettus (6 train
-        identities) and mauritius (5 train identities), ruling out any species-specific
-        explanation and isolating identity count as the governing variable.
+  \item \textbf{Pair-based models are the safe default, but corrected embedding models
+        are competitive---and the deciding factor is background, not identity count.}
+        The Siamese network is the only family that is statistically significant across
+        every species and background.  However, once the AdaFace additive margin,
+        ImageNet normalisation, and matched $112$-px evaluation are corrected, ArcFace and
+        AdaFace match or exceed the Siamese network on coherent (green/original)
+        backgrounds even at $\le\!13$ training identities---AdaFace reaches ROC-AUC
+        $0.902$ and Top-1 $0.916$ on Mauritius green.  Their failures concentrate on
+        random-composited backgrounds, where they regress toward chance and lose
+        significance.  We therefore frame the embedding-model shortfall as a
+        \emph{background-sensitivity} effect rather than a fixed small-identity wall;
+        identity count likely still matters, but at this scale background coherence is the
+        constraint we can demonstrate.
 
-  \item \textbf{Green-screen or controlled backgrounds improve performance meaningfully.}
-        A ${\sim}\!12$-point ROC-AUC improvement from random to controlled backgrounds
-        (mauritius, Siamese) suggests that background standardisation during data
-        collection is a high-leverage intervention.
+  \item \textbf{Controlled backgrounds are a high-leverage intervention, especially for
+        embedding models.}
+        Moving from random to controlled backgrounds lifts embedding-model ROC-AUC by up
+        to ${\sim}\!27$ points (Mauritius: ArcFace $0.578\!\to\!0.843$, AdaFace
+        $0.539\!\to\!0.902$) and improves the Siamese cosine ROC-AUC as well, indicating
+        that background standardisation at capture time is cheaper and more impactful than
+        collecting many additional identities.
 \end{enumerate}
 
 \paragraph{Reproducibility.}

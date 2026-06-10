@@ -1,0 +1,13 @@
+# @package _global_
+# Composed experiment: ArcFace on mauritius video frames, original backgrounds.
+defaults:
+  - override /data: manifest_mauritius_original
+  - override /model: arcface
+  - override /loss: arcface
+  - override /trainer: embedding
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: original
+  source: video

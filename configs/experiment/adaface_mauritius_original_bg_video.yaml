@@ -1,0 +1,13 @@
+# @package _global_
+# Composed experiment: AdaFace on mauritius video frames, original backgrounds.
+defaults:
+  - override /data: manifest_mauritius_original
+  - override /model: adaface
+  - override /loss: adaface
+  - override /trainer: embedding
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: original
+  source: video

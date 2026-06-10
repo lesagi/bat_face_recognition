@@ -57,7 +57,18 @@ classification head.  The architecture maps $112\!\times\!112$ RGB images to a
 \paragraph{Backbone.}
 A ResNet-50~\cite{he2016resnet} initialised with ImageNet1K-V2 weights serves as the
 feature extractor.  The original fully connected classification head is replaced by
-\texttt{nn.Identity()}, yielding a 2\,048-dimensional feature vector.
+\texttt{nn.Identity()}, yielding a 2\,048-dimensional feature vector.  Because the
+backbone is ImageNet-pretrained, inputs are normalised with the ImageNet channel
+statistics ($\mu=[0.485,0.456,0.406]$, $\sigma=[0.229,0.224,0.225]$) consistently
+across training, validation, test, and the embedding projections used for
+visualisation; the from-scratch Siamese tower instead consumes images scaled to
+$[0,1]$.  We note one deliberate deviation from the cited angular-margin
+literature: the original ArcFace/AdaFace works use an IR/IR-SE stem (a $3\!\times\!3$
+stride-1 convolution preserving spatial resolution) with an Option-E embedding head
+that flattens the final feature map.  We instead use the torchvision ResNet-50 stem
+($7\!\times\!7$ stride-2 convolution followed by max-pooling) and global average
+pooling, trading architectural fidelity for the strong transfer-learning prior of
+ImageNet pretraining, which is better suited to our small-data regime.
 
 \paragraph{Projection block.}
 Following standard practice~\cite{deng2019arcface}, the 2\,048-d backbone output is
@@ -87,12 +98,18 @@ The margin is then adapted per sample:
   g_{\text{margin}} &= \operatorname{clip}\!\left(\frac{\|\mathbf{z}\| - \mu_b}
                                                 {\sigma_b + \varepsilon} \cdot h,\,
                                                 -1, 1\right), \\
-  \ell_y &= s \cdot \bigl[\cos(\theta_y - m \cdot g_{\text{margin}}) - m \cdot
-                          g_{\text{margin}}\bigr]
+  \ell_y &= s \cdot \bigl[\cos(\theta_y - m \cdot g_{\text{margin}}) - \bigl(m \cdot
+                          g_{\text{margin}} + m\bigr)\bigr]
   \label{eq:adaface}
 \end{align}
-with $h = 0.333$, $m = 0.2$, $s = 30$.  Images with below-average feature norms (low
-quality) receive a reduced margin, lessening their influence on the decision boundary.
+with $h = 0.333$, $m = 0.2$, $s = 30$.  The constant additive term $+m$
+(Eq.~19 of Kim et al.~\cite{kim2022adaface}) is essential: at average quality
+($g_{\text{margin}}\!=\!0$) the head reduces to CosFace with additive margin $m$,
+not to a plain-softmax logit; the limit cases are $g_{\text{margin}}\!=\!-1$
+(ArcFace, $\cos(\theta_y+m)$), $g_{\text{margin}}\!=\!0$ (CosFace,
+$\cos\theta_y-m$), and $g_{\text{margin}}\!=\!1$ (negative angular margin with a
+shift).  Images with below-average feature norms (low quality) thus receive a
+reduced effective margin, lessening their influence on the decision boundary.
 
 \paragraph{Inference.}
 At test time both ArcFace and AdaFace return the L2-normalised embedding

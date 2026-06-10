@@ -11,11 +11,14 @@ We work with two fruit-bat species from active research colonies:
         Images were extracted from close-range video recordings; each frame was
         independently processed by the preprocessing pipeline.  All images were captured
         with randomised background compositing.
-  \item \textbf{\mauritius (Mauritian flying fox, \emph{Pteropus niger})}: 11 individuals,
-        1\,119 images.  Three background conditions are available for this species:
-        \emph{green screen} (green-screen chroma key replacement), \emph{original}
-        (natural enclosure background), and \emph{random} (composited random textures).
-        This provides a controlled study of background-invariance.
+  \item \textbf{\mauritius (Mauritian flying fox, \emph{Pteropus niger})}: three
+        background conditions are available for this species, each captured/curated
+        independently and therefore differing in identity and image counts:
+        \emph{random} (composited random textures; 11 individuals, 1\,119 images),
+        \emph{green screen} (chroma-key replacement; 19 individuals, 1\,598 images),
+        and \emph{original} (natural enclosure background; 17 individuals, 1\,038
+        images).  Together they provide a controlled study of background-invariance
+        (see Table~\ref{tab:dataset} for per-split counts).
 \end{itemize}
 
 \subsection{Preprocessing pipeline}
@@ -141,8 +144,10 @@ Table~\ref{tab:dataset} summarises the final partition statistics.
 
 \begin{table}[h]
 \centering
-\caption{Dataset split statistics under the identity-disjoint protocol (seed 42, val/test
-fractions 25\%/25\%). BG~=~background condition.}
+\caption{Dataset split statistics under the identity-disjoint protocol (seed 42).
+Whole identities are assigned to exactly one split; every condition reserves 3
+identities for validation and 3 for test, with the remainder used for training.
+BG~=~background condition.}
 \label{tab:dataset}
 \setlength{\tabcolsep}{5pt}
 \begin{tabular}{llccccccc}
@@ -151,10 +156,11 @@ Species & BG & Total & Identities & \multicolumn{2}{c}{Train} & \multicolumn{2}{
 \cmidrule(lr){5-6}\cmidrule(lr){7-8}
  & & imgs & total & ids & imgs & ids & imgs & imgs \\
 \midrule
-\rousettus       & random   & 1\,059 & 12 & 6 & 486 & 3 & 343 & 230 \\
-\mauritius       & random   & 1\,119 & 11 & 5 & 400 & 3 & 343 & 376 \\
-\mauritius       & green    & 1\,598 & 11 & 5 & 1229& 3 & 230 & 139 \\
-\mauritius       & original & 1\,038 & 11 & 5 & ---&3 & --- & --- \\
+\rousettus       & random   & 1\,059 & 12 & 6  & 486   & 3 & 343 & 230 \\
+\rousettus       & green    & 1\,093 & 12 & 6  & 490   & 3 & 359 & 244 \\
+\mauritius       & random   & 1\,119 & 11 & 5  & 400   & 3 & 343 & 376 \\
+\mauritius       & green    & 1\,598 & 19 & 13 & 1\,229& 3 & 230 & 139 \\
+\mauritius       & original & 1\,038 & 17 & 11 & 675   & 3 & 175 & 188 \\
 \bottomrule
 \end{tabular}
 \end{table}

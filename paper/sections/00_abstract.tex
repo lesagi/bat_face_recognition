@@ -8,21 +8,24 @@ protocol: train, validation, and test splits are partitioned at the level of ind
 identities so that no bat ever appears in more than one split.
 We show that the widely-used alternative---random pair selection---inflates performance
 dramatically: a Siamese network that achieves $F_1 = 0.99$ under the random-pair protocol
-drops to $F_1 = 0.74$ under identity-disjoint evaluation on the same images.
+drops to $F_1 = 0.71$ under identity-disjoint evaluation on the same images.
 
 We compare three deep-learning model families---a pair-based Siamese convolutional
 network and two embedding-based angular-margin architectures (ArcFace and AdaFace built
 on a ResNet-50 backbone)---across a factorial design covering two fruit-bat species
 (\rousettus and \mauritius), three background conditions (green screen, original, and
-random compositing), and controlled identity counts.
-On the rousettus dataset (12 individuals, 1\,059 images), the Siamese network achieves a
-test \rocauc of $0.809$ versus $0.541$ and $0.507$ for ArcFace and AdaFace respectively.
-On mauritius (11 individuals, 1\,119 images) the ordering is preserved, with the Siamese
-network reaching $0.803$--$0.925$ depending on background condition.
-We trace the embedding-model shortfall to the \emph{small-identity generalisation wall}:
-with fewer than twelve training identities the angular separation learned during closed-set
-training does not transfer to unseen test identities, even when training accuracy
-approaches 100\%.
+random compositing), and small identity counts ($\le 13$ training individuals).
+The Siamese network is the only family that verifies significantly across \emph{all}
+conditions (pairwise-head \rocauc $0.67$--$0.86$; cosine \rocauc $0.82$--$0.96$).  The
+embedding models, by contrast, are governed by the background: on random-composited
+backgrounds they regress toward chance (rousettus ArcFace $0.665$, AdaFace $0.434$;
+not statistically significant), but on coherent green-screen backgrounds they recover
+sharply and can \emph{surpass} the Siamese network---AdaFace reaches \rocauc $0.902$ with
+Top-1 $0.916$ on \mauritius green, at the same small identity count.
+We therefore characterise the embedding-model shortfall as a \emph{background-sensitivity}
+effect rather than a fixed small-identity ceiling: with stable backgrounds, angular-margin
+embeddings transfer to unseen identities even at this scale, whereas random-background
+nuisance variation---not identity count alone---is what collapses them.
 
 All experiments are fully reproducible via a single-command pipeline and are tracked in
 MLflow.

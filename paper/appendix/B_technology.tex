@@ -101,7 +101,10 @@ Post-training interpretability is provided by three adapters in \texttt{bat\_int
         embedding models, highlighting regions most discriminative for a given identity.
   \item \textbf{\texttt{EmbeddingProjectionAdapter}}: t-SNE and UMAP projections of
         test-set embeddings, coloured by identity, providing a 2-D snapshot of the
-        embedding space geometry.
+        embedding space geometry.  To keep every identity visible while bounding plot
+        density, embeddings are sampled with a \emph{max-samples-per-identity} policy
+        (default 8) rather than a single global cap, and each legend entry reports the
+        number of projected samples for that identity, e.g.\ \texttt{id\_7 (n=5)}.
 \end{itemize}
 The unified PDF report is assembled by \textbf{reportlab} (pure-Python PDF generation)
 and uploaded to MLflow as a run artefact.

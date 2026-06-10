@@ -29,7 +29,7 @@ three partitions.  The model therefore sees every identity during training and t
 protocol measures closed-set retrieval rather than genuine open-set generalisation.
 We demonstrate that a Siamese network trained and evaluated under the random-pair protocol
 achieves $F_1 = 0.99$, whereas the same network evaluated under a strict identity-disjoint
-protocol on the same images yields $F_1 = 0.74$.  The lower number is the scientifically
+protocol on the same images yields $F_1 = 0.71$.  The lower number is the scientifically
 correct one.
 
 \subsection*{Contributions}
@@ -44,10 +44,12 @@ This work makes the following contributions:
         embedding-based deep recognition architectures across two bat species, three
         background conditions, and controlled identity counts, using real video data from
         tracking studies.
-  \item We characterise the \textbf{small-identity generalisation wall} for angular-margin
-        embedding losses and show that, contrary to standard face-recognition benchmarks,
-        the pair-based Siamese network is the stronger model at the scale of ecological
-        datasets ($\le$12 training identities).
+  \item We show that, at the scale of ecological datasets ($\le 13$ training identities),
+        the pair-based Siamese network is the only family that verifies significantly
+        across all conditions, while corrected angular-margin embeddings (ArcFace/AdaFace)
+        match or surpass it on coherent backgrounds---characterising the embedding-model
+        shortfall as a \textbf{background-sensitivity} effect (collapse on random-composited
+        backgrounds) rather than a fixed small-identity ceiling.
   \item We release a \textbf{reproducible 13-package pipeline} (\batcli) that automates
         the full workflow from raw video to PDF experimental report, with Hydra
         configuration, MLflow tracking, and Optuna hyperparameter search.

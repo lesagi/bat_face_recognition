@@ -1,0 +1,13 @@
+# @package _global_
+# AdaFace on rousettus video frames, random backgrounds (12-ID baseline).
+defaults:
+  - override /data: manifest_rousettus
+  - override /model: adaface
+  - override /loss: adaface
+  - override /trainer: embedding
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: random
+  source: video

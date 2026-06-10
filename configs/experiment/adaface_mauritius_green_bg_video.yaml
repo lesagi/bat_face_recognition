@@ -1,0 +1,13 @@
+# @package _global_
+# AdaFace on mauritius video frames, green backgrounds (19 IDs, 13/3/3 split).
+defaults:
+  - override /data: manifest_mauritius_green
+  - override /model: adaface
+  - override /loss: adaface
+  - override /trainer: embedding
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green
+  source: video

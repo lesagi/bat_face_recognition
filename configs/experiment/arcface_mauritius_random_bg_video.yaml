@@ -1,0 +1,13 @@
+# @package _global_
+# ArcFace on mauritius video frames, random composited backgrounds.
+defaults:
+  - override /data: manifest_mauritius
+  - override /model: arcface
+  - override /loss: arcface
+  - override /trainer: embedding
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: random
+  source: video

@@ -1,0 +1,11 @@
+manifest_path: data/manifests/mauritius_green_bg_manifest.csv
+species: mauritius
+background: green
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0

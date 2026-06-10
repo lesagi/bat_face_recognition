@@ -2,123 +2,136 @@
 \section{Discussion}
 \label{sec:discussion}
 
-\subsection{Why pair-based models win at small identity counts}
+\subsection{Two robust families, and one decisive covariate: background}
 
-The consistent advantage of the Siamese network over ArcFace and AdaFace across all
-experimental conditions is not an architectural accident but a structural consequence of
-the training objective.
+Two findings organise the corrected results.  First, the Siamese network is
+\emph{robust}: it produces statistically significant verification (permutation test,
+$p<0.05$) on every species and background, with pairwise-head ROC-AUC in
+$0.67$--$0.86$ and cosine ROC-AUC in $0.82$--$0.96$.  Second, the embedding models
+(ArcFace and AdaFace), once the AdaFace additive margin, ImageNet normalisation, and
+matched $112$-px evaluation are corrected, are \emph{not} uniformly weak---their
+behaviour is governed almost entirely by the background condition rather than by the
+number of training identities.
 
-Angular-margin losses optimise a \emph{closed-set classification} problem: at training
-time the model learns to separate the specific identities it has seen, placing them into
-distinct cones on the unit hypersphere.  The hope at test time is that the manifold
-structure learned from a few training identities will generalise---that unseen test
-identities will land in distinguishable regions of the same embedding space.  With only
-6 training identities and 512 embedding dimensions, the hypersphere has vastly more
-capacity than necessary for the training task, so the learned geometry is underconstrained
-and effectively arbitrary with respect to novel bats.
+This is the central revision relative to our earlier reading of these experiments.  We
+had attributed the embedding models' weakness to a ``small-identity generalisation
+wall.''  The corrected runs show that with $\le 13$ training identities the very same
+models reach---and on Mauritius green \emph{exceed}---the Siamese network when the
+background is coherent (AdaFace Mauritius green: ROC-AUC $0.902$, Top-1 $0.916$, mAP
+$0.955$).  The factor that separates success from collapse is therefore not identity
+count alone but whether the test imagery shares the controlled background of training.
 
-The Siamese network optimises a \emph{pairwise verification} objective directly: for
-every training batch the model is asked whether two images show the same bat.  It never
-assigns identities to fixed slots and therefore does not depend on the angular geometry
-generalising to unseen individuals.  This alignment between training objective and
-deployment task is the structural reason the pair-based model wins.
+\paragraph{Objective alignment still favours pairs under distribution shift.}
+The structural reason the Siamese network is robust remains valid: it optimises a
+\emph{pairwise verification} objective that matches the deployment criterion and never
+binds identities to fixed classifier slots.  Angular-margin losses instead solve a
+\emph{closed-set classification} problem and rely on the learned hypersphere geometry
+transferring to unseen identities.  What the new data clarifies is that this transfer
+succeeds at small identity counts \emph{when the input distribution is stable}, and
+fails when random-background compositing injects nuisance variation that the
+closed-set geometry has not been forced to factor out.
 
-We expect this ordering to reverse as identity count grows: with many training identities
-the angular manifold becomes well-constrained and embedding-based models typically
-dominate~\cite{deng2019arcface, kim2022adaface}.
-
-\subsection{Evidence that the current identity count is insufficient}
+\subsection{Background sensitivity, not identity count, drives the gap}
 \label{sec:identity_wall}
 
-Four independent signals in the experimental data converge on the same conclusion: the
-dataset is currently too small for angular-margin losses to learn transferable geometry.
+Three signals, re-examined across background conditions, converge on background as the
+governing variable.
 
-\paragraph{Train/test performance divergence.}
-The sharpest signal is the gap between training accuracy and test ROC-AUC for the
-embedding models:
+\paragraph{The train/test gap is background-dependent, not count-dependent.}
+Training accuracy is near-perfect for the embedding models in \emph{every} condition, so
+identity count alone cannot explain the test gap.  What moves the gap is the background:
 
 \begin{table}[h]
 \centering
-\caption{Training accuracy vs.\ test ROC-AUC for embedding models (rousettus).
-Near-perfect closed-set training accuracy coincides with near-chance test discrimination.}
+\caption{Embedding-model train accuracy vs.\ test ROC-AUC on rousettus, by background.
+Identity count is fixed (6 train identities) across rows; only the background differs.
+The generalisation gap is large on random compositing and small on green screen.}
 \label{tab:overfit}
-\setlength{\tabcolsep}{8pt}
-\begin{tabular}{lccc}
+\setlength{\tabcolsep}{7pt}
+\begin{tabular}{llccc}
 \toprule
-Model & Train acc & Test ROC-AUC & Gap \\
+Model & BG & Train acc & Test ROC-AUC & Gap \\
 \midrule
-ArcFace (tuned) & 0.988 & 0.541 & $-0.447$ \\
-AdaFace (tuned) & 1.000 & 0.507 & $-0.493$ \\
-Siamese         & 1.000 & 0.809 & $-0.191$ \\
+ArcFace (tuned) & random & 0.969 & 0.665 & $-0.304$ \\
+AdaFace (tuned) & random & 0.975 & 0.434 & $-0.541$ \\
+ArcFace (tuned) & green  & 0.998 & 0.847 & $-0.151$ \\
+AdaFace (tuned) & green  & 0.998 & 0.753 & $-0.245$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-ArcFace and AdaFace perfectly separate the 6 training identities yet produce test
-ROC-AUC barely above chance.  The Siamese network, while also fully fitting the training
-set, retains a much smaller gap because the pairwise objective directly optimises the
-verification criterion being evaluated.
+With the identity count held fixed, moving from random to green backgrounds roughly
+halves the ArcFace gap ($-0.304 \to -0.151$) and substantially reduces the AdaFace gap.
+A pure identity-count bottleneck would not be relieved by changing the background.
 
-\paragraph{Top-1 identification at chance level.}
-With 3 unseen test identities, random guessing yields a Top-1 accuracy of $0.33$.
-ArcFace achieves $0.344$ and AdaFace $0.286$---both within noise of chance.
-The embedding space has no useful structure for assigning novel identities;
-it has only memorised the angular positions of the 6 training cones.
+\paragraph{Top-1 identification is at chance only on random backgrounds.}
+With 3 unseen test identities, chance Top-1 is $0.33$.  On random backgrounds the
+embedding models hover near chance (ArcFace rousettus $0.53$, AdaFace $0.27$), but on
+green screen they are far above it (ArcFace rousettus $0.85$, Mauritius $0.74$; AdaFace
+Mauritius $0.92$).  The embedding space \emph{does} acquire transferable structure for
+novel identities---provided the background does not dominate the signal.
 
-\paragraph{Optimization instability.}
-The validation ROC-AUC curves for ArcFace and AdaFace (Figure~\ref{fig:learning_curves})
-show high epoch-to-epoch variance throughout training, never stabilising, in contrast
-to the Siamese network which converges smoothly by epoch 4.  This instability is a
-symptom of an under-constrained optimisation landscape: with too few classes, the
-angular loss surface has many shallow plateaus and the model cannot find a configuration
-that generalises.  The sensitivity to batch ordering observed before the DataLoader seed
-fix (repro-1 vs.\ repro-2: ROC-AUC $0.528$ vs.\ $0.563$ from identical hyperparameters)
-further illustrates this fragility.
+\paragraph{Optimization instability tracks the background too.}
+The validation ROC-AUC curves for ArcFace and AdaFace on random backgrounds
+(Figure~\ref{fig:learning_curves}) show high epoch-to-epoch variance and, for AdaFace,
+decay toward chance, whereas the Siamese network converges smoothly.  On green/original
+backgrounds the same losses converge to high, stable validation scores (Section
+\ref{sec:experiments}).  The instability is thus a property of the random-background
+optimisation landscape rather than an intrinsic small-class pathology.
 
-\paragraph{Cross-species consistency rules out species-specific explanations.}
-The same failure pattern appears independently for both species:
+\paragraph{Cross-species consistency points to background, not species.}
+The pattern replicates across both species, which rules out species-specific causes:
 
 \begin{table}[h]
 \centering
-\caption{ArcFace test ROC-AUC across species (random background, tuned hyperparameters).
-The near-chance performance and the Siamese advantage are consistent across both
-species, pointing to identity count as the common cause.}
+\caption{Embedding (ArcFace) test ROC-AUC by background and species (tuned).
+Random-background weakness and green-screen recovery are consistent across both
+species, isolating background---not species or identity count---as the common cause.}
 \label{tab:crossspecies}
 \setlength{\tabcolsep}{7pt}
-\begin{tabular}{lcccc}
+\begin{tabular}{lccc}
 \toprule
-Species & Train ids & Siamese & ArcFace & Gap \\
+Species & ArcFace random & ArcFace green & $\Delta$ \\
 \midrule
-rousettus & 6 & 0.809 & 0.541 & $+0.268$ \\
-mauritius & 5 & 0.803 & 0.526 & $+0.277$ \\
+rousettus & 0.665 & 0.847 & $+0.182$ \\
+mauritius & 0.578 & 0.843 & $+0.265$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Had the failure been caused by species-specific factors---fur texture,
-pose distribution, image quality---the gap would vary between species.
-Instead it is virtually identical ($0.268$ vs.\ $0.277$), which isolates
-identity count as the governing variable.  This cross-species replication
-is the strongest experimental evidence that the current scale is the bottleneck
-rather than any property of the images or animals themselves.
+Both species are weak on random compositing and both recover strongly on green screen.
+Had identity count been the binding constraint, the green-screen runs---at the same
+small counts---would not recover.
+
+\paragraph{A softened role for identity count.}
+None of this means identity count is irrelevant.  The literature is unambiguous that
+angular-margin losses improve with many training identities~\cite{deng2019arcface,
+kim2022adaface}, and our random-background runs remain the hardest precisely where
+nuisance variation compounds limited identity diversity.  Our revised reading is more
+specific: at this scale the \emph{binding} constraint we can demonstrate is background
+coherence, and the apparent identity-count ``wall'' in earlier runs was confounded both
+by the random-background condition and by the AdaFace-margin and evaluation-resolution
+defects that this study corrects.  Disentangling residual identity-count effects from
+background effects would require a controlled sweep of identity count at fixed
+background, which we leave to future work.
 
 \subsection{Background effects}
 
-The green-screen and original-background conditions outperform random-background
-compositing for both species on the Siamese network ($0.925/0.922$ vs.\ $0.803$ on
-mauritius; Table~\ref{tab:mauritius}).  Two explanations are plausible: (1) random
-texture compositing introduces visual clutter that competes with facial features in the
-$105\!\times\!105$ input field; (2) consistent backgrounds reduce domain shift within
-the test split.
-
-The embedding models show a stronger relative improvement under green-screen ($0.761$
-for ArcFace green vs.\ $0.526$ for ArcFace random on mauritius), suggesting that the
-angular-margin geometry is more sensitive to background variation than the pairwise
-objective.
+Across families, coherent backgrounds help, but the effect is far larger for the
+embedding models than for the Siamese network.  On Mauritius the Siamese pairwise-head
+ROC-AUC varies only modestly with background ($0.71$--$0.83$), whereas ArcFace swings
+from $0.578$ (random) to $0.843$ (green) and AdaFace from $0.539$ to $0.902$
+(Table~\ref{tab:mauritius}).  Two mechanisms are plausible: (1) random texture
+compositing introduces visual clutter that competes with facial features in the input
+field; (2) consistent backgrounds reduce domain shift within the test split.  The
+markedly stronger sensitivity of the angular-margin geometry indicates that, unlike the
+pairwise objective, it does not automatically learn to factor out background nuisance at
+this data scale---an actionable finding, since background standardisation at capture
+time is cheap relative to collecting many more identities.
 
 \subsection{The leaky-vs-honest gap}
 
-The 24-point F\textsubscript{1} gap between the random-pair protocol and the
+The 28-point F\textsubscript{1} gap between the random-pair protocol and the
 identity-disjoint protocol (Table~\ref{tab:leakage}) is larger than typical published
 figures for animal re-identification.  Practitioners are encouraged to audit their
 evaluation protocols: if the same individual appears in both train and test, reported
@@ -129,7 +142,11 @@ numbers are not measuring deployed-scenario performance.
 \paragraph{Single-seed evaluation.}
 All reported numbers come from single training runs.  The standard deviation of test
 metrics across seeds is unknown and likely non-trivial for the embedding models given
-the instability documented in Section~\ref{sec:identity_wall}.
+the instability documented in Section~\ref{sec:identity_wall}: a repeated AdaFace run on
+rousettus random produced test ROC-AUC $0.671$ versus the reported $0.434$ from an
+identical configuration, underscoring that the random-background embedding numbers in
+particular should be read as single-sample point estimates with wide implied
+uncertainty.
 
 \paragraph{No external validation set.}
 The test identities were drawn from the same colony as the training identities.

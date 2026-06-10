@@ -1,0 +1,13 @@
+# @package _global_
+# Siamese on mauritius video frames, green backgrounds (19 IDs, 13/3/3 split).
+defaults:
+  - override /data: manifest_mauritius_green
+  - override /model: siamese
+  - override /loss: focal
+  - override /trainer: pair
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green
+  source: video
