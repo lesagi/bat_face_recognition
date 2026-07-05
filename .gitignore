@@ -63,3 +63,10 @@ cvat/
 !configs/data/
 !configs/data/*.yaml
 **/chosen_model/
+
+# training outputs, run scratch, and stray auto-downloaded weights
+outputs/
+legacy/
+optuna_studies.db
+/yolo11n-seg.pt
+/yolo26n.pt

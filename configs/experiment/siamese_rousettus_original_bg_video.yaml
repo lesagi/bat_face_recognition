@@ -1,0 +1,15 @@
+# @package _global_
+# Siamese on rousettus video frames, original backgrounds. Completes the
+# rousettus background matrix (original/green/random) for the cross-species
+# comparison against mauritius.
+defaults:
+  - override /data: manifest_rousettus_original
+  - override /model: siamese
+  - override /loss: focal
+  - override /trainer: pair
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: original
+  source: video
