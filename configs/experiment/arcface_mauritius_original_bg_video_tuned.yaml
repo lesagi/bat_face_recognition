@@ -1,6 +1,8 @@
 # @package _global_
-# Tuned ArcFace on mauritius video frames, original backgrounds (Adam lr=1e-3,
-# m=0.2, s=30).
+# Tuned ArcFace on mauritius video frames, original backgrounds.
+# Uses the shared arcface_tuned recipe (m=0.2, s=30, Adam lr=1e-3): original bg
+# already works well with it (test roc_auc 0.778). The green/random-specific
+# re-tune (higher scale+lr) regressed original, so it keeps the gentle recipe.
 #   bat-cli train --experiment arcface_mauritius_original_bg_video_tuned
 defaults:
   - override /data: manifest_mauritius_original

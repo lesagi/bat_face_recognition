@@ -1,6 +1,9 @@
 # @package _global_
-# Tuned ArcFace on mauritius video frames, green backgrounds (Adam lr=1e-3,
-# m=0.2, s=30).
+# Tuned ArcFace on mauritius video frames, green backgrounds.
+# Mauritius-specific HPs from Optuna (study arcface_mauritius_search, val/roc_auc
+# 0.914): m=0.284, s=38.6, Adam lr=3.2e-3. The shared arcface_tuned recipe
+# (m=0.2, s=30) collapsed on mauritius green/random; higher scale + lr recover it.
+# rousettus keeps the shared arcface_tuned recipe (untouched).
 #   bat-cli train --experiment arcface_mauritius_green_bg_video_tuned
 defaults:
   - override /data: manifest_mauritius_green
@@ -13,3 +16,10 @@ defaults:
 data:
   background: green
   source: video
+
+loss:
+  margin: 0.284
+  scale: 38.6
+
+trainer:
+  lr: 3.2e-3

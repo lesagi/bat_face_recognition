@@ -1,6 +1,8 @@
 # @package _global_
-# Tuned ArcFace on mauritius video frames, random composited backgrounds
-# (Adam lr=1e-3, m=0.2, s=30).
+# Tuned ArcFace on mauritius video frames, random composited backgrounds.
+# Random-specific HPs from Optuna (study arcface_mauritius_random_search,
+# val/roc_auc 0.701): m=0.186, s=37.6, Adam lr=1.45e-3. rousettus keeps the
+# shared arcface_tuned recipe (untouched).
 #   bat-cli train --experiment arcface_mauritius_random_bg_video_tuned
 defaults:
   - override /data: manifest_mauritius
@@ -13,3 +15,10 @@ defaults:
 data:
   background: random
   source: video
+
+loss:
+  margin: 0.186
+  scale: 37.6
+
+trainer:
+  lr: 1.45e-3

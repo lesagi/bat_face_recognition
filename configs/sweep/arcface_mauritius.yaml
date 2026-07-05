@@ -1,0 +1,16 @@
+# Mauritius-specific ArcFace HP search. Distinct study_name so it does not
+# append to the shared `arcface_search` study. The default arcface sweep ranges
+# (margin 0.3-0.6, scale 32-96) sit ABOVE the region that works on <=12-identity
+# datasets — ArcFace collapsed on mauritius green/random at m=0.2/s=30 while the
+# same recipe gave 0.78 on original. Search shifted DOWN to cover the gentle
+# region (and below), around the working point.
+study_name: arcface_mauritius_search
+n_trials: 30
+direction: maximize
+target_metric: val/roc_auc
+pruner: median
+storage: sqlite:///optuna_studies.db
+search_space:
+  loss.margin: { type: float, low: 0.05, high: 0.4 }
+  loss.scale: { type: float, low: 10.0, high: 48.0 }
+  trainer.lr: { type: loguniform, low: 2.0e-4, high: 4.0e-3 }
