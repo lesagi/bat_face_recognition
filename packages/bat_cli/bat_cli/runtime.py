@@ -156,7 +156,7 @@ def build_bundle(
     cfg_dict = dict(cfg)
     manifest = load_manifest(cfg_dict, root=repo)
     family = _model_family(cfg_dict)
-    image_size = int(_mapping(cfg_dict.get("model")).get("input_edge_length", 224))
+    image_size = _resolve_image_size(cfg_dict)
     batch_size = int(
         _trainer_value(cfg_dict, "batch_size", _data_value(cfg_dict, "batch_size", 32))
     )
@@ -207,9 +207,7 @@ def build_bundle(
             if _is_pretrained(_mapping(cfg_dict.get("model")).get("pretrained", True))
             else None
         )
-        train_ds = BatDataset(
-            manifest, split="train", image_size=image_size, normalize=normalize
-        )
+        train_ds = BatDataset(manifest, split="train", image_size=image_size, normalize=normalize)
         val_ds = _optional_embedding_dataset(
             manifest, "val", image_size=image_size, normalize=normalize
         )
@@ -437,6 +435,7 @@ def run_training(
     mlflow_experiment: str = "bat-face-recognition",
     tracking_uri: str | None = None,
     run_name: str | None = None,
+    run_tags: Mapping[str, str] | None = None,
     use_mlflow: bool = True,
     promote: bool = False,
     prompt_promote: bool = False,
@@ -466,7 +465,7 @@ def run_training(
         start_run(
             experiment_name=mlflow_experiment,
             run_name=run_name,
-            tags={"entrypoint": "bat-cli"},
+            tags={"entrypoint": "bat-cli", **(run_tags or {})},
             tracking_uri=tracking_uri,
         )
         if use_mlflow
@@ -518,9 +517,7 @@ def run_training(
         explanations_dir: Path | None = None
         if run_explanations:
             explanations_dir = resolved_output / "explanations"
-            explanation_image_size = int(
-                _mapping(bundle.cfg.get("model")).get("input_edge_length", 224)
-            )
+            explanation_image_size = _resolve_image_size(bundle.cfg)
             explanation_normalize = (
                 "imagenet"
                 if (
@@ -1007,6 +1004,230 @@ def build_manifest_csv(
     return path, splitter.counts(split_manifest)
 
 
+_SPECIES_LETTER = {"mauritius": "m", "rousettus": "r"}
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".m4v")
+
+
+def run_video_extraction(
+    *,
+    videos_dir: Path,
+    output_root: Path,
+    species: str,
+    n_videos: int,
+    seed: int,
+    seg_weights: Path,
+    pose_weights: Path,
+    detector_weights: Path | None = None,
+    device: str = "cuda",
+    target_frames: int = 53,
+    edge_length: int = 224,
+    margin_ratio: float = 0.03,
+    min_keypoint_confidence: float = 0.35,
+    variants: Sequence[str] = ("original_bg", "green_bg", "random_bg", "face_ellipse"),
+    frame_oversample: int = 20,
+    min_quality: float = 0.0,
+    require_pose: bool = True,
+    random_bg_style: str = "picsum",
+    build_manifests: bool = False,
+    manifests_dir: Path | None = None,
+    val_fraction: float = 0.15,
+    test_fraction: float = 0.15,
+    root: Path | None = None,
+    log=print,
+) -> dict[str, Any]:
+    """Sample ``n_videos`` and extract eye-anchored face crops + bg variants.
+
+    Each video is treated as one identity (the video stem). Models are loaded
+    once and reused across all videos. Videos are picked by a seeded shuffle of
+    the full set then taking the first ``n_videos`` — so a smaller ``n_videos``
+    (e.g. a 3-video preview) is always a subset of a larger run with the same
+    seed. Returns a summary dict (selection, per-variant counts, manifests).
+    """
+    import random
+
+    import numpy as np
+    from bat_preprocessing import (
+        VideoExtractionConfig,
+        VideoExtractor,
+        YOLODetector,
+        YOLOPoseEstimator,
+        YOLOSegmenter,
+    )
+
+    repo = find_project_root(root)
+
+    def _resolve(p: Path) -> Path:
+        p = Path(p)
+        return p if p.is_absolute() else repo / p
+
+    videos_dir = _resolve(videos_dir)
+    output_root = _resolve(output_root)
+    seg_weights = _resolve(seg_weights)
+    pose_weights = _resolve(pose_weights)
+    detector_weights = _resolve(detector_weights) if detector_weights is not None else None
+    if species not in _SPECIES_LETTER:
+        raise CliRuntimeError(f"unsupported species {species!r}")
+    if not videos_dir.is_dir():
+        raise CliRuntimeError(f"videos dir not found: {videos_dir}")
+    required = [seg_weights, pose_weights] + ([detector_weights] if detector_weights else [])
+    for w in required:
+        if not w.exists():
+            raise CliRuntimeError(f"weights not found: {w}")
+
+    all_videos = sorted(p for p in videos_dir.iterdir() if p.suffix.lower() in _VIDEO_EXTENSIONS)
+    if not all_videos:
+        raise CliRuntimeError(f"no videos found under {videos_dir}")
+    shuffled = list(all_videos)
+    random.Random(seed).shuffle(shuffled)
+    selected = shuffled[: min(n_videos, len(shuffled))]
+    letter = _SPECIES_LETTER[species]
+    variants = list(variants)
+
+    log(f"Loading models on device={device!r} (once, reused across {len(selected)} videos)…")
+    segmenter = YOLOSegmenter({"weights": str(seg_weights), "device": device})
+    pose = YOLOPoseEstimator({"weights": str(pose_weights), "device": device})
+    detector = (
+        YOLODetector({"weights": str(detector_weights), "device": device})
+        if detector_weights is not None
+        else None
+    )
+    if detector is not None:
+        log(f"  detector (presence gate): {detector_weights.name}")
+
+    config = VideoExtractionConfig(
+        output_dir=output_root,
+        identity="__placeholder__",
+        species=species,  # type: ignore[arg-type]
+        source="video",
+        split="train",
+        augmented=False,
+        frame_stride=1,
+        max_frames=None,  # collect all passers; subsample for temporal spread below
+        min_quality=min_quality,
+        edge_length=edge_length,
+        margin_ratio=margin_ratio,
+        require_pose=require_pose,
+        align_mode="eye_anchored",
+        min_keypoint_confidence=min_keypoint_confidence,
+        require_confident_eyes=True,
+        variants=variants,
+        variant_output_dirs={v: output_root / v for v in variants},
+        name_template=f"{letter}--{{identity}}--{{video}}.{{frame}}.jpg",
+        output_ext=".jpg",
+        random_bg_style=random_bg_style,
+        random_seed=seed,
+    )
+    extractor = VideoExtractor(config, segmenter=segmenter, pose_estimator=pose, detector=detector)
+
+    import cv2
+
+    def _frame_idx(path: Path) -> int:
+        # filename "{letter}--{identity}--{video}.{frame}.jpg" → trailing ".{frame}".
+        try:
+            return int(Path(path).stem.rsplit(".", 1)[-1])
+        except (ValueError, IndexError):
+            return -1
+
+    per_video: dict[str, int] = {}
+    per_variant: dict[str, int] = {v: 0 for v in variants}
+    for i, video in enumerate(selected, 1):
+        cap = cv2.VideoCapture(str(video))
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if cap.isOpened() else 0
+        cap.release()
+        candidates = max(1, target_frames * max(1, frame_oversample))
+        stride = max(1, total // candidates) if total > 0 else 1
+
+        config.identity = video.stem
+        config.frame_stride = stride
+        records = extractor.extract(video)
+
+        # Group passers by frame index, then evenly subsample to target_frames so
+        # the kept frames are spread across the clip (consecutive frames look alike).
+        by_frame: dict[int, list] = defaultdict(list)
+        for r in records:
+            by_frame[_frame_idx(r.path)].append(r)
+        frames_sorted = sorted(by_frame)
+        if len(frames_sorted) > target_frames:
+            pick = np.linspace(0, len(frames_sorted) - 1, target_frames).round().astype(int)
+            keep = {frames_sorted[j] for j in sorted({int(p) for p in pick})}
+        else:
+            keep = set(frames_sorted)
+        for fr, recs in by_frame.items():
+            if fr in keep:
+                for r in recs:
+                    per_variant[Path(r.path).parent.name] = (
+                        per_variant.get(Path(r.path).parent.name, 0) + 1
+                    )
+            else:  # drop the non-selected frames' files (all variants)
+                for r in recs:
+                    Path(r.path).unlink(missing_ok=True)
+        per_video[video.stem] = len(keep)
+        log(
+            f"  [{i}/{len(selected)}] {video.name}: total={total} stride={stride} "
+            f"passers={len(frames_sorted)} kept={len(keep)} (spread across clip)"
+        )
+
+    selection = {
+        "seed": seed,
+        "n_videos": len(selected),
+        "videos": [v.name for v in selected],
+        "species": species,
+        "variants": variants,
+        "target_frames": target_frames,
+        "seg_weights": (
+            str(seg_weights.relative_to(repo))
+            if seg_weights.is_relative_to(repo)
+            else str(seg_weights)
+        ),
+        "pose_weights": (
+            str(pose_weights.relative_to(repo))
+            if pose_weights.is_relative_to(repo)
+            else str(pose_weights)
+        ),
+    }
+    output_root.mkdir(parents=True, exist_ok=True)
+    (output_root / "_selection.json").write_text(json.dumps(selection, indent=2), encoding="utf-8")
+
+    summary: dict[str, Any] = {
+        "selection": selection,
+        "per_video": per_video,
+        "per_variant": per_variant,
+        "output_root": str(output_root),
+    }
+
+    if build_manifests:
+        manifests_dir = _resolve(manifests_dir or Path("data/manifests"))
+        manifests_dir.mkdir(parents=True, exist_ok=True)
+        manifests: dict[str, Any] = {}
+        for v in variants:
+            variant_dir = output_root / v
+            if not variant_dir.is_dir():
+                continue
+            csv_path = manifests_dir / f"{species}_aligned_{v}.csv"
+            path, counts = build_manifest_csv(
+                input_dir=variant_dir,
+                output_csv=csv_path,
+                species=species,
+                val_fraction=val_fraction,
+                test_fraction=test_fraction,
+                seed=seed,
+            )
+            manifests[v] = {
+                "csv": str(path),
+                "train": counts.train,
+                "val": counts.val,
+                "test": counts.test,
+                "total": counts.total,
+            }
+            log(
+                f"  manifest {v}: {path} "
+                f"(train={counts.train}, val={counts.val}, test={counts.test}, total={counts.total})"
+            )
+        summary["manifests"] = manifests
+
+    return summary
+
+
 def eval_report_to_dict(report: EvalReport) -> dict[str, Any]:
     """Convert an EvalReport to a JSON-friendly dictionary."""
 
@@ -1162,7 +1383,7 @@ def _comparable_cosine_report(trainer: Any, bundle: TrainingBundle) -> EvalRepor
     model = getattr(trainer, "model", None)
     if model is None or not hasattr(model, "forward_embedding"):
         return None
-    image_size = int(_mapping(bundle.cfg.get("model")).get("input_edge_length", 224))
+    image_size = _resolve_image_size(bundle.cfg)
     normalize = (
         "imagenet"
         if (
@@ -1329,6 +1550,25 @@ def _model_family(cfg: Mapping[str, Any]) -> str:
     if family not in {"pair", "embedding"}:
         raise CliRuntimeError(f"model.family must be 'pair' or 'embedding'; got {family!r}")
     return family
+
+
+def _resolve_image_size(cfg: Mapping[str, Any]) -> int:
+    """Edge length the model trains/evals at, from ``model.input_edge_length``.
+
+    Required, no default: a missing key previously fell back to 224, which a
+    torchvision ResNet50 silently accepts (adaptive pool) — corrupting embeddings
+    with no error. Fail loud instead.
+    """
+    model_cfg = _mapping(cfg.get("model"))
+    if "input_edge_length" not in model_cfg:
+        raise CliRuntimeError(
+            "model.input_edge_length is required (e.g. 112 for ArcFace/AdaFace, "
+            "105 for Siamese); none found in the composed config"
+        )
+    size = int(model_cfg["input_edge_length"])
+    if size <= 0:
+        raise CliRuntimeError(f"model.input_edge_length must be a positive int; got {size!r}")
+    return size
 
 
 def _warmup_steps(cfg: Mapping[str, Any], trainer_cfg: TrainerConfig, train_loader: Any) -> int:

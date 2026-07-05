@@ -17,6 +17,7 @@ from bat_cli.runtime import (
     run_evaluation,
     run_permutation_test,
     run_training,
+    run_video_extraction,
 )
 
 
@@ -25,6 +26,17 @@ def _overrides(_: click.Context, __: click.Parameter, values: tuple[str, ...]) -
         if "=" not in value:
             raise click.BadParameter(f"Hydra override must look like key=value; got {value!r}")
     return values
+
+
+def _run_tags(_: click.Context, __: click.Parameter, values: tuple[str, ...]) -> dict[str, str]:
+    """Parse repeated ``KEY=VALUE`` MLflow run tags into a dict."""
+    tags: dict[str, str] = {}
+    for value in values:
+        key, sep, val = value.partition("=")
+        if not sep or not key:
+            raise click.BadParameter(f"run tag must look like key=value; got {value!r}")
+        tags[key.strip()] = val.strip()
+    return tags
 
 
 @click.group(invoke_without_command=True)
@@ -50,6 +62,13 @@ def main(ctx: click.Context) -> None:
 @click.option("--mlflow-experiment", default="bat-face-recognition", show_default=True)
 @click.option("--tracking-uri", help="Optional MLflow tracking URI.")
 @click.option("--run-name", help="Optional MLflow run name.")
+@click.option(
+    "--run-tag",
+    "run_tags",
+    multiple=True,
+    callback=_run_tags,
+    help="MLflow run tag as key=value (e.g. batch=rousettus-2026-07-05). May be passed multiple times.",
+)
 @click.option("--no-mlflow", is_flag=True, help="Run locally without starting an MLflow run.")
 @click.option(
     "--promote",
@@ -100,6 +119,7 @@ def train(
     mlflow_experiment: str,
     tracking_uri: str | None,
     run_name: str | None,
+    run_tags: dict[str, str],
     no_mlflow: bool,
     promote: bool,
     prompt_promote: bool,
@@ -129,6 +149,7 @@ def train(
             mlflow_experiment=mlflow_experiment,
             tracking_uri=tracking_uri,
             run_name=run_name,
+            run_tags=run_tags,
             use_mlflow=not no_mlflow,
             promote=promote,
             prompt_promote=prompt_promote,
@@ -385,6 +406,157 @@ def build_manifest(
         f"Wrote {path} "
         f"(train={counts.train}, val={counts.val}, test={counts.test}, total={counts.total})"
     )
+
+
+@main.command("extract-videos")
+@click.option(
+    "--videos-dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory of raw videos (one video = one identity).",
+)
+@click.option(
+    "--output-root",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Root for per-variant output folders (original_bg/green_bg/random_bg/face_ellipse).",
+)
+@click.option(
+    "--species",
+    type=click.Choice(["mauritius", "rousettus"]),
+    default="mauritius",
+    show_default=True,
+)
+@click.option("--n-videos", default=20, show_default=True, type=int)
+@click.option("--seed", default=42, show_default=True, type=int)
+@click.option(
+    "--seg-weights",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default="models/preprocessing/face_seg_mauritius_v2.pt",
+    show_default=True,
+    help="YOLO segmentation weights (retrained mauritius face seg, class 'face').",
+)
+@click.option(
+    "--detector-weights",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default="legacy/face_detection/chosen_model/best.pt",
+    show_default=True,
+    help="YOLO detect weights — used as a face-presence gate before segmenting.",
+)
+@click.option(
+    "--gate/--no-gate",
+    default=True,
+    show_default=True,
+    help="Only process frames where the detector finds a face (presence gate).",
+)
+@click.option(
+    "--pose-weights",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default="legacy/face_annotation_eyes_nose/runs/pose/augmented_train/weights/best.pt",
+    show_default=True,
+    help="YOLO pose weights (eyes+nose), used to straighten the face.",
+)
+@click.option(
+    "--min-keypoint-confidence",
+    default=0.35,
+    show_default=True,
+    type=float,
+    help="Require both eyes above this confidence (fixes garbage-angle rotations).",
+)
+@click.option(
+    "--device", default="cuda", show_default=True, help="Torch device for YOLO (cuda/cpu/0)."
+)
+@click.option(
+    "--target-frames",
+    default=53,
+    show_default=True,
+    type=int,
+    help="Kept frames per video (~53 × 20 ≈ rousettus count). Spread across the clip.",
+)
+@click.option("--edge-length", default=224, show_default=True, type=int)
+@click.option(
+    "--margin-ratio", default=0.03, show_default=True, type=float, help="Margin around mask (3%)."
+)
+@click.option(
+    "--variant",
+    "variants",
+    multiple=True,
+    default=("original_bg", "green_bg", "random_bg", "face_ellipse"),
+    show_default=True,
+    help="Variant to emit (repeatable).",
+)
+@click.option(
+    "--random-bg-style",
+    default="picsum",
+    show_default=True,
+    help="random_bg source: 'picsum' (natural, pooled) or a generator key like 'blur'.",
+)
+@click.option("--min-quality", default=0.0, show_default=True, type=float)
+@click.option(
+    "--build-manifests/--no-build-manifests",
+    default=False,
+    show_default=True,
+    help="Also build one split manifest CSV per variant directory.",
+)
+@click.option("--val-fraction", default=0.15, show_default=True, type=float)
+@click.option("--test-fraction", default=0.15, show_default=True, type=float)
+def extract_videos(
+    videos_dir: Path,
+    output_root: Path,
+    species: str,
+    n_videos: int,
+    seed: int,
+    seg_weights: Path,
+    detector_weights: Path,
+    gate: bool,
+    pose_weights: Path,
+    min_keypoint_confidence: float,
+    device: str,
+    target_frames: int,
+    edge_length: int,
+    margin_ratio: float,
+    variants: tuple[str, ...],
+    random_bg_style: str,
+    min_quality: float,
+    build_manifests: bool,
+    val_fraction: float,
+    test_fraction: float,
+) -> None:
+    """Extract eye-anchored face crops + background variants from raw videos."""
+
+    try:
+        summary = run_video_extraction(
+            videos_dir=videos_dir,
+            output_root=output_root,
+            species=species,
+            n_videos=n_videos,
+            seed=seed,
+            seg_weights=seg_weights,
+            detector_weights=detector_weights if gate else None,
+            pose_weights=pose_weights,
+            min_keypoint_confidence=min_keypoint_confidence,
+            device=device,
+            target_frames=target_frames,
+            edge_length=edge_length,
+            margin_ratio=margin_ratio,
+            variants=list(variants),
+            min_quality=min_quality,
+            random_bg_style=random_bg_style,
+            build_manifests=build_manifests,
+            val_fraction=val_fraction,
+            test_fraction=test_fraction,
+            log=lambda msg: click.echo(msg),
+        )
+    except CliRuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    per_variant = summary.get("per_variant", {})
+    total = sum(per_variant.values())
+    click.echo(
+        f"Extracted {total} images across {len(per_variant)} variants "
+        f"from {summary['selection']['n_videos']} videos → {summary['output_root']}"
+    )
+    click.echo(format_json({"per_variant": per_variant}))
 
 
 @main.command()

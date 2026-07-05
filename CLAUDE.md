@@ -38,6 +38,7 @@ packages/
 - **Trainers are loops, not god-classes.** Data wiring → `bat_data`. MLflow → `bat_tracking`. Eval → `bat_evaluation`. Loss math → `bat_losses`. The trainer keeps only optimizer / scheduler / AMP / EMA / checkpointing / callbacks.
 - **Test split is sacred.** `bat_sweeps` only reads val metrics; the objective never calls `trainer.test`. Verified with a mock test.
 - **Naming bug fix is load-bearing.** Every plot title / filename / axis label routes through `bat_stats.naming.experiment_name(cfg)` so the species/source/background/model/loss combination is always visible. Don't bypass this helper.
+- **Pose runs on the mask-crop, not the full frame.** `models/preprocessing/face_pose.pt` was trained on tight square face crops (`legacy/face_annotation_eyes_nose/`, 43 labeled faces filling the frame), so full-frame inference wrecks keypoints (border/nose misdetections → tilted alignment). Segmentation runs on the full frame; pose runs on the mask-centered square crop with keypoints mapped back to frame coords. See `scripts/build_variants_from_frames.py:pose_on_mask_crop`.
 - **No CSV output from new code.** The legacy TF stack emitted CSVs everywhere; the PyTorch eval/report path returns dataclasses and renders directly to the PDF.
 - **Hydra cfg → caller responsibility.** `bat_training` does not log Hydra cfg itself; the CLI does (avoids leaking Hydra into trainer internals).
 

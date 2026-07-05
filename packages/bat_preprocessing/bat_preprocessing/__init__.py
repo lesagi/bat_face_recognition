@@ -24,7 +24,7 @@ from .background import (
     replace_background_with_alpha,
     replace_green_background,
 )
-from .face_aligner import FaceAligner
+from .face_aligner import AlignedFace, FaceAligner
 from .input_processor import PreprocessingConfig, PreprocessingPipeline
 from .prediction_cache import CacheConfig, CacheEntry, CacheManager, PredictionCache
 from .prediction_structures import (
@@ -42,6 +42,7 @@ from .prediction_transforms import (
     TransformationMatrix,
 )
 from .video_extractor import VideoExtractionConfig, VideoExtractor
+from .yolo_detector import DEFAULT_DETECTOR_CONFIG, DetectionPrediction, YOLODetector
 from .yolo_pose import DEFAULT_POSE_CONFIG, YOLOPoseEstimator
 from .yolo_segmenter import DEFAULT_SEGMENTER_CONFIG, YOLOSegmenter
 
@@ -57,6 +58,7 @@ __all__ = [
     "replace_background_with_alpha",
     "replace_green_background",
     # face alignment
+    "AlignedFace",
     "FaceAligner",
     # high-level pipeline
     "PreprocessingConfig",
@@ -82,8 +84,11 @@ __all__ = [
     "VideoExtractionConfig",
     "VideoExtractor",
     # YOLO wrappers
+    "DEFAULT_DETECTOR_CONFIG",
     "DEFAULT_POSE_CONFIG",
     "DEFAULT_SEGMENTER_CONFIG",
+    "DetectionPrediction",
+    "YOLODetector",
     "YOLOPoseEstimator",
     "YOLOSegmenter",
 ]

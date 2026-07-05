@@ -201,10 +201,34 @@ def _normalise_mask(mask: np.ndarray, target_shape: tuple[int, int]) -> np.ndarr
     return mask
 
 
+def _soften_mask(binary: np.ndarray, smooth: int, feather: int) -> np.ndarray:
+    """0/1 uint8 mask → float32 alpha in [0, 1].
+
+    ``smooth`` rounds the contour itself (morphological close, then Gaussian
+    blur + re-threshold) so jagged seg-mask corners disappear; ``feather``
+    then blurs the edge into a soft alpha ramp instead of a hard binary cut.
+    Both are pixel radii.
+    """
+    alpha = binary.astype(np.float32)
+    if smooth > 0:
+        k = 2 * smooth + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        blurred = cv2.GaussianBlur(closed.astype(np.float32), (k, k), 0)
+        alpha = (blurred >= 0.5).astype(np.float32)
+    if feather > 0:
+        k = 2 * feather + 1
+        alpha = cv2.GaussianBlur(alpha, (k, k), 0)
+    return alpha
+
+
 def replace_background(
     image: np.ndarray,
     mask: np.ndarray,
     background: np.ndarray | Callable[..., np.ndarray],
+    *,
+    smooth: int = 0,
+    feather: int = 0,
     **generator_kwargs,
 ) -> np.ndarray:
     """Replace the masked background of ``image``.
@@ -214,6 +238,8 @@ def replace_background(
         mask: 2-D mask where the bat (foreground) is non-zero.
         background: Either a precomputed background image or a generator
             callable accepting ``(height, width, **kwargs)``.
+        smooth: Contour-rounding radius in px (0 = keep the raw mask shape).
+        feather: Edge-feathering radius in px (0 = hard binary cut).
         **generator_kwargs: Forwarded to the generator callable.
 
     Returns:
@@ -224,7 +250,6 @@ def replace_background(
 
     height, width = image.shape[:2]
     binary_mask = _normalise_mask(mask, (height, width))
-    mask_3d = np.repeat(binary_mask[:, :, np.newaxis], 3, axis=2)
 
     if callable(background):
         bg = background(height, width, **generator_kwargs)
@@ -236,6 +261,12 @@ def replace_background(
     if bg.shape != image.shape:
         raise ValueError(f"background shape {bg.shape} does not match image shape {image.shape}")
 
+    if smooth > 0 or feather > 0:
+        alpha = _soften_mask(binary_mask, smooth, feather)[:, :, np.newaxis]
+        blended = image.astype(np.float32) * alpha + bg.astype(np.float32) * (1.0 - alpha)
+        return np.clip(blended.round(), 0, 255).astype(np.uint8)
+
+    mask_3d = np.repeat(binary_mask[:, :, np.newaxis], 3, axis=2)
     result = bg.copy()
     foreground = mask_3d > 0
     result[foreground] = image[foreground]

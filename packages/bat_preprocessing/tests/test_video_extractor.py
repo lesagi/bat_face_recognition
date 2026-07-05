@@ -21,6 +21,22 @@ from bat_preprocessing.prediction_structures import (  # noqa: E402
     SegmentationPrediction,
 )
 from bat_preprocessing.video_extractor import VideoExtractionConfig, VideoExtractor  # noqa: E402
+from bat_preprocessing.yolo_detector import DetectionPrediction  # noqa: E402
+
+
+class _StubDetector:
+    def __init__(self, bbox: tuple[float, float, float, float] = (0.2, 0.2, 0.8, 0.8)) -> None:
+        self.bbox = bbox
+
+    def predict(self, image: np.ndarray, **_: Any):
+        h, w = image.shape[:2]
+        return DetectionPrediction(
+            bounding_box=self.bbox,
+            confidence=0.9,
+            class_id=0,
+            class_name="bat",
+            original_image_shape=(h, w),
+        )
 
 
 class _StubSegmenter:
@@ -112,6 +128,61 @@ def test_video_extractor_emits_image_records(tmp_path: Path) -> None:
         assert r.path.exists()
         assert r.path.suffix == ".png"
         assert 0.0 <= r.quality <= 1.0
+
+
+def test_video_extractor_detector_gate_multivariant(tmp_path: Path) -> None:
+    video = tmp_path / "clip.mp4"
+    _write_synthetic_video(video, frames=6, size=128)
+    if not video.exists():
+        video = video.with_suffix(".avi")
+    out = tmp_path / "out"
+    variants = ["original_bg", "green_bg", "random_bg", "face_ellipse"]
+    cfg = VideoExtractionConfig(
+        output_dir=out,
+        identity="20230101_000000",
+        species="mauritius",
+        edge_length=64,
+        margin_ratio=0.03,
+        frame_stride=1,
+        max_frames=2,
+        align_mode="eye_anchored",
+        variants=variants,
+        variant_output_dirs={v: out / v for v in variants},
+        name_template="m--{identity}--{video}.{frame}.jpg",
+        output_ext=".jpg",
+        random_bg_style="blur",  # offline — no picsum network
+        require_confident_eyes=True,
+    )
+    ext = VideoExtractor(
+        cfg,
+        segmenter=_StubSegmenter(),
+        pose_estimator=_StubPose(),
+        detector=_StubDetector((0.2, 0.2, 0.8, 0.8)),
+    )
+    records = ext.extract(video)
+    assert records, "detector-gate → full-frame multivariant path should emit records"
+    kept_frames = len({r.path.name for r in records})
+    assert len(records) == kept_frames * len(variants)
+    for v in variants:
+        assert (out / v).is_dir() and list((out / v).glob("*.jpg"))
+    for r in records:
+        assert r.path.name.startswith("m--20230101_000000--")
+        assert r.path.suffix == ".jpg"
+
+
+class _StubCap:
+    def __init__(self, meta: float) -> None:
+        self._meta = meta
+
+    def get(self, _prop: int) -> float:
+        return self._meta
+
+
+def test_orientation_code_mapping() -> None:
+    assert VideoExtractor._orientation_code(_StubCap(90.0)) == cv2.ROTATE_90_CLOCKWISE
+    assert VideoExtractor._orientation_code(_StubCap(180.0)) == cv2.ROTATE_180
+    assert VideoExtractor._orientation_code(_StubCap(270.0)) == cv2.ROTATE_90_COUNTERCLOCKWISE
+    assert VideoExtractor._orientation_code(_StubCap(0.0)) is None
 
 
 def test_video_extractor_validates_missing_video(tmp_path: Path) -> None:

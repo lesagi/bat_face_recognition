@@ -1,9 +1,10 @@
 """Manifest construction utilities.
 
 Walks a data directory, parses filenames according to the
-``(type)--(class)--(id)[--aug###].png`` convention used across the
-project, computes a per-image quality score (Laplacian variance), and
-emits a :class:`bat_core.Manifest`.
+``(type)--(class)--(id)[_c<conf>][--aug###].png`` convention used across
+the project, computes a per-image quality score (Laplacian variance), and
+emits a :class:`bat_core.Manifest`. The optional ``_c<conf>`` segment carries
+a detection/segmentation confidence (e.g. ``_c0.95``).
 
 The directory layout assumed (matches the legacy ``app/`` layout):
 
@@ -50,13 +51,17 @@ __all__ = [
 # Filename parsing (ported from app/utils/filename_parser.py)
 # ---------------------------------------------------------------------------
 
-# Pattern: (type)--(class)--(id)[--aug###]
+# Pattern: (type)--(class)--(id)[_c<conf>][--aug###]
 # - type: short token (e.g. "r" for rousettus)
 # - class: identity (alphanumeric)
 # - id: capture id (allows ``\d+.\d+`` decimal style)
+# - optional ``_c<conf>`` suffix carrying a detection/segmentation confidence
+#   (e.g. ``_c0.95``); ``<conf>`` is an int or decimal. The id stops before a
+#   ``_c<digit>`` boundary so the confidence is captured separately.
 # - optional --aug### suffix where ### is exactly three digits
 FILENAME_PATTERN = re.compile(
-    r"^(?P<type>\w+)--(?P<class>\w+)--(?P<id>\w+(?:\.\d+)?)"
+    r"^(?P<type>\w+)--(?P<class>\w+)--(?P<id>(?:(?!_c\d)\w)+(?:\.\d+)?)"
+    r"(?:_c(?P<conf>\d+(?:\.\d+)?))?"
     r"(?P<aug_suffix>--aug(?P<aug_id>\d{3}))?$"
 )
 
@@ -66,7 +71,7 @@ _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 class ParsedFilename:
     """Lightweight result type for :func:`parse_filename`."""
 
-    __slots__ = ("type_", "class_name", "id_", "aug_id")
+    __slots__ = ("type_", "class_name", "id_", "aug_id", "confidence")
 
     def __init__(
         self,
@@ -74,11 +79,13 @@ class ParsedFilename:
         class_name: str,
         id_: str,
         aug_id: str | None,
+        confidence: float | None = None,
     ) -> None:
         self.type_ = type_
         self.class_name = class_name
         self.id_ = id_
         self.aug_id = aug_id
+        self.confidence = confidence
 
     @property
     def is_augmented(self) -> bool:
@@ -87,7 +94,7 @@ class ParsedFilename:
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return (
             f"ParsedFilename(type={self.type_!r}, class={self.class_name!r}, "
-            f"id={self.id_!r}, aug_id={self.aug_id!r})"
+            f"id={self.id_!r}, aug_id={self.aug_id!r}, confidence={self.confidence!r})"
         )
 
     def __eq__(self, other: object) -> bool:
@@ -98,6 +105,7 @@ class ParsedFilename:
             and self.class_name == other.class_name
             and self.id_ == other.id_
             and self.aug_id == other.aug_id
+            and self.confidence == other.confidence
         )
 
 
@@ -112,11 +120,13 @@ def parse_filename(filename: str) -> ParsedFilename | None:
     if match is None:
         return None
     g = match.groupdict()
+    conf = g.get("conf")
     return ParsedFilename(
         type_=g["type"],
         class_name=g["class"],
         id_=g["id"],
         aug_id=g.get("aug_id"),
+        confidence=float(conf) if conf is not None else None,
     )
 
 

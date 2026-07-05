@@ -131,6 +131,23 @@ def test_comparable_cosine_report_none_without_embedding() -> None:
     assert _comparable_cosine_report(trainer, bundle) is None
 
 
+def test_resolve_image_size_requires_input_edge_length() -> None:
+    """Missing ``model.input_edge_length`` fails loud instead of silently using 224.
+
+    A torchvision ResNet50 accepts any input size (adaptive pool), so a missing
+    key would otherwise train/eval at the wrong resolution with no error.
+    """
+    from bat_cli.runtime import CliRuntimeError, _resolve_image_size
+
+    assert _resolve_image_size({"model": {"family": "embedding", "input_edge_length": 112}}) == 112
+
+    with pytest.raises(CliRuntimeError, match="input_edge_length"):
+        _resolve_image_size({"model": {"family": "embedding"}})
+
+    with pytest.raises(CliRuntimeError, match="positive"):
+        _resolve_image_size({"model": {"input_edge_length": 0}})
+
+
 def test_help_lists_core_commands() -> None:
     result = CliRunner().invoke(main, ["--help"])
 
@@ -300,6 +317,33 @@ def test_permutation_test_rejects_malformed_hydra_override() -> None:
 
     assert result.exit_code != 0
     assert "Hydra override" in result.output
+
+
+def test_run_tags_parses_key_value_pairs() -> None:
+    from bat_cli.__main__ import _run_tags
+
+    assert _run_tags(None, None, ()) == {}
+    assert _run_tags(None, None, ("batch=rousettus-2026-07-05", "species=rousettus")) == {
+        "batch": "rousettus-2026-07-05",
+        "species": "rousettus",
+    }
+
+
+def test_train_rejects_malformed_run_tag() -> None:
+    result = CliRunner().invoke(
+        main,
+        [
+            "train",
+            "--experiment",
+            "arcface_rousettus_random_bg_video",
+            "--no-mlflow",
+            "--run-tag",
+            "no-equals-sign",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "run tag" in result.output
 
 
 def test_train_help_advertises_promotion_and_explanation_flags() -> None:
@@ -512,11 +556,7 @@ def test_sample_explanation_records_skips_empty_splits() -> None:
 
 def test_sample_projection_records_caps_per_identity() -> None:
     # 3 identities, 20 records each; cap of 5 keeps 5 per identity = 15 total.
-    records = [
-        _record_for("train", ident, idx)
-        for ident in ("A", "B", "C")
-        for idx in range(20)
-    ]
+    records = [_record_for("train", ident, idx) for ident in ("A", "B", "C") for idx in range(20)]
     manifest = Manifest.from_records(records)
     sample = _sample_projection_records(manifest, max_per_identity=5)
 

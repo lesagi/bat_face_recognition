@@ -33,6 +33,27 @@ def test_parse_known_patterns(
 
 
 @pytest.mark.parametrize(
+    "filename, expected_id, expected_conf, expected_aug",
+    [
+        ("m--20230805_131123--206_c0.47.jpg", "206", 0.47, None),
+        ("m--20230831_161613--23_c0.21.jpg", "23", 0.21, None),
+        ("m--20230805_132834--544_c0.95--aug003.jpg", "544", 0.95, "003"),
+        ("r--W--00012_c1.jpg", "00012", 1.0, None),
+        # No ``_c`` suffix → confidence is None (back-compat).
+        ("r--W--00012.png", "00012", None, None),
+        # An underscore in the id that is not a ``_c<digit>`` boundary stays.
+        ("type1--ABC--id_5.png", "id_5", None, None),
+    ],
+)
+def test_parse_confidence(filename, expected_id, expected_conf, expected_aug) -> None:
+    result = parse_filename(filename)
+    assert result is not None
+    assert result.id_ == expected_id
+    assert result.confidence == expected_conf
+    assert result.aug_id == expected_aug
+
+
+@pytest.mark.parametrize(
     "filename",
     [
         "no_separator.png",
