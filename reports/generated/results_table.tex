@@ -1,0 +1,20 @@
+\begin{tabular}{llcccc}
+\toprule
+& & \multicolumn{2}{c}{Mauritius} & \multicolumn{2}{c}{Rousettus} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Model & Bg & ROC-AUC & top-1 & ROC-AUC & top-1 \\
+\midrule
+Siamese & green & 0.798\,$\pm$\,0.105 & -- & 0.475\,$\pm$\,0.125 & -- \\
+Siamese & original & 0.880\,$\pm$\,0.059 & -- & 0.614\,$\pm$\,0.106 & -- \\
+Siamese & random & 0.700\,$\pm$\,0.050 & -- & 0.454\,$\pm$\,0.035 & -- \\
+\addlinespace
+ArcFace & green & 0.777\,$\pm$\,0.122 & 0.741\,$\pm$\,0.113 & 0.774\,$\pm$\,0.085 & 0.700\,$\pm$\,0.100 \\
+ArcFace & original & 0.885\,$\pm$\,0.068 & 0.900\,$\pm$\,0.113 & 0.740\,$\pm$\,0.119 & 0.796\,$\pm$\,0.062 \\
+ArcFace & random & 0.611\,$\pm$\,0.073 & 0.582\,$\pm$\,0.082 & 0.508\,$\pm$\,0.135 & 0.485\,$\pm$\,0.141 \\
+\addlinespace
+AdaFace & green & 0.809\,$\pm$\,0.114 & 0.794\,$\pm$\,0.077 & 0.757\,$\pm$\,0.127 & 0.667\,$\pm$\,0.232 \\
+AdaFace & original & 0.845\,$\pm$\,0.071 & 0.841\,$\pm$\,0.109 & 0.739\,$\pm$\,0.056 & 0.759\,$\pm$\,0.063 \\
+AdaFace & random & 0.592\,$\pm$\,0.061 & 0.662\,$\pm$\,0.119 & 0.551\,$\pm$\,0.102 & 0.542\,$\pm$\,0.132 \\
+\addlinespace
+\bottomrule
+\end{tabular}

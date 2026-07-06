@@ -1,0 +1,109 @@
+\documentclass[10pt]{article}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage[hidelinks]{hyperref}
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{0pt}
+
+\title{\vspace{-1.2cm}Bat Face Recognition: model\,$\times$\,background sweep,
+ArcFace tuning, and interpretability}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-1.0cm}
+
+\section{Setup}
+Open-set bat face recognition on two species: \textbf{Mauritius} (16 identities) and
+\textbf{Rousettus} (12). Aligned 224\,px face crops (YOLO segmentation + pose $\rightarrow$
+eye-levelled, mask-centred square crop) in three background variants: \emph{original} (raw),
+\emph{green} (chroma-key), and \emph{random} (composited). Splits are identity-disjoint
+(Mauritius 12/2/2). Three model families: \textbf{Siamese} (4-conv, trained from scratch, 105\,px),
+\textbf{ArcFace} and \textbf{AdaFace} (ResNet50, ImageNet-pretrained, 112\,px). The dominant caveat
+throughout: the \emph{test splits hold only 2--3 identities}, so single-run metrics are noise-heavy.
+
+\section{Settings tried}
+We ran the full $3\times3\times2$ matrix (model $\times$ background $\times$ species). Initial
+single-run results were unstable (the same ArcFace-green config gave ROC-AUC 0.910 then 0.623 on
+re-run), so we moved to \textbf{5-seed multi-seed} evaluation (deterministic, fixed data split;
+90 runs) and report \textbf{mean\,$\pm$\,std}. Everything is tracked in MLflow, tagged by
+\texttt{batch}/\texttt{species}/\texttt{seed}. Hyperparameter tuning used Optuna on the
+\emph{validation} split only --- the test split is never touched during selection.
+
+\section{ArcFace hyperparameters}
+The shared ``tuned'' recipe (Adam, lr\,$=$\,1e-3, margin $m=0.2$, scale $s=30$) worked for AdaFace
+but \textbf{ArcFace collapsed on Mauritius green/random} (single-run ROC-AUC $\approx0.45$, below
+chance) while remaining fine on \emph{original} ($\approx0.78$). The stock ArcFace sweep searched
+$m\in[0.3,0.6],\,s\in[32,96]$ --- \emph{above} the usable region: the paper-scale $m{=}0.5,s{=}64$
+overpowers the angular space at $\le 12$ identities. With a corrected search space
+($m\in[0.05,0.4],\,s\in[10,48],\,\text{lr}\in[2\!\cdot\!10^{-4},4\!\cdot\!10^{-3}]$) we re-tuned
+\emph{per background}:
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{green}: $m{=}0.284,\ s{=}38.6,\ \text{lr}{=}3.2\!\cdot\!10^{-3}$;
+  \item \textbf{random}: $m{=}0.186,\ s{=}37.6,\ \text{lr}{=}1.45\!\cdot\!10^{-3}$;
+  \item \textbf{original}: kept the gentle shared recipe (the re-tune regressed it).
+\end{itemize}
+Higher scale ($\sim$38 vs 30) plus higher lr was the missing ingredient. \emph{Caveat:} with only
+2 validation identities, val-based selection is itself noisy (best-val trial $0.914$ vs the
+re-run's val $0.471$); Optuna's ``best'' is a starting point that must be confirmed by multi-seed
+test evaluation.
+
+\section{Results}
+\begin{table}[h]\centering\small
+\input{generated/results_table.tex}
+\caption{Test metrics, 5-seed mean\,$\pm$\,std (112\,px). Siamese reports no top-1 (verification-only
+pair model). ArcFace uses the per-background re-tuned recipe above.}
+\end{table}
+
+\vspace{-0.3em}
+\begin{center}\includegraphics[width=0.92\linewidth]{figures/multiseed_matrix.png}\end{center}
+
+\textbf{What the matrix says.} (i) \emph{Variance dominates}: per-cell std is $\approx0.06$--$0.13$,
+so ROC-AUC gaps under $\sim$0.14 are within seed noise --- most within-cell model differences are
+statistical ties. (ii) Mauritius outperforms Rousettus overall; best cells are Mauritius
+ArcFace/Siamese \emph{original} ($\approx0.88$) and Rousettus ArcFace \emph{green} ($\approx0.77$).
+(iii) \emph{Model ranking is species-dependent}: Siamese is strong on Mauritius (best on random,
+tied-best on original) yet collapses to $\sim$chance on Rousettus, where the embedding heads
+(ArcFace/AdaFace) lead. (iv) The ArcFace re-tune made it \emph{competitive} (no longer collapsing),
+not dominant --- it ties AdaFace/Siamese within noise.
+
+\textbf{Input resolution.} We retrained ArcFace/AdaFace at 224\,px (native crop size; ResNet50 is
+size-agnostic), 60 multi-seed runs. Higher resolution \emph{did not help}: mean
+$\Delta\text{ROC-AUC}=-0.03$; it improved only the hardest background (\emph{random}, $+0.03$ avg)
+and degraded \emph{green} ($-0.06$) and \emph{original} ($-0.07$). (HPs were tuned at 112\,px, a
+partial confound.) Resolution is not the bottleneck --- test-set size / seed variance is.
+
+\section{Conclusions}
+\begin{itemize}\setlength\itemsep{0pt}
+  \item On 2--3-identity test splits, seed variance ($\pm0.1$ ROC-AUC) exceeds model, HP, and
+        resolution differences --- report mean\,$\pm$\,std, never single runs.
+  \item Best operating points: Mauritius $\approx0.88$ (original), Rousettus $\approx0.77$
+        (green/original, embedding heads). \emph{Random} backgrounds are hardest everywhere.
+  \item ArcFace needs background-specific margin/scale; the paper-scale defaults overpower
+        small-identity sets. AdaFace is more robust to a shared recipe.
+  \item More identities/data would move the needle more than higher resolution or head choice.
+\end{itemize}
+
+\appendix
+\section{Interpretability: where each model attends}
+Same bat per species (\emph{original} background), maps at each model's native resolution.
+\textbf{Siamese}: Integrated Gradients (20 steps) on the pair similarity. \textbf{ArcFace/AdaFace}:
+\emph{SmoothGrad-IG} (denoised 20-step Integrated Gradients on the class logit, fine-grained) and
+\emph{GradCAM} (last-conv class attention, smooth but coarse --- ResNet50 at 112\,px yields only a
+$4\times4$ grid). Each row shows the input, an overlay, and the attribution on black. The clean
+Siamese blobs (forehead/snout) reflect its shallow net; the ResNet50 pixel-gradients are inherently
+grainy, while GradCAM localises a smooth focus region on the face.
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.72\linewidth]{figures/ig_compare_mauritius.png}
+\caption{Mauritius --- saliency across models/methods.}
+\end{figure}
+\begin{figure}[h]\centering
+\includegraphics[width=0.72\linewidth]{figures/ig_compare_rousettus.png}
+\caption{Rousettus --- saliency across models/methods.}
+\end{figure}
+
+\end{document}
