@@ -320,6 +320,133 @@ def get_record(manifest_path: str, img_path: str):
     raise SystemExit(f"record not found in {manifest_path}: {img_path}")
 
 
+# --- gallery mode: many bats × methods × targets × sizes ---------------------
+GALLERY_MODELS = [("ArcFace", "arcface"), ("AdaFace", "adaface")]
+# (row label, method, target)
+GALLERY_METHODS = [
+    ("IG·class", "ig", "class_logit"),
+    ("IG·emb", "ig", "emb_mag"),
+    ("GradCAM·class", "gradcam", "class_logit"),
+    ("GradCAM·emb", "gradcam", "emb_mag"),
+]
+SIAMESE_EDGE = 105  # 4-conv net is size-locked; runs only at its native small size
+
+
+def siamese_ckpt(species: str) -> Path | None:
+    d = Path(f"outputs/res_runs/{species}_siamese_original_e{SIAMESE_EDGE}_s42")
+    return resolve_ckpt(d) if d.is_dir() else None
+
+
+def src_for_edge(species: str, filename: str, edge: int) -> Path:
+    """Genuine source crop for a given edge: the 320 build for 320, else 224
+    (the loader downsizes 224→112; 320 must come from the 320 build, not an
+    upscale of 224)."""
+    d = 320 if edge == 320 else 224
+    return Path(f"data/processed/{species}/video/not_augmented/{d}/original_bg/{filename}")
+
+
+def pick_gallery_images(species: str, n_bats: int, per_bat: int, seed: int):
+    """Seeded pick of n_bats individuals × per_bat images from the 320 build."""
+    import random
+
+    root = Path(f"data/processed/{species}/video/not_augmented/320/original_bg")
+    by_id: dict[str, list[Path]] = {}
+    for f in sorted(root.glob("*.jpg")):
+        parts = f.name.split("--")
+        if len(parts) >= 3:
+            by_id.setdefault(parts[1], []).append(f)
+    rng = random.Random(f"{species}-{seed}")
+    bats = sorted(by_id)
+    chosen = sorted(rng.sample(bats, min(n_bats, len(bats))))
+    picks: list[tuple[str, Path]] = []
+    for b in chosen:
+        imgs = sorted(by_id[b])
+        for p in sorted(rng.sample(imgs, min(per_bat, len(imgs)))):
+            picks.append((b, p))
+    return chosen, picks
+
+
+def render_gallery(device: str, out: Path, steps: int, n_bats: int, per_bat: int, seed: int) -> None:
+    """For 10 individuals × 2 images per species: IG & GradCAM × {class_logit,
+    emb_mag} × {112,224,320} for ArcFace/AdaFace + Siamese IG@105, overlay +
+    on-black. One 9×6 figure per bat-image. Each of the 14 models is loaded once."""
+    import matplotlib.pyplot as plt
+
+    gdir = out.parent / "saliency_gallery"
+    row_labels = [f"{mn}·{ml}" for mn, _ in GALLERY_MODELS for ml, _, _ in GALLERY_METHODS]
+    row_labels.append("Siamese·IG")
+    col_specs = [(e, r) for e in EDGES_CMP for r in ("ov", "ob")]  # 6 cols
+    col_titles = [f"{e}px {'overlay' if r == 'ov' else 'on-black'}" for e, r in col_specs]
+
+    for sp in ("mauritius", "rousettus"):
+        chosen, picks = pick_gallery_images(sp, n_bats, per_bat, seed)
+        print(f"[{sp}] {len(chosen)} bats: {', '.join(chosen)}")
+        manifest = f"data/manifests/{sp}_original_aligned_224_manifest.csv"
+        # results[pathname][row_label][edge] = (overlay, on_black)
+        res: dict[str, dict[str, dict[int, tuple[np.ndarray, np.ndarray]]]] = {
+            p.name: {rl: {} for rl in row_labels} for _, p in picks
+        }
+        orig320 = {
+            p.name: np.asarray(Image.open(p).convert("RGB").resize((DISPLAY, DISPLAY)))
+            for _, p in picks
+        }
+        # embedding models: load each (model,edge) once, sweep all images
+        for mname, mkey in GALLERY_MODELS:
+            exp = f"{mkey}_{sp}_original_bg_video_tuned"
+            for edge in EDGES_CMP:
+                ck = gradcam_ckpt(sp, mkey, edge)
+                if ck is None:
+                    print(f"  !! missing {sp}/{mkey}/e{edge}")
+                    continue
+                model = load_model(exp, ck, device, "embedding")
+                for _, p in picks:
+                    src = src_for_edge(sp, p.name, edge)
+                    x = default_image_loader(str(src), edge, "imagenet").unsqueeze(0).to(device)
+                    orig = orig320[p.name]
+                    for ml, method, target in GALLERY_METHODS:
+                        sal = (
+                            embedding_ig(model, x, steps, target)
+                            if method == "ig"
+                            else embedding_gradcam(model, x, target)
+                        )
+                        sal = resize_map(sal, DISPLAY)
+                        res[p.name][f"{mname}·{ml}"][edge] = (overlay(orig, sal), on_black(sal))
+        # Siamese IG @105 (native), stored under the 112 column
+        sck = siamese_ckpt(sp)
+        if sck is not None:
+            smodel = load_model(f"siamese_{sp}_original_bg_video", sck, device, "pair")
+            for _, p in picks:
+                sal = resize_map(siamese_ig(smodel, get_record(manifest, str(p)), steps, SIAMESE_EDGE), DISPLAY)
+                res[p.name]["Siamese·IG"][112] = (overlay(orig320[p.name], sal), on_black(sal))
+        else:
+            print(f"  !! missing Siamese checkpoint for {sp}")
+
+        # one figure per bat-image
+        (gdir / sp).mkdir(parents=True, exist_ok=True)
+        for bat, p in picks:
+            cells = res[p.name]
+            fig, axes = plt.subplots(len(row_labels), len(col_specs), figsize=(13, 20))
+            for r, rl in enumerate(row_labels):
+                for c, (edge, kind) in enumerate(col_specs):
+                    ax = axes[r, c]
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    pair = cells[rl].get(edge)
+                    if pair is None:
+                        ax.axis("off")
+                    else:
+                        ax.imshow(pair[0] if kind == "ov" else pair[1])
+                    if r == 0:
+                        ax.set_title(col_titles[c], fontsize=9)
+                axes[r, 0].set_ylabel(rl, fontsize=9, rotation=90, labelpad=8)
+            fig.suptitle(f"{sp} · {bat} · {p.stem}", fontsize=13, y=0.995)
+            fig.tight_layout(rect=(0, 0, 1, 0.985))
+            dest = gdir / sp / f"{p.stem}.png"
+            fig.savefig(dest, dpi=110, bbox_inches="tight")
+            plt.close(fig)
+        print(f"  wrote {len(picks)} figures → {gdir / sp}/")
+
+
 def _embed_saliency(model, x, method: str, steps: int) -> np.ndarray:
     if method == "gradcam":
         return embedding_gradcam(model, x, "emb_mag")
@@ -332,7 +459,12 @@ def _embed_saliency(model, x, method: str, steps: int) -> np.ndarray:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["compare", "preview", "gradcam_res"], default="compare")
+    ap.add_argument(
+        "--mode", choices=["compare", "preview", "gradcam_res", "gallery"], default="compare"
+    )
+    ap.add_argument("--n-bats", type=int, default=10, help="Gallery: individuals per species.")
+    ap.add_argument("--per-bat", type=int, default=2, help="Gallery: images per individual.")
+    ap.add_argument("--pick-seed", type=int, default=0, help="Gallery: seed for bat/image pick.")
     ap.add_argument(
         "--target",
         choices=["emb_mag", "class_logit"],
@@ -355,6 +487,10 @@ def main() -> None:
 
     if args.mode == "gradcam_res":
         render_gradcam_resolution(args.device, out, args.target)
+        return
+
+    if args.mode == "gallery":
+        render_gallery(args.device, out, args.steps, args.n_bats, args.per_bat, args.pick_seed)
         return
 
     import matplotlib.pyplot as plt
