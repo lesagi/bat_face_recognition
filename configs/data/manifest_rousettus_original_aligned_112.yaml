@@ -1,0 +1,12 @@
+# 112px GradCAM baseline: reuses the 224px crops, downsized to 112 at load time.
+manifest_path: data/manifests/rousettus_original_aligned_224_manifest.csv
+species: rousettus
+background: original
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0

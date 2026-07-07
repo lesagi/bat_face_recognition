@@ -236,6 +236,81 @@ def on_black(sal: np.ndarray) -> np.ndarray:
     return (HOT(sal)[..., :3] * 255).astype(np.uint8)
 
 
+EDGES_CMP = [112, 224, 320]  # ResNet50 /32 → 4×4, 7×7, 10×10 conv grids
+GRID = {112: "4×4", 224: "7×7", 320: "10×10"}
+
+
+def gradcam_ckpt(species: str, model: str, edge: int) -> Path | None:
+    """Deterministic checkpoint dir from the resolution matrix (original bg,
+    seed 42): outputs/res_runs/<sp>_<model>_original_e<edge>_s42/. The 112px
+    originals are trained into the same namespace by a small extra pass so all
+    three columns share one data lineage."""
+    d = Path(f"outputs/res_runs/{species}_{model}_original_e{edge}_s42")
+    return resolve_ckpt(d) if d.is_dir() else None
+
+
+def render_gradcam_resolution(device: str, out: Path, target: str) -> None:
+    """One fixed bat per species, GradCAM at 112 / 224 / 320 for ArcFace & AdaFace.
+
+    The same 320px crop is re-loaded at each edge (identical source pixels), so
+    the only variable is the conv-grid resolution — the point of the figure.
+    Rows = {ArcFace, AdaFace} × {overlay, on-black}; cols = 112 | 224 | 320.
+    """
+    import matplotlib.pyplot as plt
+
+    models = [("ArcFace", "arcface"), ("AdaFace", "adaface")]
+    for sp, spec in BATS.items():
+        fname = Path(spec["path"]).name
+        src = Path(f"data/processed/{sp}/video/not_augmented/320/original_bg/{fname}")
+        if not src.exists():  # fall back to the original committed crop
+            src = Path(spec["path"])
+        orig = np.asarray(Image.open(src).convert("RGB").resize((DISPLAY, DISPLAY)))
+        rows: list[tuple[str, list[np.ndarray], list[np.ndarray]]] = []
+        for mname, mkey in models:
+            exp = f"{mkey}_{sp}_original_bg_video_tuned"
+            ov_cells, ob_cells = [], []
+            for edge in EDGES_CMP:
+                ckpt = gradcam_ckpt(sp, mkey, edge)
+                if ckpt is None:
+                    print(f"  !! missing ckpt {sp}/{mkey}/e{edge}")
+                    ov_cells.append(np.zeros_like(orig))
+                    ob_cells.append(np.zeros_like(orig))
+                    continue
+                model = load_model(exp, ckpt, device, "embedding")
+                x = default_image_loader(str(src), edge, "imagenet").unsqueeze(0).to(device)
+                cam = embedding_gradcam(model, x, target)  # raw conv grid (edge/32)
+                sal = resize_map(cam, DISPLAY)
+                ov_cells.append(overlay(orig, sal))
+                ob_cells.append(on_black(sal))
+            rows.append((f"{mname}\noverlay", ov_cells, ob_cells))
+
+        # 4 rows (2 models × overlay/on-black) × 3 cols (edges)
+        fig, axes = plt.subplots(4, 3, figsize=(9, 12))
+        row_labels = [
+            f"{models[0][0]}\noverlay",
+            f"{models[0][0]}\non black",
+            f"{models[1][0]}\noverlay",
+            f"{models[1][0]}\non black",
+        ]
+        cells = [rows[0][1], rows[0][2], rows[1][1], rows[1][2]]
+        for r in range(4):
+            for c, edge in enumerate(EDGES_CMP):
+                axes[r, c].imshow(cells[r][c])
+                axes[r, c].set_xticks([])
+                axes[r, c].set_yticks([])
+                if r == 0:
+                    axes[r, c].set_title(f"{edge}px  (Grad-CAM {GRID[edge]})", fontsize=11)
+            axes[r, 0].set_ylabel(row_labels[r], fontsize=10, rotation=90, labelpad=10)
+        fig.suptitle(
+            f"{sp} — Grad-CAM vs input resolution (target={target})", fontsize=13
+        )
+        fig.tight_layout()
+        dest = out / f"gradcam_resolution_{sp}_{target}.png"
+        fig.savefig(dest, dpi=140, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  wrote {dest}")
+
+
 def get_record(manifest_path: str, img_path: str):
     manifest = manifest_from_csv(manifest_path)
     want = Path(img_path)
@@ -257,7 +332,13 @@ def _embed_saliency(model, x, method: str, steps: int) -> np.ndarray:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["compare", "preview"], default="compare")
+    ap.add_argument("--mode", choices=["compare", "preview", "gradcam_res"], default="compare")
+    ap.add_argument(
+        "--target",
+        choices=["emb_mag", "class_logit"],
+        default="emb_mag",
+        help="Grad-CAM target scalar for --mode gradcam_res.",
+    )
     ap.add_argument(
         "--embed-method",
         choices=["gradcam", "smoothgrad", "ig_class", "ig_emb"],
@@ -271,6 +352,11 @@ def main() -> None:
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
+
+    if args.mode == "gradcam_res":
+        render_gradcam_resolution(args.device, out, args.target)
+        return
+
     import matplotlib.pyplot as plt
 
     # In compare mode, show every candidate embedding method next to the

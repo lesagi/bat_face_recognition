@@ -1,0 +1,11 @@
+manifest_path: data/manifests/rousettus_green_aligned_224_manifest.csv
+species: rousettus
+background: green
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.25
+test_fraction: 0.25
+batch_size: 32
+num_workers: 0
