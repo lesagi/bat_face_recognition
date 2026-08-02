@@ -1,0 +1,321 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage{amssymb}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage[colorlinks=true,linkcolor=accent,urlcolor=accent]{hyperref}
+
+\definecolor{accent}{HTML}{2B5F6B}
+\definecolor{good}{HTML}{2E7D4F}
+\definecolor{warn}{HTML}{A9791F}
+\definecolor{poor}{HTML}{A63A3A}
+\definecolor{faint}{HTML}{F0F3F5}
+
+\captionsetup{font=small,labelfont=bf,labelsep=period}
+\setlist{leftmargin=1.4em,itemsep=2pt,topsep=3pt}
+\newcommand{\g}[1]{\textcolor{good}{#1}}
+\newcommand{\w}[1]{\textcolor{warn}{#1}}
+\newcommand{\bd}[1]{\textcolor{poor}{#1}}
+\sisetup{table-format=1.3,detect-weight=true}
+
+% callout box
+\usepackage[most]{tcolorbox}
+\newtcolorbox{callout}[1][accent]{colback=faint,colframe=#1,boxrule=0pt,
+  leftrule=3pt,arc=2pt,left=8pt,right=8pt,top=6pt,bottom=6pt}
+
+\title{\vspace{-1.4cm}\bfseries Recognising individual bats by face:\\[2pt]
+\large what the multi-seed results actually show}
+\author{\normalsize Master's thesis --- results interpretation}
+\date{\normalsize Open-set individual recognition \textbullet\ 2 species \textbullet\ 3 model families
+\textbullet\ 3 backgrounds \textbullet\ 5 seeds/cell (270 runs)}
+
+\begin{document}
+\maketitle
+\vspace{-0.8em}
+
+\begin{callout}
+\textbf{In one paragraph.} Across a re-run of the full experiment matrix, individual bat faces are
+recognisable well above chance in the favourable conditions (best cells ROC-AUC $\approx$
+0.85--0.89; permutation $p \approx 0.001$--$0.007$), and the signal is genuinely in the
+\emph{foreground} --- performance survives removing the background entirely. Two limits are equally
+clear: the models are not background-invariant (randomised backgrounds drop them to near chance),
+and higher input resolution does not help (224$\to$320\,px, mean $\Delta$ROC-AUC $=-0.033$).
+Metric-learning embeddings (ArcFace/AdaFace) are more robust than the contrastive Siamese network,
+especially where training identities are few. A control experiment adds a decisive qualifier: much
+of the apparent recognition --- nearly \textbf{all} of it for Rousettus --- is reproducible from the
+crop \textbf{silhouette} alone, so the signal is as much head-shape as facial texture. The dominant
+caveat throughout is the tiny open-set test (two held-out identities per species), so every claim is
+directional, not definitive.
+\end{callout}
+
+\section{What the experiment measured}
+The task is \textbf{open-set} individual recognition: the identities used to test the model were
+never seen in training. Each species' data is split by identity, and the held-out \emph{test} set is
+small (Table~\ref{tab:splits}) --- the single most important fact for interpreting everything below.
+
+\begin{table}[h]\centering
+\caption{Identity-disjoint splits.}\label{tab:splits}
+\begin{tabular}{lccccc}
+\toprule
+Species & Train id. & Val id. & Test id. & Train img & Test img \\
+\midrule
+Mauritius & 12 & 2 & \bd{2} & 373 & 77 \\
+Rousettus & 8 & 2 & \bd{2} & 619 & 137 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three model families were compared: a \textbf{Siamese} 4-conv contrastive network (learns a
+similarity from pairs) and two margin-based metric-learning heads on a ResNet-50 backbone,
+\textbf{ArcFace} and \textbf{AdaFace} (learn an identity-structured embedding). Each was trained on
+three \textbf{background variants} of the same face crops --- \emph{original} (natural background
+kept), \emph{green} (face segmented onto a uniform field, i.e.\ background removed), and \emph{random}
+(face composited onto varied, identity-unrelated backgrounds) --- at five seeds each. Verification
+quality is ROC-AUC; identification is top-1/mAP; a \textbf{permutation test} checks each result
+against a shuffled-label null.
+
+\paragraph{How to read the numbers.} With only two test identities, a single run is noisy: one
+pairing can swing ROC-AUC by $>0.1$. Every cell is therefore a \textbf{mean $\pm$ standard deviation
+over five seeds}, and chance is ROC-AUC $=0.5$. Differences smaller than roughly one standard
+deviation are ties. The permutation test asks the stricter question --- could this arise from a model
+that learned nothing? --- and for the strong cells the answer is no ($p\approx0.001$--$0.007$).
+
+\section{The headline results}
+\begin{table}[h]\centering
+\caption{Test ROC-AUC (mean $\pm$ std, 5 seeds), edge 112\,px.
+\g{Green} $\ge 0.75$, \w{amber} 0.60--0.75, \bd{red} $<0.60$ (approaching chance).}\label{tab:matrix}
+\begin{tabular}{ll cc}
+\toprule
+Model & Background & Mauritius & Rousettus \\
+\midrule
+Siamese & original & \g{$0.880\pm.059$} & \w{$0.614\pm.106$} \\
+Siamese & green    & \g{$0.798\pm.105$} & \bd{$0.421\pm.051$} \\
+Siamese & random   & \w{$0.700\pm.050$} & \bd{$0.454\pm.035$} \\
+\addlinespace
+ArcFace & original & \g{$0.885\pm.068$} & \w{$0.740\pm.119$} \\
+ArcFace & green    & \g{$0.777\pm.122$} & \g{$0.774\pm.085$} \\
+ArcFace & random   & \w{$0.611\pm.073$} & \bd{$0.508\pm.135$} \\
+\addlinespace
+AdaFace & original & \g{$0.845\pm.071$} & \w{$0.739\pm.056$} \\
+AdaFace & green    & \g{$0.809\pm.114$} & \g{$0.757\pm.127$} \\
+AdaFace & random   & \bd{$0.592\pm.061$} & \bd{$0.551\pm.102$} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.95\linewidth]{figures/multiseed_matrix.png}
+\caption{Test ROC-AUC (mean $\pm$ std) by background, per species; dashed line is chance (0.5).
+Two patterns recur: \emph{random} backgrounds are lowest everywhere, and Rousettus is both lower
+and more variable than Mauritius.}
+\end{figure}
+
+\section{Finding 1 --- the recognition is real}
+The concern with a two-identity test is that a good score is a fluke. The permutation test re-scores
+each model against hundreds of label shuffles; for the strong cells (Mauritius ArcFace/AdaFace on
+original background) the observed ROC-AUC beats \emph{every} shuffle ($p\approx0.001$--$0.007$).
+\begin{callout}[good]
+\textbf{Defensible claim.} In the favourable conditions the models discriminate individuals at a rate
+shuffled-label chance does not reproduce --- the learned representation carries genuine identity
+information.
+\end{callout}
+
+\section{Finding 2 --- foreground, not background (but not background-invariant)}
+If the high scores were the model memorising the enclosure rather than the bat, removing the
+background should destroy performance. It does not:
+\begin{itemize}
+\item \textbf{Background removed (green):} embedding models still recognise well --- ArcFace
+0.78\,/\,0.77 and AdaFace 0.81\,/\,0.76 (Mauritius\,/\,Rousettus), on par with the natural background.
+\item \textbf{Background randomised (random):} the same models collapse toward chance (0.51--0.61).
+\end{itemize}
+Green working while random fails is the tell: a clean uniform field lets the network read the
+foreground; arbitrary cluttered backgrounds act as distractors it was never taught to suppress. So
+the model has learned a foreground representation that is \emph{not robust} to background variation.
+\emph{Which part} of the foreground it uses --- the face, or the crop shape --- is the subject of
+Section~\ref{sec:validity}.
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.49\linewidth]{figures/proj_mauritius_umap.png}\hfill
+\includegraphics[width=0.49\linewidth]{figures/proj_rousettus_umap.png}
+\caption{UMAP of ArcFace test embeddings, coloured by identity (left Mauritius, right Rousettus,
+original background). Tight, separated colour clusters mean same-individual images sit together and
+different individuals are pushed apart --- the geometric basis of the ROC-AUC numbers.}
+\end{figure}
+
+\section{Finding 3 --- embeddings beat Siamese, most where identities are scarce}
+The families diverge sharply on Rousettus (fewer training identities, 8 vs 12): the Siamese network
+barely functions (0.61 original, \textbf{0.42 green --- below chance}), while ArcFace/AdaFace hold
+0.74--0.77. The Mauritius$\to$Rousettus drop is therefore largest for Siamese (green: 0.80$\to$0.42).
+The contrastive objective learns a metric from pairs and needs a diversity of identities to
+generalise; with only eight it underfits. Margin-based heads extract more per identity and transfer
+better to the open-set test.
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.49\linewidth]{figures/siam_mauritius_umap.png}\hfill
+\includegraphics[width=0.49\linewidth]{figures/siam_rousettus_umap.png}
+\caption{Siamese embeddings, UMAP (left Mauritius, right Rousettus, original) --- the family with the
+largest species gap. Mauritius shows structure; Rousettus is diffuse, the geometric counterpart of
+its near-chance ROC-AUC. (This is why the resolution study excludes Siamese: its 4-conv net is fixed
+at 105\,px.)}
+\end{figure}
+
+\section{Finding 4 --- higher resolution does not help}
+Retraining the embedding models on genuinely higher-resolution crops at 224 and 320\,px did not
+improve recognition: mean change 224$\to$320 was $-0.033$ ROC-AUC (green $-0.048$, original $-0.036$,
+random $-0.015$). GradCAM localises the eyes \emph{more} sharply at higher resolution
+(Fig.~\ref{fig:gradcam}), so the model is not starved of detail --- it already has what it needs at
+112\,px.
+\begin{figure}[h]\centering
+\includegraphics[width=0.9\linewidth]{figures/gradcam_resolution_mauritius_class_logit.png}
+\caption{GradCAM (class-logit target) at 112/224/320\,px, Mauritius. Attention concentrates on the
+facial region and sharpens with resolution --- yet accuracy is unchanged.}\label{fig:gradcam}
+\end{figure}
+
+\section{Internal validity: is it the face, or the crop shape?}\label{sec:validity}
+\begin{callout}
+\textbf{Two terms, used throughout this section.}\\
+\textbf{Shape (silhouette)} --- the outline of the segmented head crop only: head size, ear notches,
+jaw contour. The black-vs-white boundary in the ``Silhouette'' panels (Figs.~\ref{fig:montage-mau}--\ref{fig:montage-rou}),
+with all interior detail erased.\\[3pt]
+\textbf{Texture} --- shorthand for everything \emph{inside} that outline: the eyes (position, spacing,
+iris), the snout and muzzle patterning, fur colour and markings, shading --- the internal facial
+appearance a person would use to tell two bats apart. (``Texture'' is the standard computer-vision
+term; it means internal appearance here, not just fine fur detail.)
+\end{callout}
+
+Finding~2 showed recognition survives removing the background (green). But green keeps the tight
+segmentation \textbf{silhouette} --- the head/face outline --- which is itself identity-correlated
+(the ``Silhouette'' panels: head size, ear notches and jaw contour visibly differ between
+individuals). So ``green works'' might reflect the model reading the \emph{shape} of the crop, not the
+\emph{texture} of the face. Two controls test this directly.
+
+\begin{figure}[h]\centering
+\includegraphics[width=\linewidth]{figures/montage_mauritius.png}
+\caption{Mauritius --- the same test crop as four inputs: natural, background-removed (green),
+\textbf{silhouette} (shape only, zero texture), and \textbf{aperture} (texture only, outline removed).
+The silhouette carries no facial detail, yet is trainable and discriminative.}\label{fig:montage-mau}
+\end{figure}
+\begin{figure}[h]\centering
+\includegraphics[width=\linewidth]{figures/montage_rousettus.png}
+\caption{Rousettus --- same four inputs. Note how distinctive the bare outline is even with the face
+erased.}\label{fig:montage-rou}
+\end{figure}
+
+\subsection*{Control 1 --- train on shape alone (silhouette)}
+Retrain the full matrix on the pure silhouette, with identical identities and splits, and compare to
+green (shape\,+\,texture):
+\begin{table}[h]\centering
+\caption{Silhouette (shape only) vs green, test ROC-AUC (mean $\pm$ std, 5 seeds).
+\bd{Red $\Delta$} = silhouette matches/beats green (shape dominates); \g{green $\Delta$} = texture
+adds value.}\label{tab:silh}
+\begin{tabular}{ll ccc}
+\toprule
+Species & Model & Silhouette & Green & $\Delta$ (silh$-$green) \\
+\midrule
+Mauritius & Siamese & $0.697\pm.023$ & 0.798 & \g{$-0.101$} \\
+Mauritius & ArcFace & $0.649\pm.086$ & 0.777 & \g{$-0.128$} \\
+Mauritius & AdaFace & $0.611\pm.130$ & 0.809 & \g{$-0.198$} \\
+\addlinespace
+Rousettus & Siamese & $0.698\pm.032$ & 0.421 & \bd{$+0.277$} \\
+Rousettus & ArcFace & $0.823\pm.038$ & 0.774 & \bd{$+0.049$} \\
+Rousettus & AdaFace & $0.820\pm.075$ & 0.757 & \bd{$+0.063$} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Shape alone is \textbf{well above chance everywhere} (0.61--0.82). For Mauritius the silhouette runs
+0.10--0.20 \emph{below} green, so internal texture genuinely adds value. For Rousettus the silhouette
+\textbf{matches or beats} green --- Siamese by $+0.28$ --- so the bare outline is as discriminative as
+the textured face, or more.
+
+\subsection*{Control 2 --- occlude one cue on the real-face model (5 seeds)}
+\begin{table}[h]\centering
+\caption{Occluding one cue in the test set of a model trained on real faces (ArcFace/original, mean
+over 5 seeds). Bigger drop $=$ stronger reliance on the removed cue.}\label{tab:occl}
+\begin{tabular}{ll cc}
+\toprule
+Species & Test-set ablation & ROC-AUC & $\Delta$ vs clean \\
+\midrule
+Rousettus & clean & $0.793\pm.135$ & --- \\
+Rousettus & shape removed (texture only) & $0.672\pm.117$ & \bd{$-0.122$} \\
+Rousettus & texture removed (shape only) & $0.774\pm.141$ & $-0.019$ \\
+\addlinespace
+Mauritius & clean & $0.808\pm.185$ & --- \\
+Mauritius & shape removed (texture only) & $0.884\pm.047$ & \textcolor{gray}{$+0.076$ (noise)} \\
+Mauritius & texture removed (shape only) & $0.815\pm.101$ & \textcolor{gray}{$+0.007$ (noise)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For Rousettus, removing the \emph{shape} costs $6\times$ more than removing the \emph{texture}
+($-0.122$ vs $-0.019$) --- it relies on shape, corroborating Control~1. For Mauritius the deltas are
+swamped by the two-identity test's $\pm0.20$ noise and are inconclusive (occlusion even nominally
+``improves'' it --- a sign of pure variance).
+
+\subsection*{Why this is not negligible}
+\begin{itemize}
+\item \textbf{It is most of the signal, not a small correction.} For Rousettus a binary silhouette
+with zero facial detail reaches ROC-AUC 0.82 (ArcFace) --- \emph{higher} than the textured face
+(0.77). Nearly all of the reported Rousettus recognition is reproducible from the outline alone.
+\item \textbf{Two independent controls agree.} For Rousettus, silhouette $\ge$ green (Control~1)
+\emph{and} shape-removal hurts most (Control~2).
+\item \textbf{It changes what the result means.} A ``face recognition'' score that survives deleting
+the face --- keeping only the crop outline --- is measuring head/crop \emph{geometry}, not facial
+identity. The silhouette is the segmentation mask, whose contour (head size, ear shape, jaw line) is
+stable within an individual and variable across individuals: a per-individual shortcut a CNN will
+exploit.
+\item \textbf{It is species-specific.} For Mauritius texture \emph{does} contribute (silhouette drops
+below green), so the face claim is partly supported --- though shape still accounts for a large share.
+For Rousettus a distinct facial-texture contribution is not established by these data.
+\end{itemize}
+\begin{callout}[warn]
+\textbf{State it carefully.} Report the silhouette baseline next to every headline number. Honest
+phrasing: Mauritius --- ``individuals are recognised from face crops, with contributions from both
+facial texture and head-crop shape''; Rousettus --- ``individuals are separable largely by head-crop
+\textbf{shape}; a distinct facial-texture contribution is not demonstrated.'' Isolating texture
+cleanly would require shape-normalised inputs (a fixed aperture) at training time, not just at test
+time.
+\end{callout}
+
+\section{What the thesis learns}
+\begin{itemize}
+\item \textbf{Feasibility.} Automated individual identification of these fruit-bat species from face
+crops is possible above chance --- a proof of concept, not yet a deployable tool.
+\item \textbf{Architecture.} Prefer margin-based embedding learning (ArcFace/AdaFace) over contrastive
+Siamese, especially with few identities.
+\item \textbf{The real bottleneck is data.} Neither model capacity nor input resolution is limiting;
+the scarce resource is the \emph{number of individuals}.
+\item \textbf{Background must be controlled}, and \textbf{shape is a confound, not a footnote} --- a
+silhouette baseline recognises individuals on its own, so the ``face'' framing must be qualified and
+the silhouette number reported beside every accuracy.
+\end{itemize}
+
+\section{Limitations to state up front}
+\begin{itemize}
+\item \textbf{Two-identity open-set test} --- wide confidence intervals; conclusions are about
+patterns across the matrix, not any single cell.
+\item \textbf{Background robustness gap} --- the random-background collapse means the model would not
+transfer to unfamiliar backgrounds without further work.
+\item \textbf{Shape confound} --- a large share of performance (nearly all for Rousettus) is
+reproducible from the crop silhouette; isolating texture needs shape-normalised training inputs.
+\item \textbf{Generalisation scope} --- splits are identity-disjoint but within the same capture
+setting; cross-session generalisation is not separately demonstrated.
+\end{itemize}
+
+\begin{callout}[good]
+\textbf{For the abstract.} ``On an open-set test of held-out individuals, margin-based face embeddings
+recognise individual fruit bats above chance (best ROC-AUC $\approx$ 0.85--0.89; permutation
+$p<0.01$), with the signal shown to be foreground- rather than background-driven --- though a
+silhouette control indicates much of it (nearly all for Rousettus) reflects head-crop \emph{shape}
+rather than facial texture; performance is limited by the number of available identities rather than
+by model capacity or image resolution, and is not yet robust to background change.''
+\end{callout}
+
+\end{document}
