@@ -106,4 +106,21 @@ grainy, while GradCAM localises a smooth focus region on the face.
 \caption{Rousettus --- saliency across models/methods.}
 \end{figure}
 
+\section{Embedding structure: UMAP / t-SNE projections}
+ArcFace test-set embeddings projected to 2D (per-identity colour), \emph{original} background.
+Tight, well-separated clusters indicate identity-discriminative embeddings; overlap flags the
+harder identities. Generated from the per-run projections via
+\texttt{gen\_report\_assets.py --mode projection}.
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.48\linewidth]{figures/proj_mauritius_umap.png}\hfill
+\includegraphics[width=0.48\linewidth]{figures/proj_mauritius_tsne.png}
+\caption{Mauritius --- ArcFace embedding projections (UMAP left, t-SNE right).}
+\end{figure}
+\begin{figure}[h]\centering
+\includegraphics[width=0.48\linewidth]{figures/proj_rousettus_umap.png}\hfill
+\includegraphics[width=0.48\linewidth]{figures/proj_rousettus_tsne.png}
+\caption{Rousettus --- ArcFace embedding projections (UMAP left, t-SNE right).}
+\end{figure}
+
 \end{document}

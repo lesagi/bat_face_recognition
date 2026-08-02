@@ -67,14 +67,50 @@ def resolve_ckpt(d: Path) -> Path | None:
     return rest[0] if rest else None
 
 
-def find_run_dir(species: str, head_token: str) -> Path | None:
-    runs = sorted(Path("outputs/runs").glob("*/"), key=lambda p: p.stat().st_mtime, reverse=True)
+def find_run_dir(species: str, head_token: str, *, require_ckpt: bool = True) -> Path | None:
+    base = Path("outputs/runs")
+    # Support both the legacy flat layout (outputs/runs/<run>/) and the current
+    # day-nested layout (outputs/runs/<YYYY-MM-DD>/<run>/). Day dirs themselves hold
+    # no roc_curve PNGs, so they are harmlessly skipped by the match below.
+    # require_ckpt=False finds runs kept under --keep-checkpoints none (which still
+    # carry their report/figures/explanations, just no best_model_*.pt).
+    candidates = list(base.glob("*/")) + list(base.glob("*/*/"))
+    runs = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
     for d in runs:
-        if list(d.glob(f"roc_curve__{species}_video_original_*{head_token}*.png")) and resolve_ckpt(
-            d
+        if list(d.glob(f"roc_curve__{species}_video_original_*{head_token}*.png")) and (
+            not require_ckpt or resolve_ckpt(d)
         ):
             return d
     return None
+
+
+def render_projection(out: Path) -> None:
+    """Copy per-run UMAP/t-SNE embedding projections into the report figures dir.
+
+    Checkpoint-free: reuses the projection PNGs each ArcFace run already writes to
+    ``<run>/explanations/embedding_projection_{umap,tsne}.png`` when trained with
+    explanations enabled. No model reload, so this works under
+    ``--keep-checkpoints none``.
+    """
+    import shutil
+
+    for sp in BATS:
+        rd = find_run_dir(sp, "arcface", require_ckpt=False)
+        if rd is None:
+            print(f"  !! no ArcFace run dir for {sp} — skipping projection")
+            continue
+        found = False
+        for method in ("umap", "tsne"):
+            src = rd / "explanations" / f"embedding_projection_{method}.png"
+            if src.exists():
+                dst = out / f"proj_{sp}_{method}.png"
+                shutil.copyfile(src, dst)
+                print(f"  ok {sp}/{method}: {rd.name} -> {dst.name}")
+                found = True
+            else:
+                print(f"  !! missing {src}")
+        if not found:
+            print(f"  !! {sp}: {rd.name} has no projection PNGs (train with explanations enabled)")
 
 
 def load_model(experiment: str, ckpt: Path, device: str, family: str):
@@ -240,13 +276,25 @@ EDGES_CMP = [112, 224, 320]  # ResNet50 /32 → 4×4, 7×7, 10×10 conv grids
 GRID = {112: "4×4", 224: "7×7", 320: "10×10"}
 
 
+def _res_run_dir(species: str, model_token: str, edge: int) -> Path | None:
+    """Locate a resolution-study run dir (original bg, seed 42) by species/model/edge.
+
+    Tolerant of both the legacy flat layout (outputs/res_runs/<leaf>/) and a day-nested
+    layout (outputs/res_runs/<YYYY-MM-DD>/<leaf>/), and of both leaf schemes: the concise
+    ``<sp>_<model>_original_e<edge>_s42`` and the experiment_name
+    ``<sp>_video_original_<model>_..._e<edge>_s42``. Returns the most recent match."""
+    base = Path("outputs/res_runs")
+    pat = f"*{species}*{model_token}*_e{edge}_s42"
+    matches = [p for p in (list(base.glob(pat)) + list(base.glob(f"*/{pat}"))) if p.is_dir()]
+    return max(matches, key=lambda p: p.stat().st_mtime) if matches else None
+
+
 def gradcam_ckpt(species: str, model: str, edge: int) -> Path | None:
-    """Deterministic checkpoint dir from the resolution matrix (original bg,
-    seed 42): outputs/res_runs/<sp>_<model>_original_e<edge>_s42/. The 112px
-    originals are trained into the same namespace by a small extra pass so all
+    """Deterministic checkpoint dir from the resolution matrix (original bg, seed 42).
+    The 112px originals are trained into the same namespace by a small extra pass so all
     three columns share one data lineage."""
-    d = Path(f"outputs/res_runs/{species}_{model}_original_e{edge}_s42")
-    return resolve_ckpt(d) if d.is_dir() else None
+    d = _res_run_dir(species, model, edge)
+    return resolve_ckpt(d) if d else None
 
 
 def render_gradcam_resolution(device: str, out: Path, target: str) -> None:
@@ -333,8 +381,8 @@ SIAMESE_EDGE = 105  # 4-conv net is size-locked; runs only at its native small s
 
 
 def siamese_ckpt(species: str) -> Path | None:
-    d = Path(f"outputs/res_runs/{species}_siamese_original_e{SIAMESE_EDGE}_s42")
-    return resolve_ckpt(d) if d.is_dir() else None
+    d = _res_run_dir(species, "siamese", SIAMESE_EDGE)
+    return resolve_ckpt(d) if d else None
 
 
 def src_for_edge(species: str, filename: str, edge: int) -> Path:
@@ -460,7 +508,9 @@ def _embed_saliency(model, x, method: str, steps: int) -> np.ndarray:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--mode", choices=["compare", "preview", "gradcam_res", "gallery"], default="compare"
+        "--mode",
+        choices=["compare", "preview", "gradcam_res", "gallery", "projection"],
+        default="compare",
     )
     ap.add_argument("--n-bats", type=int, default=10, help="Gallery: individuals per species.")
     ap.add_argument("--per-bat", type=int, default=2, help="Gallery: images per individual.")
@@ -491,6 +541,10 @@ def main() -> None:
 
     if args.mode == "gallery":
         render_gallery(args.device, out, args.steps, args.n_bats, args.per_bat, args.pick_seed)
+        return
+
+    if args.mode == "projection":
+        render_projection(out)
         return
 
     import matplotlib.pyplot as plt
