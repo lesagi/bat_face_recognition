@@ -7,6 +7,7 @@ from typing import Any
 
 import click
 from bat_cli.runtime import (
+    KEEP_CHECKPOINTS_CHOICES,
     CliRuntimeError,
     build_manifest_csv,
     compose_config,
@@ -37,6 +38,29 @@ def _run_tags(_: click.Context, __: click.Parameter, values: tuple[str, ...]) ->
             raise click.BadParameter(f"run tag must look like key=value; got {value!r}")
         tags[key.strip()] = val.strip()
     return tags
+
+
+def _require_gpu(allow_cpu: bool) -> None:
+    """Log the training device and fail fast on an accidental CPU fallback.
+
+    ``accelerate`` silently places training on CPU when CUDA is unavailable, which
+    would make a multi-day batch crawl unnoticed. Refuse unless ``--allow-cpu`` is
+    set. Respects ``CUDA_VISIBLE_DEVICES`` (torch reports only visible devices)."""
+    import torch
+
+    if torch.cuda.is_available():
+        n = torch.cuda.device_count()
+        names = ", ".join(torch.cuda.get_device_name(i) for i in range(n))
+        click.echo(f"GPU: training on CUDA — {n} device(s) visible: {names}")
+        return
+    if allow_cpu:
+        click.echo("GPU: CUDA unavailable — training on CPU (--allow-cpu set).", err=True)
+        return
+    raise CliRuntimeError(
+        "CUDA is not available — refusing to train on CPU (a full run would be "
+        "prohibitively slow). Pass --allow-cpu to override, or fix the CUDA/driver "
+        "setup / CUDA_VISIBLE_DEVICES."
+    )
 
 
 @click.group(invoke_without_command=True)
@@ -110,6 +134,19 @@ def main(ctx: click.Context) -> None:
     type=int,
     help="Identities sampled per split (train/val/test) for the saliency composite.",
 )
+@click.option(
+    "--keep-checkpoints",
+    type=click.Choice(KEEP_CHECKPOINTS_CHOICES),
+    default="all",
+    show_default=True,
+    help="Checkpoint retention after the pipeline runs: all | roc_auc | f1 | none. "
+    "Batch runs use 'none' (models are re-derivable from the recorded seed + config).",
+)
+@click.option(
+    "--allow-cpu",
+    is_flag=True,
+    help="Permit training on CPU when CUDA is unavailable (otherwise the run fails fast).",
+)
 @click.option("--dry-run", is_flag=True, help="Compose and print the run plan without training.")
 def train(
     config_name: str,
@@ -128,6 +165,8 @@ def train(
     permutation_n: int,
     no_explanations: bool,
     explanations_per_split: int,
+    keep_checkpoints: str,
+    allow_cpu: bool,
     dry_run: bool,
 ) -> None:
     """Run training followed by test evaluation, PDF generation, and permutation test."""
@@ -142,6 +181,7 @@ def train(
             click.echo("Dry run OK")
             click.echo(format_json(_plan_payload(cfg, resolved_output, use_mlflow=not no_mlflow)))
             return
+        _require_gpu(allow_cpu)
         result = run_training(
             cfg,
             root=root,
@@ -158,6 +198,7 @@ def train(
             permutation_n=permutation_n,
             run_explanations=not no_explanations,
             explanations_per_split=explanations_per_split,
+            keep_checkpoints=keep_checkpoints,
         )
     except CliRuntimeError as exc:
         raise click.ClickException(str(exc)) from exc

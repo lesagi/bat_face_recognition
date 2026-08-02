@@ -1,3 +1,4 @@
+name: arcface
 family: embedding
 arch: resnet50
 embedding_dim: 512

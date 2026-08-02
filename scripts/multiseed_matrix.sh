@@ -3,17 +3,25 @@
 # green/original/random) for one species, N seeds each, into one MLflow
 # experiment — for mean±std reporting on the small (2-3 identity) test splits
 # where single runs are noise-dominated. deterministic=true + a fixed data
-# split_seed so ONLY the training seed varies; --no-explanations/--no-permutation
-# keep each run fast (metrics are logged regardless).
+# split_seed so ONLY the training seed varies. Each run does the FULL pipeline
+# (explanations + permutation) and then discards its checkpoints
+# (--keep-checkpoints none) — models are re-derivable from seed+config, so this
+# keeps the batch tiny on disk while still emitting per-run UMAP/t-SNE/saliency.
 #
 # Usage: multiseed_matrix.sh <species> <gpu_id>   species in {mauritius, rousettus}
-# Env: MLFLOW_EXP (default multiseed-full-20260706), SEEDS (default "42 43 44 45 46").
+# Env: MLFLOW_EXP (default multiseed-full-20260706), SEEDS (default "42 43 44 45 46"),
+#      EXPLAIN (default 1; set 0 to skip explanations+permutation for a fast pass),
+#      KEEP_CKPT (default none; all|roc_auc|f1|none).
 set +u
 
 SPECIES="${1:?usage: multiseed_matrix.sh <species> <gpu_id>}"
 GPU_ID="${2:-0}"
 EXP="${MLFLOW_EXP:-multiseed-full-20260706}"
 SEEDS="${SEEDS:-42 43 44 45 46}"
+EXPLAIN="${EXPLAIN:-1}"
+KEEP_CKPT="${KEEP_CKPT:-none}"
+EXPL_FLAGS=""
+[ "$EXPLAIN" = "0" ] && EXPL_FLAGS="--no-explanations --no-permutation"
 
 cd "$(dirname "$0")/.." || exit 1
 export CUDA_VISIBLE_DEVICES="$GPU_ID"
@@ -46,7 +54,7 @@ for e in $CONFIGS; do
     log="$LOG_DIR/${e}_s${s}.log"
     uv run bat-cli train --experiment "$e" \
       --hydra trainer.deterministic=true --hydra seed="$s" \
-      --no-explanations --no-permutation \
+      $EXPL_FLAGS --keep-checkpoints "$KEEP_CKPT" \
       --mlflow-experiment "$EXP" --run-name "${e}-s${s}" \
       --run-tag "batch=$EXP" --run-tag "species=$SPECIES" --run-tag "seed=$s" > "$log" 2>&1
     rc=$?

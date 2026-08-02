@@ -7,7 +7,9 @@
 #
 # Usage: multiseed_hires.sh <species> <gpu_id>   species in {mauritius, rousettus}
 # Env: EDGE (default 224), MLFLOW_EXP (default multiseed-hires<EDGE>-20260706),
-#      SEEDS (default "42 43 44 45 46").
+#      SEEDS (default "42 43 44 45 46"),
+#      EXPLAIN (default 1; set 0 to skip explanations+permutation),
+#      KEEP_CKPT (default none; all|roc_auc|f1|none).
 set +u
 
 SPECIES="${1:?usage: multiseed_hires.sh <species> <gpu_id>}"
@@ -15,6 +17,10 @@ GPU_ID="${2:-0}"
 EDGE="${EDGE:-224}"
 EXP="${MLFLOW_EXP:-multiseed-hires${EDGE}-20260706}"
 SEEDS="${SEEDS:-42 43 44 45 46}"
+EXPLAIN="${EXPLAIN:-1}"
+KEEP_CKPT="${KEEP_CKPT:-none}"
+EXPL_FLAGS=""
+[ "$EXPLAIN" = "0" ] && EXPL_FLAGS="--no-explanations --no-permutation"
 
 cd "$(dirname "$0")/.." || exit 1
 export CUDA_VISIBLE_DEVICES="$GPU_ID"
@@ -45,7 +51,7 @@ for e in $CONFIGS; do
     uv run bat-cli train --experiment "$e" \
       --hydra model.input_edge_length="$EDGE" \
       --hydra trainer.deterministic=true --hydra seed="$s" \
-      --no-explanations --no-permutation \
+      $EXPL_FLAGS --keep-checkpoints "$KEEP_CKPT" \
       --mlflow-experiment "$EXP" --run-name "${e}-e${EDGE}-s${s}" \
       --run-tag "batch=$EXP" --run-tag "species=$SPECIES" --run-tag "seed=$s" \
       --run-tag "edge=$EDGE" > "$log" 2>&1

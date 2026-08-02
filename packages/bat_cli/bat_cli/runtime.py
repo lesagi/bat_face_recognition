@@ -11,7 +11,7 @@ import json
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -86,6 +86,11 @@ class PermutationResult:
     n_permutations: int
     metrics_tested: tuple[str, ...]
     p_values: dict[str, float]
+    # Full bat_stats results + pre-rendered null-dist plot(s), so the caller can
+    # embed the permutation summary in the unified PDF. Optional: the standalone
+    # permutation-test command ignores them.
+    results: Any = None
+    plot_paths: list[Path] = field(default_factory=list)
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -132,16 +137,38 @@ def compose_config(
 
 
 def default_output_dir(cfg: Mapping[str, Any], root: Path | None = None) -> Path:
-    """Return the default timestamped output directory for a composed config."""
+    """Return the default day-nested, descriptive output directory for a composed config.
+
+    Layout: ``<output_root>/<YYYY-MM-DD>/<experiment_name>_e<edge>_s<seed>[_<HHMMSS>]``.
+
+    The leaf routes through :func:`bat_stats.naming.experiment_name` (species / source /
+    background / model / loss) so a run's directory name matches the artifact filenames
+    inside it, instead of the old ``<stamp>_<arch>_<loss>`` which was identical across
+    every dataset. ``_e<edge>_s<seed>`` disambiguates same-day multi-seed / multi-resolution
+    runs; ``_<HHMMSS>`` is appended only as a tiebreaker when the target already exists (e.g.
+    regenerating the same experiment+seed on the same day under ``--keep-checkpoints none``).
+    """
+
+    from bat_stats.naming import experiment_name
 
     repo = find_project_root(root)
     base = Path(str(cfg.get("output_root", "outputs/runs")))
     if not base.is_absolute():
         base = repo / base
-    model = _mapping(cfg.get("model")).get("arch", "model")
-    loss = _mapping(cfg.get("loss")).get("type", _mapping(cfg.get("model")).get("head", "loss"))
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return base / f"{stamp}_{model}_{loss}"
+    now = datetime.now()
+    day_dir = base / now.strftime("%Y-%m-%d")
+
+    try:
+        edge_token = f"_e{_resolve_image_size(cfg)}"
+    except CliRuntimeError:
+        edge_token = ""
+    seed = int(_mapping(cfg).get("seed", 0))
+    leaf = f"{experiment_name(cfg)}{edge_token}_s{seed}"
+
+    candidate = day_dir / leaf
+    if candidate.exists():
+        candidate = day_dir / f"{leaf}_{now.strftime('%H%M%S')}"
+    return candidate
 
 
 def build_bundle(
@@ -447,8 +474,17 @@ def run_training(
     run_explanations: bool = True,
     explanations_per_split: int = 2,
     explanations_max_per_identity: int = 8,
+    keep_checkpoints: str = "all",
 ) -> TrainResult:
-    """Train, evaluate, render a PDF, and optionally log to MLflow."""
+    """Train, evaluate, render a PDF, and optionally log to MLflow.
+
+    ``keep_checkpoints`` controls checkpoint retention *after* the full pipeline
+    (eval / explanations / report / permutation / promotion) has run: ``"all"``
+    (default, keep every ``best_model_*.pt``), ``"none"`` (delete them all), or a
+    metric token such as ``"roc_auc"``/``"f1"`` (keep only ``best_model_<token>.pt``).
+    Checkpoints carry no RNG state and are re-derivable from seed+config, so pruning
+    reclaims disk without losing reproducible state.
+    """
 
     from bat_reporting import ReportData, build_unified_pdf
     from bat_tracking import start_run
@@ -556,22 +592,8 @@ def run_training(
                 report_data_kwargs["embedding_projection"] = EmbeddingProjection(
                     images=explanations.projection_images
                 )
-
-        report_path = _safe(
-            "PDF report",
-            warnings,
-            lambda: build_unified_pdf(
-                ReportData(**report_data_kwargs),
-                resolved_output / "post_training_report.pdf",
-            ),
-        )
-
-        if tracker is not None and report_path is not None:
-            _safe(
-                "MLflow report upload",
-                warnings,
-                lambda: tracker.log_artifact(report_path, "reports"),
-            )
+        # The PDF is built later (after the permutation step) so its permutation
+        # section is populated rather than a placeholder; see below.
 
         # Val-selected operating threshold + comparable cosine metric (PR6).
         # Computing them once here lets the permutation test use the
@@ -623,6 +645,7 @@ def run_training(
                 )
 
         permutation_dir: Path | None = None
+        permutation_result: PermutationResult | None = None
         if run_permutation and eval_report is not None and eval_report.predictions is not None:
             # Pick the threshold the permutation test binarises at. Default
             # Youden-J reproduces legacy behaviour; ``far_1e2`` uses the
@@ -665,6 +688,31 @@ def run_training(
                         lambda: tracker.log_artifact(permutation_dir, "permutation"),
                     )
 
+        # Build the PDF now — after the permutation step — so its permutation
+        # section renders the real table + null-dist plots instead of a
+        # placeholder. All other inputs (eval, saliency, projection) are ready.
+        if permutation_result is not None:
+            from bat_reporting import PermutationSummary
+
+            report_data_kwargs["permutation"] = PermutationSummary(
+                results=permutation_result.results,
+                plot_paths=permutation_result.plot_paths,
+            )
+        report_path = _safe(
+            "PDF report",
+            warnings,
+            lambda: build_unified_pdf(
+                ReportData(**report_data_kwargs),
+                resolved_output / "post_training_report.pdf",
+            ),
+        )
+        if tracker is not None and report_path is not None:
+            _safe(
+                "MLflow report upload",
+                warnings,
+                lambda: tracker.log_artifact(report_path, "reports"),
+            )
+
         promotion_decision = _maybe_promote(
             tracker=tracker,
             run_id=run_id,
@@ -674,6 +722,11 @@ def run_training(
             confirm=promotion_confirm,
             warnings=warnings,
         )
+
+    # Prune checkpoints only after the whole pipeline (incl. promotion) has used
+    # the model. Checkpoints are re-derivable from seed+config, so this reclaims
+    # disk on large batch runs without losing reproducible state.
+    _prune_checkpoints(resolved_output, keep_checkpoints, warnings)
 
     return TrainResult(
         run_id=run_id,
@@ -966,11 +1019,17 @@ def run_permutation_test(
     )
 
     p_values = {name: float(metric.p_value) for name, metric in results.metrics.items()}
+    # Combined null-distribution figure (if the visualizer rendered one); the PDF
+    # inlines it and skips regenerating per-metric plots. Empty is fine — the PDF
+    # then draws them on the fly from the null distributions in ``results``.
+    plot_paths = sorted(resolved_output.glob("null_distributions_all__*.png"))
     return PermutationResult(
         output_dir=resolved_output,
         n_permutations=int(results.n_permutations),
         metrics_tested=tuple(p_values),
         p_values=p_values,
+        results=results,
+        plot_paths=list(plot_paths),
     )
 
 
@@ -1595,6 +1654,44 @@ def _is_pretrained(value: Any) -> bool:
     if isinstance(value, str):
         return value.lower() not in {"false", "none", "null", "random", "no", "0"}
     return bool(value)
+
+
+KEEP_CHECKPOINTS_CHOICES: tuple[str, ...] = ("all", "roc_auc", "f1", "none")
+
+
+def _prune_checkpoints(output_dir: Path, keep: str, warnings: list[str]) -> None:
+    """Delete ``best_model_*.pt`` in *output_dir* not matching the retention policy.
+
+    ``keep`` is one of :data:`KEEP_CHECKPOINTS_CHOICES`: ``"all"`` (no-op),
+    ``"none"`` (delete every checkpoint), or a metric token (keep only
+    ``best_model_<token>.pt``). Failures are recorded as warnings, never raised —
+    a prune problem must not fail an otherwise-successful run.
+    """
+
+    if keep == "all":
+        return
+    keep_names = set() if keep == "none" else {f"best_model_{keep}.pt"}
+    ckpts = sorted(output_dir.glob("best_model_*.pt"))
+
+    # Materialize kept checkpoints that are symlinks before deleting siblings: the
+    # trainer symlinks metrics peaking at the same epoch (e.g. roc_auc -> f1), so
+    # deleting the target would leave the kept file a dangling symlink.
+    for ckpt in ckpts:
+        if ckpt.name in keep_names and ckpt.is_symlink():
+            try:
+                data = ckpt.resolve().read_bytes()
+                ckpt.unlink()
+                ckpt.write_bytes(data)
+            except OSError as exc:
+                warnings.append(f"checkpoint materialize failed for {ckpt.name}: {exc}")
+
+    for ckpt in ckpts:
+        if ckpt.name in keep_names:
+            continue
+        try:
+            ckpt.unlink()
+        except OSError as exc:
+            warnings.append(f"checkpoint prune failed for {ckpt.name}: {exc}")
 
 
 def _safe(label: str, warnings: list[str], fn: Any) -> Any:

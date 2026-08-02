@@ -1,3 +1,4 @@
+name: siamese
 family: pair
 arch: siamese_4conv
 input_edge_length: 105
