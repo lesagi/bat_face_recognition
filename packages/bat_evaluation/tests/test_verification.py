@@ -93,9 +93,9 @@ def test_threshold_at_min_recall_realises_at_least_min_recall():
     for min_recall in (0.5, 0.75, 0.9):
         thr, precision_returned = threshold_at_min_recall(y_true, y_score, min_recall)
         cm = confusion_at_threshold(y_true, y_score, thr)
-        assert cm.recall >= min_recall - 1e-9, (
-            f"min_recall={min_recall}: realised recall {cm.recall} below floor"
-        )
+        assert (
+            cm.recall >= min_recall - 1e-9
+        ), f"min_recall={min_recall}: realised recall {cm.recall} below floor"
         # Precision_recall_curve and confusion_at_threshold may differ by an
         # epsilon when scores are tied at the threshold (`>=` vs `>` semantics
         # in the two libraries). Accept a small absolute tolerance.

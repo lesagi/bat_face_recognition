@@ -19,11 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from bat_core import Predictions, VerificationMetrics
-from bat_evaluation.threshold import (
-    optimize_youden_j,
-    threshold_at_far,
-    threshold_at_min_recall,
-)
+from bat_evaluation.threshold import optimize_youden_j, threshold_at_far, threshold_at_min_recall
 from numpy.typing import NDArray
 from sklearn.metrics import roc_auc_score, roc_curve
 

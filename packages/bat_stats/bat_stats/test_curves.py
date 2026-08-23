@@ -22,6 +22,7 @@ never raise on degenerate input.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,9 +31,8 @@ import numpy as np
 from bat_stats.naming import build_filename, build_title_suffix
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-
     from bat_core import EvalReport, Predictions
+    from matplotlib.figure import Figure
 
 _DPI = 150
 _FIGSIZE: tuple[int, int] = (7, 5)
@@ -62,9 +62,7 @@ def _is_degenerate(y_true: Any) -> bool:
     return len(arr) == 0 or len(np.unique(arr)) < 2
 
 
-def _compute_roc(
-    y_true: Any, y_score: Any
-) -> tuple[float, np.ndarray, np.ndarray]:
+def _compute_roc(y_true: Any, y_score: Any) -> tuple[float, np.ndarray, np.ndarray]:
     """Return ``(auc, fpr, tpr)`` via sklearn's ``roc_curve``."""
     from sklearn.metrics import roc_auc_score, roc_curve
 
@@ -80,7 +78,7 @@ def _compute_roc(
 # ------------------------------------------------------------------
 
 
-def roc_curve_figure(predictions: "Predictions", cfg: Any) -> "Figure":
+def roc_curve_figure(predictions: Predictions, cfg: Any) -> Figure:
     """Build a ROC curve figure from *predictions*.
 
     Parameters
@@ -106,7 +104,7 @@ def roc_curve_figure(predictions: "Predictions", cfg: Any) -> "Figure":
     return fig
 
 
-def recall_vs_far_figure(predictions: "Predictions", cfg: Any) -> "Figure":
+def recall_vs_far_figure(predictions: Predictions, cfg: Any) -> Figure:
     """Build a Recall-vs-FAR figure on a log x-axis.
 
     Vertical lines mark FAR = 1e-4, 1e-3, 1e-2.  Each operating point that
@@ -150,7 +148,7 @@ def recall_vs_far_figure(predictions: "Predictions", cfg: Any) -> "Figure":
     return fig
 
 
-def cmc_curve_figure(cmc: tuple[float, ...], cfg: Any) -> "Figure":
+def cmc_curve_figure(cmc: tuple[float, ...], cfg: Any) -> Figure:
     """Build a CMC (Cumulative Match Characteristic) curve figure.
 
     Parameters
@@ -183,7 +181,7 @@ def cmc_curve_figure(cmc: tuple[float, ...], cfg: Any) -> "Figure":
 
 
 def save_test_curves(
-    eval_report: "EvalReport",
+    eval_report: EvalReport,
     cfg: Any,
     output_dir: Path | str,
 ) -> list[Path]:
@@ -241,10 +239,7 @@ def save_test_curves(
         pass
 
     # ---- CMC (embedding models only) ----
-    if (
-        eval_report.identification is not None
-        and eval_report.identification.cmc
-    ):
+    if eval_report.identification is not None and eval_report.identification.cmc:
         try:
             fig = cmc_curve_figure(eval_report.identification.cmc, cfg)
             path = out / build_filename("test_cmc", cfg, ".png")
@@ -259,10 +254,8 @@ def save_test_curves(
 
 def _close_fig(fig: Any) -> None:
     """Close *fig* without raising."""
-    try:
+    with contextlib.suppress(Exception):
         plt.close(fig)
-    except Exception:  # noqa: BLE001
-        pass
 
 
 __all__ = [

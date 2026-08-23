@@ -343,9 +343,7 @@ class EmbeddingTrainer:
                     "tar_at_far_1e3": float(report.verification.tar_at_far_1e3),
                     "tar_at_far_1e4": float(report.verification.tar_at_far_1e4),
                     "recall_at_far_1e2": float(report.verification.recall_at_far_1e2),
-                    "precision_at_recall_0p75": float(
-                        report.verification.precision_at_recall_0p75
-                    ),
+                    "precision_at_recall_0p75": float(report.verification.precision_at_recall_0p75),
                     "top1": float(report.identification.top1) if report.identification else 0.0,
                     "top5": float(report.identification.top5) if report.identification else 0.0,
                     "map": float(report.identification.map) if report.identification else 0.0,

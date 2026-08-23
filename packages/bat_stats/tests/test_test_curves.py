@@ -19,16 +19,14 @@ import matplotlib
 
 matplotlib.use("Agg")  # noqa: E402 — headless-safe before any plt import
 
-import pytest
 
-from bat_stats.naming import build_filename, build_title_suffix, experiment_name
+from bat_stats.naming import build_filename, build_title_suffix
 from bat_stats.test_curves import (
     cmc_curve_figure,
     recall_vs_far_figure,
     roc_curve_figure,
     save_test_curves,
 )
-
 
 # ------------------------------------------------------------------
 # Minimal stand-ins for bat_core types (no torch required in bat_stats)
@@ -63,9 +61,7 @@ class _IdentificationMetrics:
 @dataclass(frozen=True)
 class _EvalReport:
     verification: _VerificationMetrics = field(default_factory=_VerificationMetrics)
-    identification: _IdentificationMetrics | None = field(
-        default_factory=_IdentificationMetrics
-    )
+    identification: _IdentificationMetrics | None = field(default_factory=_IdentificationMetrics)
     predictions: _Predictions | None = None
 
 
@@ -99,6 +95,7 @@ def test_roc_curve_figure_title_contains_experiment_signature(cfg: Any) -> None:
     title = fig.axes[0].get_title()
     assert suffix in title, f"title suffix {suffix!r} not found in title {title!r}"
     import matplotlib.pyplot as plt
+
     plt.close(fig)
 
 
@@ -110,6 +107,7 @@ def test_recall_vs_far_figure_title_contains_experiment_signature(cfg: Any) -> N
     title = fig.axes[0].get_title()
     assert suffix in title, f"title suffix {suffix!r} not found in title {title!r}"
     import matplotlib.pyplot as plt
+
     plt.close(fig)
 
 
@@ -119,6 +117,7 @@ def test_recall_vs_far_figure_xscale_is_log(cfg: Any) -> None:
     fig = recall_vs_far_figure(preds, cfg)
     assert fig.axes[0].get_xscale() == "log"
     import matplotlib.pyplot as plt
+
     plt.close(fig)
 
 
@@ -130,6 +129,7 @@ def test_cmc_curve_figure_title_contains_experiment_signature(cfg: Any) -> None:
     title = fig.axes[0].get_title()
     assert suffix in title, f"title suffix {suffix!r} not found in title {title!r}"
     import matplotlib.pyplot as plt
+
     plt.close(fig)
 
 
@@ -138,9 +138,7 @@ def test_cmc_curve_figure_title_contains_experiment_signature(cfg: Any) -> None:
 # ------------------------------------------------------------------
 
 
-def test_save_test_curves_writes_expected_filenames(
-    tmp_path: Path, cfg: Any
-) -> None:
+def test_save_test_curves_writes_expected_filenames(tmp_path: Path, cfg: Any) -> None:
     """Embedding report (with identification) → three PNGs with naming-helper names."""
     report = _EvalReport(
         predictions=_binary_predictions(),
@@ -152,17 +150,15 @@ def test_save_test_curves_writes_expected_filenames(
     stems = {"test_roc", "test_recall_vs_far", "test_cmc"}
     for stem in stems:
         expected_name = build_filename(stem, cfg, ".png")
-        assert any(p.name == expected_name for p in written), (
-            f"expected {expected_name!r} in {[p.name for p in written]}"
-        )
+        assert any(
+            p.name == expected_name for p in written
+        ), f"expected {expected_name!r} in {[p.name for p in written]}"
     # All files must actually exist on disk.
     for p in written:
         assert p.exists(), f"{p} was listed but not written"
 
 
-def test_save_test_curves_skips_cmc_when_no_identification(
-    tmp_path: Path, cfg: Any
-) -> None:
+def test_save_test_curves_skips_cmc_when_no_identification(tmp_path: Path, cfg: Any) -> None:
     """Pair/Siamese report (no identification) → only ROC + recall-vs-FAR."""
     report = _EvalReport(
         predictions=_binary_predictions(),
@@ -177,9 +173,7 @@ def test_save_test_curves_skips_cmc_when_no_identification(
     assert not any("test_cmc" in n for n in names)
 
 
-def test_save_test_curves_returns_empty_on_single_class(
-    tmp_path: Path, cfg: Any
-) -> None:
+def test_save_test_curves_returns_empty_on_single_class(tmp_path: Path, cfg: Any) -> None:
     """Single-class predictions → degenerate, no files written, no exception."""
     report = _EvalReport(predictions=_single_class_predictions())
     written = save_test_curves(report, cfg, tmp_path)
@@ -191,9 +185,7 @@ def test_save_test_curves_returns_empty_on_single_class(
     )
 
 
-def test_save_test_curves_returns_empty_when_predictions_none(
-    tmp_path: Path, cfg: Any
-) -> None:
+def test_save_test_curves_returns_empty_when_predictions_none(tmp_path: Path, cfg: Any) -> None:
     """``predictions=None`` → no figures, no exception."""
     report = _EvalReport(predictions=None)
     written = save_test_curves(report, cfg, tmp_path)
