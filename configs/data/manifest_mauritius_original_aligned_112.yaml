@@ -10,3 +10,18 @@ val_fraction: 0.15
 test_fraction: 0.15
 batch_size: 32
 num_workers: 0
+
+# --- Runtime re-split (k-fold study). No-op unless `resplit` or `fold_id` is set,
+# so this config keeps using the manifest's baked split column by default.
+# In `seeded` mode val/test_fraction above become FLOORS and the seed draws the
+# actual identity counts within the bounds below -- that variation is the
+# independent variable of the split-size sensitivity analysis.
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`; derives split_seed
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 4
+min_test_identities: 2
+max_test_identities: 6 # mauritius: 16 identities total
+min_train_identities: 6

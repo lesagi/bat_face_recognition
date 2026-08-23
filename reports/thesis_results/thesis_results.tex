@@ -43,7 +43,7 @@
 \begin{callout}
 \textbf{In one paragraph.} Across a re-run of the full experiment matrix, individual bat faces are
 recognisable well above chance in the favourable conditions (best cells ROC-AUC $\approx$
-0.85--0.89; permutation $p \approx 0.001$--$0.007$), and the signal is genuinely in the
+0.85--0.89; permutation $p$ from $<0.001$ to $0.007$ on the thresholded operating point), and the signal is genuinely in the
 \emph{foreground} --- performance survives removing the background entirely. Two limits are equally
 clear: the models are not background-invariant (randomised backgrounds drop them to near chance),
 and higher input resolution does not help (224$\to$320\,px, mean $\Delta$ROC-AUC $=-0.033$).
@@ -85,7 +85,11 @@ against a shuffled-label null.
 pairing can swing ROC-AUC by $>0.1$. Every cell is therefore a \textbf{mean $\pm$ standard deviation
 over five seeds}, and chance is ROC-AUC $=0.5$. Differences smaller than roughly one standard
 deviation are ties. The permutation test asks the stricter question --- could this arise from a model
-that learned nothing? --- and for the strong cells the answer is no ($p\approx0.001$--$0.007$).
+that learned nothing? --- and for the strong cells the answer is no ($p$ from $<0.001$ to $0.007$).
+These p-values are computed on the thresholded operating point (F1 and accuracy/precision/recall),
+not on ROC-AUC itself, over $B=1000$ label shuffles. The smallest value $B$ can resolve is
+$1/(B+1)\approx0.001$, so cells reported at that value are \emph{censored} at the floor rather than
+estimated: the truth lies at or below it.
 
 \section{The headline results}
 \begin{table}[h]\centering
@@ -119,8 +123,9 @@ and more variable than Mauritius.}
 
 \section{Finding 1 --- the recognition is real}
 The concern with a two-identity test is that a good score is a fluke. The permutation test re-scores
-each model against hundreds of label shuffles; for the strong cells (Mauritius ArcFace/AdaFace on
-original background) the observed ROC-AUC beats \emph{every} shuffle ($p\approx0.001$--$0.007$).
+each model against 1000 label shuffles; for the strong cells (Mauritius ArcFace/AdaFace on
+original background) the observed operating-point score beats \emph{every} shuffle, giving the
+smallest p-value $B=1000$ can express ($p<0.001$); the weaker of the strong cells reach $p=0.007$.
 \begin{callout}[good]
 \textbf{Defensible claim.} In the favourable conditions the models discriminate individuals at a rate
 shuffled-label chance does not reproduce --- the learned representation carries genuine identity

@@ -37,20 +37,49 @@ def _authoritative_run_ids(summaries: list[Path]) -> dict[str, str]:
     return mapping
 
 
-def _perm_min_pvalue(log_dir: Path, experiment: str) -> float | None:
-    """Parse the smallest permutation p-value from the experiment log."""
+#: Pre-declared primary metric for the significance claim. Mirrors
+#: ``bat_stats.PRIMARY_METRIC`` (kept literal so this script has no import-time
+#: dependency on the workspace).
+PERM_PRIMARY_METRIC = "roc_auc"
+
+#: Fallback order for older logs, which predate roc_auc being permuted.
+PERM_FALLBACK_METRICS = ("f1", "accuracy", "precision", "recall")
+
+
+def _perm_pvalues(log_dir: Path, experiment: str) -> dict[str, float]:
+    """Parse every permutation p-value from the experiment log, by metric."""
     log = log_dir / f"{experiment}.log"
     if not log.exists():
-        return None
-    pvals = []
+        return {}
+    out: dict[str, float] = {}
     for line in log.read_text().splitlines():
         m = re.match(
-            r"^(f1|accuracy|precision|recall|roc_auc)\s+[-\d.]+\s+[-\d.]+\s+[-\d.]+\s+([\d.]+)",
+            r"^(roc_auc|f1|accuracy|precision|recall)\s+[-\d.]+\s+[-\d.]+\s+[-\d.]+\s+<?([\d.]+)",
             line,
         )
         if m:
-            pvals.append(float(m.group(2)))
-    return min(pvals) if pvals else None
+            out[m.group(1)] = float(m.group(2))
+    return out
+
+
+def _perm_primary_pvalue(log_dir: Path, experiment: str) -> float | None:
+    """Permutation p-value for the *pre-declared* primary metric.
+
+    Was ``min()`` over all five metrics, which is a multiple-comparisons
+    cherry-pick: taking the best of five correlated tests inflates the
+    false-positive rate well past the nominal alpha. Fix the metric in advance
+    instead. Falls back through the thresholded metrics for logs written before
+    roc_auc was added to the permutation test.
+    """
+    pvals = _perm_pvalues(log_dir, experiment)
+    if not pvals:
+        return None
+    if PERM_PRIMARY_METRIC in pvals:
+        return pvals[PERM_PRIMARY_METRIC]
+    for metric in PERM_FALLBACK_METRICS:
+        if metric in pvals:
+            return pvals[metric]
+    return None
 
 
 def _get(row: pd.Series, key: str) -> float | None:
@@ -115,7 +144,7 @@ def main() -> None:
                 "recall_far_1e2": _get(r, "test/recall_at_far_1e2"),
                 "cosine_roc_auc": _get(r, "test_cosine/roc_auc"),
                 "val_roc_auc": _get(r, "val/roc_auc"),
-                "perm_p": _perm_min_pvalue(log_dir, experiment),
+                "perm_p": _perm_primary_pvalue(log_dir, experiment),
                 "run_id": r.get("run_id"),
             }
         )

@@ -25,7 +25,14 @@ from typing import Any
 
 import numpy as np
 
-DEFAULT_METRICS: tuple[str, ...] = ("f1", "accuracy", "precision", "recall")
+DEFAULT_METRICS: tuple[str, ...] = ("roc_auc", "f1", "accuracy", "precision", "recall")
+
+#: The metric a significance claim should be made on. ROC-AUC is threshold-free
+#: and is what the project reports and promotes on; the other four are
+#: secondary. Fixing one primary metric in advance is what stops a reader (or a
+#: summary script) from quoting whichever of five correlated tests came out
+#: smallest — five tries at alpha = 0.05 is not a 5% false-positive rate.
+PRIMARY_METRIC: str = "roc_auc"
 
 
 @dataclass
@@ -95,6 +102,23 @@ class PermutationTestResults:
             metrics=metrics,
         )
 
+    @property
+    def p_value_floor(self) -> float:
+        """Smallest p-value this many permutations can produce, ``1 / (n + 1)``."""
+        return 1.0 / (self.n_permutations + 1)
+
+    def is_censored(self, metric: str) -> bool:
+        """True when *metric* landed on the floor, i.e. no null beat the observed.
+
+        The p-value is then an upper bound, not an estimate: the truth is
+        somewhere at or below it. Quoting it as a point value ("p = 0.001")
+        claims precision the run does not have.
+        """
+        result = self.metrics.get(metric)
+        if result is None:
+            return False
+        return bool(result.p_value <= self.p_value_floor + 1e-12)
+
     def print_summary(self) -> None:
         bar = "=" * 70
         print(f"\n{bar}", flush=True)
@@ -111,12 +135,23 @@ class PermutationTestResults:
         )
         for name, result in self.metrics.items():
             sig_str = f"Yes (p<{self.significance_level})" if result.significant else "No"
+            # Mark floor-censored values with "<" so they are never quoted as
+            # point estimates. Every published run hit the floor on every
+            # metric, which is what makes this worth printing.
+            p_str = (
+                f"<{result.p_value:.4f}" if self.is_censored(name) else f"{result.p_value:>10.4f}"
+            )
             print(
                 f"{name:<12} {result.observed:>10.4f} {result.null_mean:>12.4f} "
-                f"{result.null_std:>10.4f} {result.p_value:>10.4f} {sig_str:<12}",
+                f"{result.null_std:>10.4f} {p_str:>10} {sig_str:<12}",
                 flush=True,
             )
         print(bar, flush=True)
+        print(
+            f"Resolution floor: p >= 1/(n+1) = {self.p_value_floor:.6f}; "
+            "values marked '<' are censored at it (raise n to resolve further).",
+            flush=True,
+        )
         print(f"Total time: {self.total_time_seconds:.1f} seconds", flush=True)
         print(f"{bar}\n", flush=True)
 

@@ -7,6 +7,7 @@ connect the workspace packages.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from bat_core import EvalReport, ImageRecord, Manifest, Predictions, SaliencyImage
+from bat_core.exceptions import InvalidManifestError
 from bat_training import make_trainer
 from bat_training._common import TrainerConfig
 
@@ -49,6 +51,93 @@ class PromotionDecision:
     declined: bool = False  # True iff prompt-mode user said "no"
 
 
+@dataclass(frozen=True)
+class SplitInfo:
+    """Everything needed to reproduce a runtime re-split, for MLflow.
+
+    The whole point of re-splitting in memory rather than writing fold manifests
+    to disk is that nothing new has to be tracked — but that only holds if the
+    run records enough to rebuild the partition. Given the source manifest (and
+    its ``.hash`` sidecar), ``split_seed``, ``size_mode`` and the four identity
+    bounds, :class:`bat_data.IdentitySplitter` reproduces the assignment
+    exactly; ``assignment_sha256`` is the cross-check, and
+    ``split_assignment.json`` (logged as an artifact) is the human-readable
+    record.
+    """
+
+    resplit: bool
+    size_mode: str
+    split_seed: int | None
+    fold_id: int | None
+    source_manifest_hash: str
+    manifest_path: str
+    train_identities: tuple[str, ...]
+    val_identities: tuple[str, ...]
+    test_identities: tuple[str, ...]
+    n_train_images: int
+    n_val_images: int
+    n_test_images: int
+    bounds: dict[str, int | None]
+
+    @property
+    def assignment_sha256(self) -> str:
+        """Stable digest of the realised identity assignment."""
+        payload = json.dumps(
+            {
+                "train": list(self.train_identities),
+                "val": list(self.val_identities),
+                "test": list(self.test_identities),
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def to_params(self) -> dict[str, Any]:
+        """MLflow params. Keys are prefixed ``split.`` (allowed by the HP audit)."""
+        params: dict[str, Any] = {
+            "split.resplit": self.resplit,
+            "split.size_mode": self.size_mode,
+            "split.split_seed": self.split_seed,
+            "split.n_train_ids": len(self.train_identities),
+            "split.n_val_ids": len(self.val_identities),
+            "split.n_test_ids": len(self.test_identities),
+            "split.n_train_imgs": self.n_train_images,
+            "split.n_val_imgs": self.n_val_images,
+            "split.n_test_imgs": self.n_test_images,
+            "split.assignment_sha256": self.assignment_sha256,
+            "split.source_manifest_hash": self.source_manifest_hash,
+        }
+        if self.fold_id is not None:
+            params["split.fold_id"] = self.fold_id
+        for key, value in self.bounds.items():
+            if value is not None:
+                params[f"split.{key}"] = value
+        return params
+
+    def to_dict(self) -> dict[str, Any]:
+        """Full record for the ``split_assignment.json`` artifact."""
+        return {
+            "resplit": self.resplit,
+            "size_mode": self.size_mode,
+            "split_seed": self.split_seed,
+            "fold_id": self.fold_id,
+            "manifest_path": self.manifest_path,
+            "source_manifest_hash": self.source_manifest_hash,
+            "assignment_sha256": self.assignment_sha256,
+            "bounds": self.bounds,
+            "identities": {
+                "train": list(self.train_identities),
+                "val": list(self.val_identities),
+                "test": list(self.test_identities),
+            },
+            "images": {
+                "train": self.n_train_images,
+                "val": self.n_val_images,
+                "test": self.n_test_images,
+            },
+        }
+
+
 @dataclass
 class TrainingBundle:
     """Resolved runtime objects used by train/evaluate/sweep commands."""
@@ -62,6 +151,21 @@ class TrainingBundle:
     val_loader: Any | None
     test_loader: Any | None
     trainer_kwargs: dict[str, Any]
+    split_info: SplitInfo | None = None
+    """Populated when the manifest was re-split at load time (see :func:`resplit_manifest`)."""
+
+    @property
+    def source_manifest_hash(self) -> str:
+        """Hash of the manifest **as stored on disk**, before any re-split.
+
+        ``Manifest.from_records`` folds the split column into the digest, so a
+        re-split manifest hashes differently from its own CSV sidecar. MLflow
+        must keep logging the on-disk hash under ``manifest_hash`` or runs stop
+        being comparable to the 90 already published.
+        """
+        if self.split_info is not None:
+            return self.split_info.source_manifest_hash
+        return self.manifest.manifest_hash
 
 
 @dataclass
@@ -182,6 +286,19 @@ def build_bundle(
     repo = find_project_root(root)
     cfg_dict = dict(cfg)
     manifest = load_manifest(cfg_dict, root=repo)
+    # Optional in-memory re-partition (k-fold). No-op unless data.resplit or
+    # data.fold_id is set, so existing experiments keep their baked splits.
+    manifest, split_info = resplit_manifest(manifest, cfg_dict)
+    if split_info is not None:
+        print(
+            f"[split] resplit seed={split_info.split_seed} mode={split_info.size_mode} "
+            f"fold={split_info.fold_id} -> "
+            f"train={len(split_info.train_identities)}ids/{split_info.n_train_images}imgs "
+            f"val={len(split_info.val_identities)}ids/{split_info.n_val_images}imgs "
+            f"test={len(split_info.test_identities)}ids/{split_info.n_test_images}imgs",
+            flush=True,
+        )
+        print(f"[split] test identities: {', '.join(split_info.test_identities)}", flush=True)
     family = _model_family(cfg_dict)
     image_size = _resolve_image_size(cfg_dict)
     batch_size = int(
@@ -295,6 +412,7 @@ def build_bundle(
         val_loader=val_loader,
         test_loader=test_loader,
         trainer_kwargs=trainer_kwargs,
+        split_info=split_info,
     )
 
 
@@ -314,6 +432,92 @@ def load_manifest(cfg: Mapping[str, Any], *, root: Path | None = None) -> Manife
     if not path.exists():
         raise CliRuntimeError(f"manifest CSV does not exist: {path}")
     return manifest_from_csv(path)
+
+
+def _resolved_manifest_path(cfg: Mapping[str, Any]) -> str:
+    return str(_mapping(cfg.get("data")).get("manifest_path", ""))
+
+
+def resplit_manifest(
+    manifest: Manifest, cfg: Mapping[str, Any]
+) -> tuple[Manifest, SplitInfo | None]:
+    """Re-partition *manifest* in memory when the config asks for it.
+
+    The manifests on disk carry a baked ``split`` column, and ``data.split_seed``
+    was previously logged but never read at train time — so every run of a given
+    experiment saw the same held-out bats. The k-fold study needs the partition
+    itself to vary, and doing it here (the single choke point every command
+    reaches through :func:`build_bundle`) avoids generating 120 fold manifests.
+
+    Triggered by ``data.resplit: true`` **or** by setting ``data.fold_id``, which
+    also derives the seed as ``fold_base_seed + fold_id``. Returns the manifest
+    unchanged with ``None`` when neither is set, so existing experiments keep
+    using their baked splits.
+    """
+    from bat_data import IdentitySplitter
+
+    data_cfg = _mapping(cfg.get("data"))
+    fold_id_raw = data_cfg.get("fold_id")
+    fold_id = None if fold_id_raw is None else int(fold_id_raw)
+    resplit = bool(data_cfg.get("resplit", False)) or fold_id is not None
+    if not resplit:
+        return manifest, None
+
+    if fold_id is not None:
+        split_seed: int | None = int(data_cfg.get("fold_base_seed", 1000)) + fold_id
+    else:
+        raw_seed = data_cfg.get("split_seed")
+        split_seed = None if raw_seed is None else int(raw_seed)
+
+    def _opt_int(key: str) -> int | None:
+        value = data_cfg.get(key)
+        return None if value is None else int(value)
+
+    bounds: dict[str, int | None] = {
+        "min_val_identities": _opt_int("min_val_identities"),
+        "max_val_identities": _opt_int("max_val_identities"),
+        "min_test_identities": _opt_int("min_test_identities"),
+        "max_test_identities": _opt_int("max_test_identities"),
+        "min_train_identities": _opt_int("min_train_identities"),
+    }
+    size_mode = str(data_cfg.get("split_size_mode", "exact"))
+
+    try:
+        splitter = IdentitySplitter(
+            val_fraction=float(data_cfg.get("val_fraction", 0.15)),
+            test_fraction=float(data_cfg.get("test_fraction", 0.15)),
+            seed=split_seed,
+            size_mode=size_mode,  # type: ignore[arg-type]
+            min_val_identities=bounds["min_val_identities"],
+            max_val_identities=bounds["max_val_identities"],
+            min_test_identities=bounds["min_test_identities"],
+            max_test_identities=bounds["max_test_identities"],
+            min_train_identities=bounds["min_train_identities"] or 1,
+        )
+        source_hash = manifest.manifest_hash
+        new_manifest = splitter.split(manifest)
+    except (ValueError, InvalidManifestError) as exc:
+        # Bad bounds or an infeasible design are user config errors; surface
+        # them as such rather than as a traceback from deep in bat_data.
+        raise CliRuntimeError(f"runtime re-split failed: {exc}") from exc
+
+    counts = splitter.counts(new_manifest)
+    info = SplitInfo(
+        resplit=True,
+        size_mode=size_mode,
+        split_seed=split_seed,
+        fold_id=fold_id,
+        source_manifest_hash=source_hash,
+        manifest_path=_resolved_manifest_path(cfg),
+        train_identities=tuple(sorted(new_manifest.identities("train"))),
+        val_identities=tuple(sorted(new_manifest.identities("val"))),
+        test_identities=tuple(sorted(new_manifest.identities("test"))),
+        n_train_images=counts.train,
+        n_val_images=counts.val,
+        n_test_images=counts.test,
+        bounds=bounds,
+    )
+    return new_manifest, info
 
 
 def build_trainer_config(cfg: Mapping[str, Any], *, output_dir: Path) -> TrainerConfig:
@@ -501,7 +705,12 @@ def run_training(
         start_run(
             experiment_name=mlflow_experiment,
             run_name=run_name,
-            tags={"entrypoint": "bat-cli", **(run_tags or {})},
+            tags={
+                "entrypoint": "bat-cli",
+                # Split tags before user tags so an explicit --run-tag wins.
+                **_split_tags(bundle),
+                **(run_tags or {}),
+            },
             tracking_uri=tracking_uri,
         )
         if use_mlflow
@@ -512,9 +721,17 @@ def run_training(
         run_id = _tracker_run_id(tracker)
         if tracker is not None:
             tracker.log_config(bundle.cfg)
+            # ``source_manifest_hash`` is the on-disk hash: a runtime re-split
+            # rehashes the manifest, and logging the post-split hash here would
+            # break comparability with every previously published run.
             tracker.log_params(
-                _audit_params(bundle.cfg, manifest_hash=bundle.manifest.manifest_hash)
+                _audit_params(
+                    bundle.cfg,
+                    manifest_hash=bundle.source_manifest_hash,
+                    split_info=bundle.split_info,
+                )
             )
+            _log_split_assignment(tracker, bundle, resolved_output)
 
         trainer_kwargs = dict(bundle.trainer_kwargs)
         trainer_kwargs["tracker"] = tracker
@@ -686,6 +903,29 @@ def run_training(
                         "MLflow permutation upload",
                         warnings,
                         lambda: tracker.log_artifact(permutation_dir, "permutation"),
+                    )
+                    # Also log the p-values as metrics. Previously they existed
+                    # only inside the uploaded artifact directory, so answering
+                    # "what is the p-value per species?" meant downloading and
+                    # parsing 360 artifact bundles. As metrics they are directly
+                    # queryable via search_runs.
+                    # TODO(bat_core): a dedicated "permutation" TrackerSection
+                    # would read better than folding these into "test"; the
+                    # Literal lives in bat_core, which we don't edit mid-task.
+                    _safe(
+                        "MLflow permutation metrics",
+                        warnings,
+                        lambda: tracker.log_metrics(
+                            "test",
+                            {
+                                **{
+                                    f"perm_p_{metric}": value
+                                    for metric, value in permutation_result.p_values.items()
+                                },
+                                "perm_n_permutations": float(permutation_result.n_permutations),
+                            },
+                            step=0,
+                        ),
                     )
 
         # Build the PDF now — after the permutation step — so its permutation
@@ -1558,6 +1798,29 @@ def _loader(
     """
     from torch.utils.data import DataLoader
 
+    # A trailing batch of exactly 1 sample kills BatchNorm in training mode
+    # ("Expected more than 1 value per channel when training"), so drop it —
+    # but *only* in that case. Setting drop_last unconditionally would discard
+    # up to batch_size-1 samples per epoch for every run, changing training for
+    # the 284 seeded-fold runs already completed and breaking comparability with
+    # the published baked-split results. Dropping one sample from the single
+    # fold that would otherwise crash is the surgical version.
+    #
+    # Only reachable now that fold sizes vary: the baked splits had fixed train
+    # counts that never landed on len % batch_size == 1.
+    drop_last = False
+    if shuffle:
+        try:
+            drop_last = len(dataset) % batch_size == 1
+        except TypeError:  # dataset without __len__ (iterable-style)
+            drop_last = False
+        if drop_last:
+            print(
+                f"[loader] train set has {len(dataset)} samples with batch_size="
+                f"{batch_size}; dropping the 1-sample final batch (BatchNorm needs >1)",
+                flush=True,
+            )
+
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -1565,6 +1828,7 @@ def _loader(
         num_workers=num_workers,
         collate_fn=collate_fn,
         generator=generator,
+        drop_last=drop_last,
     )
 
 
@@ -1711,7 +1975,47 @@ def _tracker_run_id(tracker: Any | None) -> str:
     return str(resolver())
 
 
-def _audit_params(cfg: Mapping[str, Any], manifest_hash: str | None) -> dict[str, Any]:
+def _split_tags(bundle: TrainingBundle) -> dict[str, str]:
+    """Run tags that make folds filterable in the MLflow UI.
+
+    Params are searchable but clumsy to group by; ``n_test_ids`` as a tag is what
+    makes "show me every run with 4 held-out identities" a one-click query, which
+    is the split-size sensitivity analysis's main lookup.
+    """
+    info = bundle.split_info
+    if info is None:
+        return {}
+    tags = {
+        "resplit": "true",
+        "n_test_ids": str(len(info.test_identities)),
+        "split_size_mode": info.size_mode,
+    }
+    if info.fold_id is not None:
+        tags["fold"] = str(info.fold_id)
+    return tags
+
+
+def _log_split_assignment(tracker: Any, bundle: TrainingBundle, output_dir: Path) -> None:
+    """Write ``split_assignment.json`` and attach it to the run.
+
+    Params record the *shape* of the split; this records the realised identity
+    lists, so a fold can be audited without re-deriving it.
+    """
+    info = bundle.split_info
+    if info is None:
+        return
+    tracker.log_params(info.to_params())
+    path = output_dir / "split_assignment.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(info.to_dict(), indent=2), encoding="utf-8")
+    tracker.log_artifact(path)
+
+
+def _audit_params(
+    cfg: Mapping[str, Any],
+    manifest_hash: str | None,
+    split_info: SplitInfo | None = None,
+) -> dict[str, Any]:
     """Translate the Hydra cfg into the flat audit allowlist.
 
     ``bat_tracking.filter_params`` keeps an explicit, curated set of flat keys
@@ -1751,7 +2055,14 @@ def _audit_params(cfg: Mapping[str, Any], manifest_hash: str | None) -> dict[str
     _put("early_stop_patience", early_stop.get("patience"))
     _put("early_stop_monitor", early_stop.get("monitor"))
     _put("split_mode", data.get("split_mode"))
-    _put("split_seed", data.get("split_seed"))
+    # Log the seed that actually produced the partition. A runtime re-split
+    # derives its own seed (fold_base_seed + fold_id), so logging the config's
+    # ``data.split_seed`` here would report 42 for every fold — the one number
+    # a reader would use to reproduce the split, and wrong.
+    if split_info is not None:
+        _put("split_seed", split_info.split_seed)
+    else:
+        _put("split_seed", data.get("split_seed"))
     _put("val_fraction", data.get("val_fraction"))
     _put("test_fraction", data.get("test_fraction"))
     _put("species", data.get("species"))

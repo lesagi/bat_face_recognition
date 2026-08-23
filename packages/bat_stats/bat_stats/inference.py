@@ -35,8 +35,16 @@ def compute_metrics(
     labels: np.ndarray,
     threshold: float,
 ) -> dict[str, float]:
-    """Compute F1 / accuracy / precision / recall from binary predictions."""
+    """Compute ROC-AUC plus F1 / accuracy / precision / recall.
 
+    ``roc_auc`` is threshold-free and is the project's headline metric (it is
+    also the promotion criterion), so it belongs in the permutation test: without
+    it the test never asks whether the *reported* result could arise by chance,
+    only whether the thresholded ones could. It is computed from the raw scores
+    and ignores ``threshold``.
+    """
+
+    roc_auc = _roc_auc(predictions, labels)
     binary_preds = (predictions >= threshold).astype(np.float32)
     tp = float(np.sum((binary_preds == 1) & (labels == 1)))
     fp = float(np.sum((binary_preds == 1) & (labels == 0)))
@@ -49,11 +57,26 @@ def compute_metrics(
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     return {
+        "roc_auc": float(roc_auc),
         "f1": float(f1),
         "accuracy": float(accuracy),
         "precision": float(precision),
         "recall": float(recall),
     }
+
+
+def _roc_auc(predictions: np.ndarray, labels: np.ndarray) -> float:
+    """ROC-AUC, or 0.5 when the labels are single-class.
+
+    A permutation can leave a degenerate label vector, and sklearn raises on
+    that. 0.5 (chance) is the right null value and keeps the null distribution
+    from developing a hole.
+    """
+    from sklearn.metrics import roc_auc_score
+
+    if labels.size == 0 or len(np.unique(labels)) < 2:
+        return 0.5
+    return float(roc_auc_score(labels, predictions))
 
 
 def partial_permute_labels(

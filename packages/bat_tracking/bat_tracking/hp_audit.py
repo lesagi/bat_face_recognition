@@ -79,6 +79,11 @@ KEEP_PREFIXES: frozenset[str] = frozenset(
         # Test metrics promoted to params for sortable run tables. The trainer
         # emits these with a ``test/`` prefix; the audit allows them through.
         "test/",
+        # Runtime re-split provenance: seed, size mode, realised identity and
+        # image counts per split, identity-assignment digest, source manifest
+        # hash. These are what makes a k-fold run reproducible from MLflow
+        # alone, so they must not be dropped.
+        "split.",
     }
 )
 

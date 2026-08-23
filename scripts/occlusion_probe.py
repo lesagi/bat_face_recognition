@@ -9,6 +9,8 @@ each:
                         (the model sees SHAPE only)
   B  shape_removed    -> a FIXED circular aperture keeps interior texture, outline removed
                         (the model sees TEXTURE only, no variable silhouette)
+  C  face_removed     -> the face is flat-filled with the mean background colour, scene kept
+                        (the model sees the BACKGROUND only)
 
 Comparing the ROC-AUC drop of A vs B on the same model shows which cue it relies on.
 Absolute numbers are conservative (both arms are somewhat out-of-distribution); the
@@ -28,6 +30,12 @@ import numpy as np
 import pandas as pd
 
 APERTURE_FRAC = 0.34  # fixed aperture radius as a fraction of min(H,W)
+
+# Face dilation for arm C, matched to scripts/probe_background_leakage.py so the
+# two measurements describe the same "background" region. Calibrated there: at
+# smaller values the build's 4 px mask feathering bleeds face colour outward and
+# the green negative control stops returning chance.
+FACE_DILATE_PX = 24
 
 
 def mask_from_green(green_path: pathlib.Path, shape: tuple[int, int]) -> np.ndarray | None:
@@ -61,6 +69,41 @@ def make_B(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
     cv2.circle(ap, (cx, cy), int(APERTURE_FRAC * min(h, w)), 1, -1)
     out = np.zeros_like(img)
     out[ap > 0] = img[ap > 0]
+    return out
+
+
+def make_C(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Face removed, background kept: does the model score pairs on the scene?
+
+    The inverse of A and B. Every bat was filmed in one video, so a same-bat pair
+    always shares a background while a different-bat pair never does — the
+    verification task is partly solvable from the scene alone. A model-free probe
+    (``scripts/probe_background_leakage.py``) shows that cue is worth ROC-AUC
+    0.74-0.79 on the original background. This arm asks the complementary
+    question: does the *trained model* actually exploit it?
+
+    The face is dilated by ``FACE_DILATE_PX`` and flat-filled with the mean
+    background colour. Dilation matches the probe's definition of "background",
+    so the two measurements describe the same region; the flat fill keeps the
+    removed area from re-introducing face texture at its rim.
+
+    Caveat, stated because it bounds the interpretation: a filled region still
+    has the *outline* of the face, so this arm is "background plus residual
+    silhouette", not background alone. The model-free probe is the cleaner
+    measure of the pure background cue; read the two together.
+    """
+    out = img.copy()
+    face = mask.astype(np.uint8)
+    if FACE_DILATE_PX > 0:
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (FACE_DILATE_PX * 2 + 1,) * 2
+        )
+        face = cv2.dilate(face, kernel)
+    face_bool = face > 0
+    background = ~face_bool
+    if background.sum() < 128 or face_bool.sum() == 0:
+        return out
+    out[face_bool] = img[background].mean(axis=0).astype(img.dtype)
     return out
 
 
@@ -117,6 +160,7 @@ def main() -> None:
     clean = f"data/manifests/{args.species}_original_bg_manifest.csv"
     man_a = build_variant(args.species, "A", make_A)
     man_b = build_variant(args.species, "B", make_B)
+    man_c = build_variant(args.species, "C", make_C)
     if args.gen_only:
         return
 
@@ -124,6 +168,7 @@ def main() -> None:
         ("clean", clean),
         ("texture_removed (shape only)", man_a),
         ("shape_removed (texture only)", man_b),
+        ("face_removed (background only)", man_c),
     ]
     results = [(name, evaluate(args.species, args.checkpoint, man)) for name, man in rows]
     base = results[0][1]

@@ -40,6 +40,33 @@ def _run_tags(_: click.Context, __: click.Parameter, values: tuple[str, ...]) ->
     return tags
 
 
+def _apply_fold_overrides(overrides: tuple[str, ...], fold: int | None) -> tuple[str, ...]:
+    """Expand ``--fold N`` into the Hydra overrides that enable a re-split.
+
+    The fold index drives ``seed`` as well as the partition: one knob varying
+    both the held-out identities and the training seed means each fold is a
+    single independent draw, which is what the sensitivity analysis assumes.
+    An explicit ``--hydra`` override of any of these keys wins, so a caller can
+    still pin the training seed while varying only the split.
+    """
+    if fold is None:
+        return overrides
+
+    if fold < 0:
+        raise click.BadParameter("--fold must be >= 0")
+
+    explicit = {o.split("=", 1)[0] for o in overrides}
+    defaults = {
+        "data.resplit": "true",
+        "data.fold_id": str(fold),
+        "data.split_size_mode": "seeded",
+        "seed": str(fold),
+        "trainer.deterministic": "true",
+    }
+    extra = tuple(f"{k}={v}" for k, v in defaults.items() if k not in explicit)
+    return overrides + extra
+
+
 def _require_gpu(allow_cpu: bool) -> None:
     """Log the training device and fail fast on an accidental CPU fallback.
 
@@ -81,6 +108,14 @@ def main(ctx: click.Context) -> None:
     multiple=True,
     callback=_overrides,
     help="Hydra override, e.g. trainer.epochs=5. May be passed multiple times.",
+)
+@click.option(
+    "--fold",
+    type=int,
+    default=None,
+    help="Re-split the manifest in memory for fold N (sets data.resplit=true, "
+    "data.fold_id=N, data.split_size_mode=seeded). The fold seed drives both the "
+    "identity partition and the training seed, so one knob varies everything.",
 )
 @click.option("--output-dir", type=click.Path(path_type=Path), help="Training output directory.")
 @click.option("--mlflow-experiment", default="bat-face-recognition", show_default=True)
@@ -152,6 +187,7 @@ def train(
     config_name: str,
     experiment: str | None,
     overrides: tuple[str, ...],
+    fold: int | None,
     output_dir: Path | None,
     mlflow_experiment: str,
     tracking_uri: str | None,
@@ -175,6 +211,7 @@ def train(
         if promote and prompt_promote:
             raise CliRuntimeError("--promote and --prompt-promote are mutually exclusive")
         root = find_project_root()
+        overrides = _apply_fold_overrides(overrides, fold)
         cfg = compose_config(config_name=config_name, experiment=experiment, overrides=overrides)
         resolved_output = output_dir or default_output_dir(cfg, root=root)
         if dry_run:

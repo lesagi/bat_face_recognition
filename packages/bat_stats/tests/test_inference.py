@@ -16,10 +16,41 @@ def test_compute_metrics_perfect_predictions() -> None:
     preds = np.array([0.9, 0.1, 0.8, 0.2])
     labels = np.array([1.0, 0.0, 1.0, 0.0])
     out = compute_metrics(preds, labels, threshold=0.5)
+    assert out["roc_auc"] == pytest.approx(1.0)
     assert out["f1"] == pytest.approx(1.0)
     assert out["accuracy"] == pytest.approx(1.0)
     assert out["precision"] == pytest.approx(1.0)
     assert out["recall"] == pytest.approx(1.0)
+
+
+def test_compute_metrics_reports_roc_auc_independently_of_threshold() -> None:
+    """ROC-AUC ranks scores, so moving the threshold must not change it."""
+    preds = np.array([0.9, 0.1, 0.8, 0.2])
+    labels = np.array([1.0, 0.0, 1.0, 0.0])
+    low = compute_metrics(preds, labels, threshold=0.05)
+    high = compute_metrics(preds, labels, threshold=0.95)
+    assert low["roc_auc"] == pytest.approx(high["roc_auc"])
+    # ...while the thresholded metrics do move.
+    assert low["recall"] != pytest.approx(high["recall"])
+
+
+def test_compute_metrics_roc_auc_is_chance_for_single_class_labels() -> None:
+    """A permutation can leave one class; sklearn raises, so we return chance.
+
+    Returning 0.5 keeps the null distribution continuous instead of crashing the
+    run or punching a hole in it.
+    """
+    preds = np.array([0.9, 0.8, 0.7, 0.6])
+    out = compute_metrics(preds, np.ones(4), threshold=0.5)
+    assert out["roc_auc"] == pytest.approx(0.5)
+    out_zeros = compute_metrics(preds, np.zeros(4), threshold=0.5)
+    assert out_zeros["roc_auc"] == pytest.approx(0.5)
+
+
+def test_compute_metrics_roc_auc_is_half_for_uninformative_scores() -> None:
+    preds = np.array([0.5, 0.5, 0.5, 0.5])
+    labels = np.array([1.0, 0.0, 1.0, 0.0])
+    assert compute_metrics(preds, labels, threshold=0.5)["roc_auc"] == pytest.approx(0.5)
 
 
 def test_compute_metrics_random_predictions() -> None:

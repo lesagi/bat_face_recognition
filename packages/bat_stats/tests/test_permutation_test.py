@@ -82,7 +82,13 @@ def test_run_with_mock_trainer_factory() -> None:
             self.calls += 1
 
         def train_and_evaluate(self) -> dict[str, float]:
-            return {"f1": 0.5, "accuracy": 0.55, "precision": 0.5, "recall": 0.5}
+            return {
+                "roc_auc": 0.5,
+                "f1": 0.5,
+                "accuracy": 0.55,
+                "precision": 0.5,
+                "recall": 0.5,
+            }
 
     instances: list[_MockTrainer] = []
 
@@ -93,7 +99,13 @@ def test_run_with_mock_trainer_factory() -> None:
 
     pt = PermutationTest(n_permutations=5, permutation_epochs=1, verbose=False)
     results = pt.run(
-        observed_metrics={"f1": 0.95, "accuracy": 0.95, "precision": 0.95, "recall": 0.95},
+        observed_metrics={
+            "roc_auc": 0.95,
+            "f1": 0.95,
+            "accuracy": 0.95,
+            "precision": 0.95,
+            "recall": 0.95,
+        },
         trainer_factory=factory,
     )
     # Trainer should be created exactly once (model reuse semantic from legacy).
@@ -135,4 +147,62 @@ def test_results_save_and_load_roundtrip(tmp_path) -> None:
 
 def test_default_metrics_constant() -> None:
     assert "f1" in DEFAULT_METRICS
-    assert set(DEFAULT_METRICS) == {"f1", "accuracy", "precision", "recall"}
+    assert set(DEFAULT_METRICS) == {"roc_auc", "f1", "accuracy", "precision", "recall"}
+
+
+def test_roc_auc_is_permuted_and_is_the_primary_metric() -> None:
+    """ROC-AUC is the reported and promoted-on metric, so it must be tested.
+
+    Before this, the permutation test covered only thresholded metrics — it never
+    asked whether the headline number could arise by chance.
+    """
+    from bat_stats.permutation_test import PRIMARY_METRIC
+
+    assert PRIMARY_METRIC == "roc_auc"
+    assert PRIMARY_METRIC in DEFAULT_METRICS
+
+
+def test_p_value_floor_and_censoring() -> None:
+    """A p-value on the floor is an upper bound, and must be flagged as such."""
+    results = PermutationTestResults(
+        n_permutations=1000,
+        significance_level=0.05,
+        permutation_epochs=0,
+        metrics={
+            "roc_auc": MetricResult(
+                observed=0.9,
+                null_mean=0.5,
+                null_std=0.05,
+                p_value=1 / 1001,
+                significant=True,
+                null_distribution=[],
+            ),
+            "f1": MetricResult(
+                observed=0.7,
+                null_mean=0.5,
+                null_std=0.05,
+                p_value=0.02,
+                significant=True,
+                null_distribution=[],
+            ),
+        },
+        total_time_seconds=0.1,
+    )
+    assert results.p_value_floor == pytest.approx(1 / 1001)
+    assert results.is_censored("roc_auc")
+    assert not results.is_censored("f1")
+    assert not results.is_censored("absent_metric")
+
+
+def test_p_value_floor_shrinks_with_more_permutations() -> None:
+    def _results(n: int) -> PermutationTestResults:
+        return PermutationTestResults(
+            n_permutations=n,
+            significance_level=0.05,
+            permutation_epochs=0,
+            metrics={},
+            total_time_seconds=0.0,
+        )
+
+    assert _results(100).p_value_floor > _results(1000).p_value_floor
+    assert _results(1000).p_value_floor == pytest.approx(1 / 1001)
