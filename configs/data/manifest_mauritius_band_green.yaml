@@ -1,0 +1,50 @@
+# mauritius green backgrounds restricted to the native-resolution band both
+# species share: [297.86, 623.28] px.
+#
+# Purpose (Phase 3 arm 3B): docs/quality_parity.md shows effective resolution
+# separates the species completely (median 614 vs 312 px native head-box, Cliff's
+# delta = +1.00, no overlap), so any species comparison on the full data is
+# confounded by image quality. This arm runs the comparison on REAL in-band
+# pixels. Arm 3A answers the same question by degrading mauritius instead; the
+# two fail in different directions, so agreement between them is the point.
+#
+# Built by scripts/build_band_restricted.py. 279 images / 10 identities
+# (5 identities dropped for having fewer than 10 in-band images).
+# No images-per-identity cap: the binding minimum is 10, so capping would leave
+# ~100 images total. Per-identity counts run 14-52.
+#
+# Interpret against the power ceiling, NOT against p = 0.05. The minimum
+# detectable difference for this design is 0.440 ROC-AUC (outputs/
+# kfold_power_ceiling.json) against a largest observed gap of 0.207, so this arm
+# WILL return "not significant" whatever the truth is. Report effect size +
+# bootstrap CI + the MDE together; never a bare p-value.
+#
+# `background: green_band` is a LABEL, not a filter. The CSV keeps the `green`
+# literal that bat_core.ImageRecord requires.
+manifest_path: data/manifests/mauritius_band_green_manifest.csv
+species: mauritius
+background: green_band
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.2
+test_fraction: 0.2
+batch_size: 32
+num_workers: 0
+
+# --- Runtime re-split. Bounds RE-DERIVED for the 10-identity pool and identical
+# across species so both arms draw fold shapes from the same distribution.
+# The published mauritius bounds (max_test 6, min_train 6) would clamp test_hi to
+# min(6, 10-2-6) = 2 at splitter.py:217, pinning every fold to exactly 2 test
+# identities and destroying the test-size variation the k-fold design measures.
+# Verified over folds 0-19: train/val/test shapes {6/2/2: 7, 5/2/3: 3, 4/2/4: 10}.
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`; derives split_seed
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 2
+min_test_identities: 2
+max_test_identities: 4
+min_train_identities: 4 # 10 identities total (band-restricted)

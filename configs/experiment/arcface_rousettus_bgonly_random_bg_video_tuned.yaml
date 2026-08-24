@@ -1,0 +1,16 @@
+# @package _global_
+# Phase 3 arm 3C: tuned ArcFace trained on face-removed rousettus images derived
+# from the random background. Causally tests the background leak that
+# docs/background_leakage.md establishes model-free.
+#   bat-cli train --experiment arcface_rousettus_bgonly_random_bg_video_tuned
+defaults:
+  - override /data: manifest_rousettus_bgonly_random
+  - override /model: arcface
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: random_bgonly
+  source: video

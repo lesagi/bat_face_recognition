@@ -1,0 +1,16 @@
+# @package _global_
+# Phase 3 arm 3A (blur): tuned Adaface on mauritius video frames, green
+# backgrounds, degraded to rousettus image quality by per-bat calibrated Gaussian blur.
+# Species comparison with the image-quality confound controlled, all 16 bats kept.
+#   bat-cli train --experiment adaface_mauritius_blur_green_bg_video_tuned
+defaults:
+  - override /data: manifest_mauritius_blur_green
+  - override /model: adaface
+  - override /loss: adaface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green_blur
+  source: video

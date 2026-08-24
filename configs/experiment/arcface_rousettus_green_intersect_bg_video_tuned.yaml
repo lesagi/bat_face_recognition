@@ -1,0 +1,17 @@
+# @package _global_
+# Tuned ArcFace on rousettus video frames, green backgrounds (intersection).
+# Phase 3 arm 3D: identical to the published green arm except the manifest is the
+# 1059-image intersection of all three backgrounds, so the background comparison
+# uses the same image set everywhere.
+#   bat-cli train --experiment arcface_rousettus_green_intersect_bg_video_tuned
+defaults:
+  - override /data: manifest_rousettus_green_intersect
+  - override /model: arcface
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green_isect
+  source: video

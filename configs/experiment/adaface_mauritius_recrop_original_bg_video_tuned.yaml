@@ -1,0 +1,17 @@
+# @package _global_
+# Phase 3 arm 3A (recrop): tuned Adaface on mauritius video frames, original
+# backgrounds, degraded to rousettus image quality by re-cropping from source
+# frames downsampled to simulate a greater shooting distance.
+# Species comparison with the image-quality confound controlled, all 16 bats kept.
+#   bat-cli train --experiment adaface_mauritius_recrop_original_bg_video_tuned
+defaults:
+  - override /data: manifest_mauritius_recrop_original
+  - override /model: adaface
+  - override /loss: adaface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: original_recrop
+  source: video

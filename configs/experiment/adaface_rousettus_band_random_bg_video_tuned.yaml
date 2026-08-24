@@ -1,0 +1,16 @@
+# @package _global_
+# Phase 3 arm 3B: tuned Adaface on rousettus video frames, green backgrounds,
+# restricted to the [298, 623] px native-resolution band both species
+# share. Species comparison with resolution controlled using real pixels.
+#   bat-cli train --experiment adaface_rousettus_band_random_bg_video_tuned
+defaults:
+  - override /data: manifest_rousettus_band_random
+  - override /model: adaface
+  - override /loss: adaface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: random_band
+  source: video

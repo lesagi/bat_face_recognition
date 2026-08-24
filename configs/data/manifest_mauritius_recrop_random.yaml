@@ -1,0 +1,89 @@
+# ---------------------------------------------------------------------------
+# RANDOM-BACKGROUND ARM. This is the background that matters most: the published
+# sweep found a species difference on random ONLY (ArcFace +0.116, AdaFace
+# +0.136), while green shows -0.043 (rousettus slightly ahead) and `original` is
+# compromised -- arm 3C shows a model trained on face-removed original images
+# reaches 0.831 (mau) / 0.780 (rou) against a control at chance, so most of that
+# arm's signal is background matching. Controlling image quality only on green and
+# original would never test this arm's own premise.
+#
+# The face degradation is identical to the green/original variants of the same
+# variant; the acceptance numbers below were measured on the green variant, whose
+# green-screen ROI makes a face-only measurement possible (a random-background
+# crop has no such ROI). Verified: the face region of the random build matches the
+# original-background build to a mean absolute difference of 0.22/255.
+# ---------------------------------------------------------------------------
+# mauritius degraded to rousettus image quality by RE-CROPPING FROM THE SOURCE
+# FRAMES (Phase 2A, variant `recrop`). Companion to the `blur` variant and to the
+# band-restricted arm (3B); all three control the same confound and fail in
+# different directions.
+#
+# Why not a plain resize. The originally specified recipe -- quantile-map
+# native_side_px onto the rousettus distribution, downsample, upsample back -- is
+# a NO-OP at this project's training resolution. ArcFace/AdaFace use
+# input_edge_length 112 and outputs/quality/native_boxes.parquet shows 0.0% of
+# images in EITHER species are upscaled at 112 (rousettus' smallest native
+# head-box is 178 px), so both species are resized down to 112 and both then hold
+# exactly 112 px of face. The real gap is optical, not sampling-limited.
+#
+# Method. Both species' frames are 1080x1920 and a mauritius face fills ~57% of
+# the frame width against rousettus' ~29%, so the gap is a shooting-distance
+# difference. Each bat's source frames are downsampled by its own factor and
+# re-cropped -- literally the same bat filmed further away -- then JPEG re-encoded
+# at the reduced scale, because DCT blocks are 8x8 in FRAME pixels so a smaller
+# face gets fewer coded coefficients. Segmentation and pose run on the
+# FULL-RESOLUTION frame, so crop geometry is identical to the baseline crops and
+# only the sampled pixels differ; re-detecting on the downsampled frame would let
+# alignment drift become a second difference between the arms.
+#
+# Granularity is per-BAT: each bat was filmed in exactly one video, so shooting
+# distance is a property of the bat, not the frame.
+# Factors: min 1.780, median 1.922, max 2.105. Native head-box median
+# 602.6 -> 311.1 px against a rousettus identity-median of 311.6 px.
+# NOTHING here is calibrated against a measured target.
+#
+# Achieved, per-identity medians vs rousettus (Cliff's delta, before -> after):
+#   gradient_energy  +0.56 -> +0.16  UNDER-degrades, as predicted: downsampling
+#                                    cannot reproduce focus or motion blur. Still
+#                                    closes 71% of the gap UNCALIBRATED.
+#   laplacian_var    +0.60 -> +0.23  free check
+#   tenengrad        +0.17 -> -0.10  free check, negligible (overshoots less than
+#                                    the blur variant, which reached -0.30)
+#   noise_sigma      +0.77 -> +0.41  free check; lands on the blur variant's +0.43
+#                                    despite sharing no mechanism
+# The residual is a FINDING, not a defect to patch: an under-degrading PHYSICAL
+# control that still shrinks the species gap is stronger evidence than a
+# fully-matched artificial one. Detail + montage:
+# outputs/phase2a_review/README.md
+#
+# Interpret 3A against the power ceiling, NOT against p = 0.05: the minimum
+# detectable difference is 0.440 ROC-AUC (outputs/kfold_power_ceiling.json)
+# against a largest observed gap of 0.207. Report effect size + bootstrap CI +
+# the MDE together; never a bare p-value.
+#
+# `background: random_recrop` is a LABEL, not a filter. The CSV keeps the `green`
+# literal that bat_core.ImageRecord requires.
+manifest_path: data/manifests/mauritius_recrop_random_manifest.csv
+species: mauritius
+background: random_recrop
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0
+
+# --- Runtime re-split. Bounds unchanged: degradation drops no identities, so the
+# pool is still the full 16 bats. That is this arm's advantage over 3B, which
+# keeps real pixels but drops to 10.
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`; derives split_seed
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 4
+min_test_identities: 2
+max_test_identities: 6 # mauritius: 16 identities total
+min_train_identities: 6

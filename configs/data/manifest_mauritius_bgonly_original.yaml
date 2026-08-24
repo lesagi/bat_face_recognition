@@ -1,0 +1,43 @@
+# Face-removed ("background only") mauritius, derived from the original background.
+# Built by scripts/build_background_only.py: the green-screen face matte is
+# dilated 24 px and inpainted away (Telea) across ALL splits, so the model never
+# sees a face at any point in training or evaluation.
+#
+# Purpose (Phase 3 arm 3C): probe_background_leakage.py showed the verification
+# task is solvable to ROC-AUC 0.740/0.792 from background colour alone, with no
+# model. This arm tests that causally with a real model.
+#
+# Reading declared in advance: above chance => the background carries identity;
+# at chance => the leak needed the face-shaped hole.
+#
+# The paired random arm is the negative control. Inpainting spreads the surviving background rim
+# across a median 78-90% of the crop, so it AMPLIFIES the cue rather than merely
+# preserving it -- this arm's ROC-AUC is an upper bound, not an estimate. A
+# model-free descriptor on the inpainted test split reads 0.979 (mau) / 0.840
+# (rou) for original against 0.490 / 0.547 for random, so the pipeline does not
+# manufacture a cue where none exists.
+#
+# `background: original_bgonly` is a LABEL, not a filter. The CSV keeps the
+# `original` literal that bat_core.ImageRecord requires.
+manifest_path: data/manifests/mauritius_bgonly_original_manifest.csv
+species: mauritius
+background: original_bgonly
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0
+
+# --- Runtime re-split. Bounds unchanged: the build drops no identities.
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`; derives split_seed
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 4
+min_test_identities: 2
+max_test_identities: 6
+min_train_identities: 6

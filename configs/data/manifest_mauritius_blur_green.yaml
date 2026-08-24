@@ -1,0 +1,61 @@
+# mauritius degraded to rousettus image quality by CALIBRATED BLUR (Phase 2A,
+# variant `blur`). Companion to the `recrop` variant and to the band-restricted
+# arm (3B); all three control the same confound and fail in different directions.
+#
+# Why blur and not a resize. The originally specified recipe -- quantile-map
+# native_side_px onto the rousettus distribution, downsample, upsample back -- is
+# a NO-OP at this project's training resolution. ArcFace/AdaFace use
+# input_edge_length 112 and outputs/quality/native_boxes.parquet shows 0.0% of
+# images in EITHER species are upscaled at 112 (rousettus' smallest native
+# head-box is 178 px), so both species are resized down to 112 and both then hold
+# exactly 112 px of face. The real gap is optical, not sampling-limited.
+#
+# Calibration. One sigma per BAT (each bat was filmed in exactly one video, so
+# capture quality is a property of the bat, not the frame), solved by bisection
+# so that bat's median gradient_energy lands on the matching quantile of the
+# rousettus identity-median distribution -- measured THROUGH the JPEG round-trip,
+# because q95 re-encoding otherwise leaves the written file 1.04-1.12x sharper
+# than its target. Sigmas: min 0.000, median 0.507, max 0.618.
+#
+# Achieved, per-identity medians vs rousettus (Cliff's delta, before -> after):
+#   gradient_energy  +0.56 -> -0.03  TARGETED, reached
+#   laplacian_var    +0.60 -> +0.12  free check, converged on its own
+#   tenengrad        +0.17 -> -0.30  free check, overshot (was nearly matched)
+#   noise_sigma      +0.77 -> +0.43  free check, ~60% closed; blur cannot remove
+#                                    a 2.5x noise gap without destroying signal
+# Only gradient_energy was aimed at, so laplacian_var converging is evidence the
+# degradation is real rather than fitted. The tenengrad overshoot and the noise
+# residual are reported, not patched. Full detail:
+# outputs/phase2a_review/battery_comparison.json
+#
+# Interpret 3A against the power ceiling, NOT against p = 0.05: the minimum
+# detectable difference is 0.440 ROC-AUC (outputs/kfold_power_ceiling.json)
+# against a largest observed gap of 0.207. Report effect size + bootstrap CI +
+# the MDE together; never a bare p-value.
+#
+# `background: green_blur` is a LABEL, not a filter. The CSV keeps the `green`
+# literal that bat_core.ImageRecord requires.
+manifest_path: data/manifests/mauritius_blur_green_manifest.csv
+species: mauritius
+background: green_blur
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0
+
+# --- Runtime re-split. Bounds unchanged: degradation drops no identities, so the
+# pool is still the full 16 bats. That is this arm's advantage over 3B, which
+# keeps real pixels but drops to 10.
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`; derives split_seed
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 4
+min_test_identities: 2
+max_test_identities: 6 # mauritius: 16 identities total
+min_train_identities: 6
