@@ -28,6 +28,7 @@ KEEP: frozenset[str] = frozenset(
         # Model identity.
         "model_family",
         "model_arch",
+        "backbone_dilated",
         "embedding_dim",
         # Loss configuration.
         "loss_type",

@@ -573,7 +573,10 @@ def build_model(cfg: Mapping[str, Any], *, num_classes: int) -> Any:
     if arch and arch != "resnet50":
         raise CliRuntimeError(f"unsupported embedding model arch: {arch!r}")
 
-    backbone = resnet50_backbone(pretrained=_is_pretrained(model_cfg.get("pretrained", True)))
+    backbone = resnet50_backbone(
+        pretrained=_is_pretrained(model_cfg.get("pretrained", True)),
+        dilated=bool(model_cfg.get("backbone_dilated", False)),
+    )
     head = str(model_cfg.get("head", loss_cfg.get("type", "arcface"))).lower()
     embedding_dim = int(model_cfg.get("embedding_dim", 512))
     margin = float(loss_cfg.get("margin", 0.5 if head == "arcface" else 0.4))
@@ -2043,6 +2046,9 @@ def _audit_params(
 
     _put("model_family", model.get("family") or loss.get("family"))
     _put("model_arch", model.get("arch"))
+    # Only meaningful for the dilated-backbone saliency arm, but it changes
+    # the network, so it must be recoverable from the run.
+    _put("backbone_dilated", model.get("backbone_dilated"))
     _put("embedding_dim", model.get("embedding_dim"))
     _put("loss_type", loss.get("type"))
     _put("optimizer", trainer.get("optimizer"))

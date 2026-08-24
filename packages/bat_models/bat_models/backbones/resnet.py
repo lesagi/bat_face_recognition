@@ -35,10 +35,16 @@ class _ResNet50Backbone(nn.Module):
 
     output_dim: int = 2048
 
-    def __init__(self, pretrained: bool = True) -> None:
+    def __init__(self, pretrained: bool = True, dilated: bool = False) -> None:
         super().__init__()
         weights = models.ResNet50_Weights.DEFAULT if pretrained else None
-        net = models.resnet50(weights=weights)
+        # ``dilated`` replaces layer4's stride-2 with dilation, giving output
+        # stride 16 instead of 32. Parameter shapes are unchanged, so pretrained
+        # weights still load. The only reason this exists is Grad-CAM
+        # resolution: the CAM grid is input_edge / output_stride, so a 320px
+        # input goes from a 10x10 grid (32px cells, coarser than an eye) to
+        # 20x20 (16px cells). See docs/saliency_species.md.
+        net = models.resnet50(weights=weights, replace_stride_with_dilation=[False, False, dilated])
         net.fc = nn.Identity()  # type: ignore[assignment]
         self._net = net
 
@@ -48,12 +54,17 @@ class _ResNet50Backbone(nn.Module):
         return out
 
 
-def resnet50_backbone(pretrained: bool = True) -> nn.Module:
+def resnet50_backbone(pretrained: bool = True, dilated: bool = False) -> nn.Module:
     """Build a ResNet50 backbone whose ``forward`` outputs a 2048-d feature.
 
     Parameters
     ----------
     pretrained:
         If ``True`` (default), use torchvision's ImageNet1K_V2 weights.
+    dilated:
+        If ``True``, dilate layer4 instead of striding it (output stride 16
+        rather than 32). Quadruples the spatial resolution of the final feature
+        map, which is what Grad-CAM's grid is derived from. Costs memory and
+        compute in layer4; leaves parameter shapes and the 2048-d output alone.
     """
-    return _ResNet50Backbone(pretrained=pretrained)
+    return _ResNet50Backbone(pretrained=pretrained, dilated=dilated)

@@ -1,0 +1,26 @@
+# @package _global_
+# Phase 3 arm 3E: ArcFace with a dilated backbone at 320px on rousettus, green
+# backgrounds -- a 20x20 Grad-CAM grid to cross-check the Integrated-Gradients
+# saliency result in docs/saliency_species.md.
+#
+# Two backgrounds on purpose: `original` is directly comparable to the published
+# IG maps, and `green` is the arm that docs/background_leakage.md does not
+# invalidate.
+#
+# Qualitative cross-check only -- no p-values. Two caveats stated rather than
+# fixed: DataLoader(shuffle=True) has no explicit generator (see
+# docs/PHASE_4_CHECKLIST.md) so a single-seed run is not bit-reproducible, and
+# rousettus never improved val ROC-AUC at 320px, so its checkpoint is selected by
+# a fallback criterion.
+#   bat-cli train --experiment arcface_rousettus_dilated_green_bg_video_tuned
+defaults:
+  - override /data: manifest_rousettus_green_intersect
+  - override /model: arcface_dilated
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green_dilated
+  source: video

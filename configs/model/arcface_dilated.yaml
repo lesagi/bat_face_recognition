@@ -1,0 +1,20 @@
+# ArcFace with a dilated layer4 (output stride 16) at 320px input.
+#
+# Sole purpose: Grad-CAM resolution. The CAM grid is input_edge / output_stride,
+# so the stock backbone gives 320/32 = 10x10 (32px cells) while an eye ROI is
+# smaller than one cell -- docs/saliency_species.md flags this as the reason the
+# eye-attention claims could not be supported at any input edge. Dilating layer4
+# gives 320/16 = 20x20 with 16px cells.
+#
+# Parameter shapes are identical to configs/model/arcface.yaml, so this is not a
+# different architecture -- but the network is RETRAINED rather than having stock
+# weights loaded into it, because layer4's receptive-field statistics change and
+# maps from an untrained configuration would describe a model that never existed.
+name: arcface
+family: embedding
+arch: resnet50
+backbone_dilated: true
+embedding_dim: 512
+input_edge_length: 320
+pretrained: imagenet
+head: arcface
