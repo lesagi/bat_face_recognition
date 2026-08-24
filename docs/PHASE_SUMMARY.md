@@ -4,8 +4,10 @@ One page per phase: what was asked, what was done, what held up, what did not.
 Written to be picked up cold in a new session. Every claim points at the artifact
 that backs it.
 
-**Status as of 2026-08-23:** Phases 0–1 complete. Phase 2 partially complete.
-Phase 3 not started and its scope is an **open decision** (see the end).
+**Status as of 2026-08-24:** Phases 0–1 complete. Phase 2 complete.
+**Phase 3 complete — 624 runs, all clean. Results in `docs/phase3_results.md`.**
+Two of its findings change how earlier phases must be read; see "Phase 3 outcome"
+at the end.
 
 ---
 
@@ -261,6 +263,45 @@ p-value from these arms.
   `aggregate_kfold.py`'s coverage report.
 - Never edit a running bash script — bash re-reads by byte offset. Python is safe.
 - `nvidia-smi` first; the box is shared with another user.
+
+## Phase 3 outcome (2026-08-24) — 624 runs, all clean
+
+Full detail in `docs/phase3_results.md`. The two findings that change earlier
+conclusions:
+
+**The background leak is causal (3C).** An ArcFace trained end to end on images
+with the face *inpainted away* scores **0.831** (mauritius) / **0.780**
+(rousettus) on held-out bats, against a random-background control at chance
+(0.516 / 0.555) and a full model at 0.890 / 0.860. Paired vs control: +0.314
+CI [+0.229, +0.393] and +0.225 CI [+0.165, +0.286]. A model that never sees a
+face reaches 93% / 91% of the full model's performance. Read as an upper bound
+(inpainting amplifies the rim), but the arm confirms 1A/1B causally. **`original`
+cannot carry a headline.**
+
+**Image quality does NOT explain the species difference — this reverses a Phase A
+prediction.** Phase A concluded the species separability gap was "substantially a
+measurement artifact". It is not, for recognition. The species differ on exactly
+one background (`random`: +0.116 / +0.136; green is ~0, `original` leaks), and
+across three independent controls — calibrated blur, physical re-crop from
+downsampled frames, and band-restriction to real in-band pixels — the gap
+**survives all three**. Largest reduction 0.043 ROC-AUC; the control with no free
+parameters (re-crop) moved it by −0.002 / −0.000; one control increased it.
+Statement: *matching image quality changed the gap by at most 0.043 ROC-AUC.*
+The separability analysis measured frozen-backbone embedding geometry, this
+measures trained open-set verification — different questions, and the recognition
+one is what the paper claims.
+
+**Also:** the rousettus manifest asymmetry was harmless (3D, all CIs contain zero);
+a 20×20 Grad-CAM is now available via `model.backbone_dilated` (3E, verified on the
+trained checkpoints); and `docs/quality_parity.md` has been corrected — it measured
+`aligned_224` while the sweep trained on `not_augmented/`, which for rousettus are
+different, sharper images.
+
+Arms 3A and 3B were **extended to the random background** during execution: as
+originally specified they controlled the confound on green and original only, i.e.
+everywhere except where the effect actually appears. 3C was **doubled** to add a
+random-background negative control, without which its positive result would have
+been uninterpretable.
 
 ## Cross-cutting lesson
 

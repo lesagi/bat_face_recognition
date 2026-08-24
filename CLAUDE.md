@@ -86,6 +86,16 @@ K-fold: `--fold N` re-splits the manifest in memory (see "Runtime re-split" belo
 
 ## Where to find things
 
+- **Phase 3 controls (start here for any species or background claim)**:
+  `docs/phase3_results.md` — 624 runs. Two results override earlier docs. (1) A
+  model trained on images with the face *inpainted away* scores 0.831/0.780 on
+  held-out bats against a control at chance, so the `original` arm is
+  substantially background matching and cannot carry a headline. (2) Matching
+  image quality does **not** explain the species difference: it survives three
+  independent controls, largest reduction 0.043 ROC-AUC. This reverses
+  `quality_parity.md`'s "substantially a measurement artifact" reading for
+  recognition (that result was frozen-backbone embedding geometry, not trained
+  verification).
 - Species dataset comparability: `docs/quality_parity.md` — the image-quality battery, the equivalence (TOST) tests, and the intrinsic-separability result. Short version: the two species' datasets differ on 11 of 12 quality metrics, effective resolution separates them completely (1.97×, Cliff's δ = 1.00), and matching resolution removes most of the apparent separability gap. Any species comparison needs the matched arm.
 - **Background leakage — read before quoting any `original`-background result**: `docs/background_leakage.md`. Each bat has one video, so same-bat pairs always share a background and the verification task is solvable to ROC-AUC 0.74–0.79 from background colour alone, with no model. `green`/`random` are clean (0.50). No model significantly beats that baseline on `original`. The arm is unfixable with this data (one video per bat); the headline belongs on `green`.
 - Per-species saliency: `docs/saliency_species.md` — group maps, pose-derived eye/nose ROIs, pointing game. Three gotchas. (1) Grad-CAM's grid is `input_edge/32`, so at the tuned 112px it is **4×4** — one cell larger than the eye ROI — and says nothing; ROI claims need ≥320px. (2) Grad-CAM with the `class_logit` target silently returns all-zero maps for 20% (mauritius) / 46% (rousettus) of images, because the target is a scale-invariant cosine while Grad-CAM assumes the target grows with activation magnitude; that differential attrition biased the species comparison. Use **Integrated Gradients** (`--method ig`, pixel resolution, zero attrition) or the `emb_mag` target. (3) **The randomisation control FAILS** — an untrained network of the same architecture peaks on an eye in 64% of mauritius images and reproduces the species difference at Cliff's δ = +0.94 vs the trained +0.98. So eye-attention and the species gap are properties of the *images* (very likely the resolution confound), not of learning. Only the trained-minus-untrained contrast is learning-attributable, and it has opposite signs per species: mauritius 64%→83%, rousettus 48%→15%. Do not quote eye-attention against the 16% area-share null.

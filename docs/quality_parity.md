@@ -55,6 +55,32 @@ real detail.
   face mask, so only there is every metric restricted to the face. On `original`
   and `random`, gradient measures partly report background scenery.
 
+## Correction (2026-08-24): these are not the crops the models trained on
+
+**The numbers below measure `aligned_224`; the 360-run k-fold sweep trained on
+`not_augmented/`.** For mauritius those are byte-identical, so its figures carry
+over unchanged. For **rousettus they are different images** — the two builds
+produce visibly different crops (mean absolute pixel difference ≈ 39/255) — and
+the rousettus training crops are *sharper*. Recomputing the identical battery on
+the crops the models actually saw:
+
+| metric (per-identity median ratio) | measured below (`aligned_224`) | on the trained crops (`not_augmented`) |
+|---|---|---|
+| `laplacian_var` | 3.78× | **3.21×** |
+| `gradient_energy` | 2.08× | **1.87×** |
+| `tenengrad` | 1.19× | **1.07×** |
+| `noise_sigma_immerkaer` | 3.13× | **2.50×** |
+
+So the species quality gap is real and in the same direction, but **smaller than
+stated below** for every sharpness and noise measure. `native_side_px` is
+unaffected: it is derived from the source frame, not the crop, so the resolution
+result (1.97×, Cliff's δ = +1.00, complete separation) stands exactly as written.
+
+This was found while calibrating the Phase 2A degradation arms, which had to be
+matched against the trained crops — calibrating against the figures below would
+have over-degraded mauritius. Anything that quotes this document as the quality
+gap *of the trained models' data* should use the right-hand column.
+
 ## Result — green background, face ROI only
 
 | metric | group | mauritius | rousettus | ratio | Cliff's δ | p (BH) | p (TOST) | verdict |
