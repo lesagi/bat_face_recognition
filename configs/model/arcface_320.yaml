@@ -1,0 +1,17 @@
+# ArcFace at 320px input, stock (non-dilated) backbone.
+#
+# For the saliency arm. Integrated Gradients attributes at full input resolution,
+# so the dilated backbone's finer conv grid buys nothing here -- dilation only
+# matters for Grad-CAM. Stock also matches the architecture the published
+# original-background saliency result used, which keeps green-vs-original
+# like-for-like.
+#
+# 320 rather than the tuned 112 because the ROI analysis needs the resolution:
+# at 112 the eye disc is a handful of pixels. See docs/saliency_species.md.
+name: arcface
+family: embedding
+arch: resnet50
+embedding_dim: 512
+input_edge_length: 320
+pretrained: imagenet
+head: arcface

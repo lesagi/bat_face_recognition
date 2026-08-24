@@ -24,6 +24,7 @@ from bat_stats.model_comparison import (
     hedges_g,
     hierarchical_bootstrap,
     interpret_delta,
+    paired_wilcoxon,
     permutation_p,
     permutation_p_floor,
     tost,
@@ -392,3 +393,40 @@ def test_hierarchical_bootstrap_ignores_empty_identities() -> None:
 def test_hierarchical_bootstrap_requires_non_empty_groups() -> None:
     with pytest.raises(ValueError, match="at least one non-empty"):
         hierarchical_bootstrap({"a": []}, {"b": [1.0]}, n_boot=10)
+
+
+def test_paired_wilcoxon_detects_a_consistent_shift() -> None:
+    """Every pair moving the same way is the maximum possible effect."""
+    before = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
+    after = [x - 0.3 for x in before]
+    result = paired_wilcoxon(before, after, alternative="less")
+    assert result.n_pairs == 6
+    assert result.median_difference == pytest.approx(-0.3)
+    # All six ranks negative -> rank-biserial exactly -1.
+    assert result.matched_pairs_rank_biserial == pytest.approx(-1.0)
+    assert result.p_value_one_sided < result.p_value
+
+
+def test_paired_wilcoxon_beats_unpaired_on_paired_data() -> None:
+    """The pairing is the point: a small consistent shift swamped by between-unit
+    spread is invisible to an unpaired test and obvious to a paired one."""
+    rng = np.random.default_rng(0)
+    before = rng.normal(1.5, 0.6, 20)  # large between-unit variation
+    after = before + 0.05  # tiny, perfectly consistent within-unit shift
+    paired = paired_wilcoxon(before, after, alternative="greater")
+    unpaired = compare_groups(after, before)
+    assert paired.p_value_one_sided < 0.001
+    assert unpaired.p_value > 0.5
+
+
+def test_paired_wilcoxon_identical_inputs_do_not_raise() -> None:
+    """scipy raises when every difference is zero; the wrapper reports no effect."""
+    result = paired_wilcoxon([1.0, 2.0, 3.0], [1.0, 2.0, 3.0])
+    assert result.p_value == 1.0
+    assert result.matched_pairs_rank_biserial == 0.0
+    assert result.effect_magnitude == "negligible"
+
+
+def test_paired_wilcoxon_rejects_mismatched_lengths() -> None:
+    with pytest.raises(ValueError, match="same length"):
+        paired_wilcoxon([1.0, 2.0], [1.0])

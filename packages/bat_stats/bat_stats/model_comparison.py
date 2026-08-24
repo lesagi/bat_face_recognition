@@ -38,6 +38,7 @@ from scipy.special import digamma
 __all__ = [
     "BootstrapResult",
     "ComparisonResult",
+    "PairedResult",
     "EquivalenceResult",
     "TTestResult",
     "benjamini_hochberg",
@@ -50,6 +51,7 @@ __all__ = [
     "hedges_g",
     "hierarchical_bootstrap",
     "interpret_delta",
+    "paired_wilcoxon",
     "permutation_p",
     "permutation_p_floor",
     "tost",
@@ -86,6 +88,40 @@ class ComparisonResult:
             "cliffs_delta": self.cliffs_delta,
             "delta_magnitude": self.delta_magnitude,
             "hedges_g": self.hedges_g,
+        }
+
+
+@dataclass(frozen=True)
+class PairedResult:
+    """Outcome of a paired within-unit comparison.
+
+    Separate from :class:`ComparisonResult` because the question is different.
+    That one asks whether two *groups* differ; this asks whether a *change*
+    applied to the same units is non-zero. Using the unpaired test on paired data
+    throws away the pairing and loses most of the power.
+    """
+
+    n_pairs: int
+    median_before: float
+    median_after: float
+    median_difference: float
+    wilcoxon_w: float
+    p_value: float
+    p_value_one_sided: float
+    matched_pairs_rank_biserial: float
+    effect_magnitude: str
+
+    def to_dict(self) -> dict[str, float | int | str]:
+        return {
+            "n_pairs": self.n_pairs,
+            "median_before": self.median_before,
+            "median_after": self.median_after,
+            "median_difference": self.median_difference,
+            "wilcoxon_w": self.wilcoxon_w,
+            "p_value": self.p_value,
+            "p_value_one_sided": self.p_value_one_sided,
+            "matched_pairs_rank_biserial": self.matched_pairs_rank_biserial,
+            "effect_magnitude": self.effect_magnitude,
         }
 
 
@@ -216,6 +252,77 @@ def hedges_g(a: Sequence[float], b: Sequence[float]) -> float:
 # ---------------------------------------------------------------------------
 # Two-group comparison
 # ---------------------------------------------------------------------------
+
+
+def paired_wilcoxon(
+    before: Sequence[float],
+    after: Sequence[float],
+    *,
+    alternative: str = "greater",
+) -> PairedResult:
+    """Wilcoxon signed-rank on paired observations, with a rank-biserial effect size.
+
+    For designs where the same units are measured twice — here, the same bats
+    scored under a trained model and under its untrained control. The pairing is
+    the whole point: between-bat variation in how much saliency an eye attracts
+    is large and irrelevant, and differencing within a bat removes it.
+
+    Non-parametric because n is 12-16 identities and the per-identity densities
+    are right-skewed (a few images whose hot spot lands in the region pull the
+    mean up), so a t-test's normality assumption is not comfortable here.
+
+    ``alternative`` gives the one-sided p in the stated direction; the two-sided
+    p is always returned alongside, so a directional hypothesis cannot quietly
+    become a fishing expedition.
+
+    The effect size is the matched-pairs rank-biserial correlation
+    (Kerby 2014): (positive rank sum - negative rank sum) / total rank sum, in
+    [-1, +1]. +1 means every pair moved the same way. It is reported because a
+    p-value alone cannot say whether a difference matters.
+    """
+    x = np.asarray(before, dtype=float)
+    y = np.asarray(after, dtype=float)
+    if x.size != y.size:
+        raise ValueError(f"paired inputs must be the same length; got {x.size} and {y.size}")
+    if x.size < 2:
+        raise ValueError("need at least 2 pairs")
+
+    diff = y - x
+    nonzero = diff[diff != 0]
+    if nonzero.size == 0:
+        # Every pair identical: no evidence of change, and scipy would raise.
+        return PairedResult(
+            n_pairs=int(x.size),
+            median_before=float(np.median(x)),
+            median_after=float(np.median(y)),
+            median_difference=0.0,
+            wilcoxon_w=0.0,
+            p_value=1.0,
+            p_value_one_sided=1.0,
+            matched_pairs_rank_biserial=0.0,
+            effect_magnitude="negligible",
+        )
+
+    two_sided = stats.wilcoxon(y, x, alternative="two-sided", zero_method="wilcox")
+    one_sided = stats.wilcoxon(y, x, alternative=alternative, zero_method="wilcox")
+
+    ranks = stats.rankdata(np.abs(nonzero))
+    pos = float(ranks[nonzero > 0].sum())
+    neg = float(ranks[nonzero < 0].sum())
+    total = pos + neg
+    rbc = (pos - neg) / total if total > 0 else 0.0
+
+    return PairedResult(
+        n_pairs=int(x.size),
+        median_before=float(np.median(x)),
+        median_after=float(np.median(y)),
+        median_difference=float(np.median(diff)),
+        wilcoxon_w=float(two_sided.statistic),
+        p_value=float(two_sided.pvalue),
+        p_value_one_sided=float(one_sided.pvalue),
+        matched_pairs_rank_biserial=float(rbc),
+        effect_magnitude=interpret_delta(rbc),
+    )
 
 
 def compare_groups(a: Sequence[float], b: Sequence[float]) -> ComparisonResult:

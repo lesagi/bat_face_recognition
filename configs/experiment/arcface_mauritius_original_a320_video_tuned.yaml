@@ -1,0 +1,20 @@
+# @package _global_
+# Saliency arm: tuned ArcFace on mauritius original backgrounds at 320px, stock
+# backbone, trained on the aligned_320 crops (genuine 320px pixels, not 224px
+# upsampled at load time).
+#
+# Ten folds of this are trained so the trained-minus-untrained attention
+# contrast gets an error bar across MODELS, not just across identities. See
+# docs/saliency_preregistration.md.
+#   bat-cli train --experiment arcface_mauritius_original_a320_video_tuned --fold N
+defaults:
+  - override /data: manifest_mauritius_original_aligned_320
+  - override /model: arcface_320
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: original
+  source: video
