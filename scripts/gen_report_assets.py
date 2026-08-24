@@ -213,10 +213,26 @@ def embedding_gradcam(model, x: torch.Tensor, target: str) -> np.ndarray:
 
 
 def embedding_smoothgrad_ig(
-    model, x: torch.Tensor, steps: int, target: str, n: int = 12, noise: float = 0.15
+    model,
+    x: torch.Tensor,
+    steps: int,
+    target: str,
+    n: int = 12,
+    noise: float = 0.15,
+    seed: int | None = None,
 ) -> np.ndarray:
     """SmoothGrad-IG (Smilkov 2017): average the 20-step IG attribution over n
-    noisy copies of the input. Denoises deep-net gradients -> smooth maps."""
+    noisy copies of the input. Denoises deep-net gradients -> smooth maps.
+
+    ``seed`` makes the noise draw reproducible. Without it two runs of the same
+    command on the same data differ by ~6 percentage points on the pointing game
+    (measured: 76.6% vs 82.8%), which is a third of the effect the species
+    analysis is trying to detect. ``siamese_ig`` below already seeded its
+    counterpart; this one did not. Seeding is per image at the call site, so the
+    noise is reproducible without being correlated across images. A local
+    Generator is used rather than ``torch.manual_seed`` so global RNG state --
+    and therefore anything else in the process -- is left alone.
+    """
     mean = torch.tensor(IMAGENET_MEAN, dtype=x.dtype, device=x.device).view(1, 3, 1, 1)
     std = torch.tensor(IMAGENET_STD, dtype=x.dtype, device=x.device).view(1, 3, 1, 1)
     baseline = (torch.zeros_like(x) - mean) / std
@@ -228,8 +244,17 @@ def embedding_smoothgrad_ig(
             cls = int((model.forward_embedding(x) @ w.t()).argmax(1).item())
     alphas = torch.linspace(0.0, 1.0, steps + 1, device=x.device)
     accum = torch.zeros_like(x)
+    gen = None
+    if seed is not None:
+        gen = torch.Generator(device=x.device)
+        gen.manual_seed(int(seed))
     for _ in range(n):
-        xn = x + torch.randn_like(x) * sigma
+        noise_draw = (
+            torch.randn_like(x)
+            if gen is None
+            else torch.randn(x.shape, generator=gen, device=x.device, dtype=x.dtype)
+        )
+        xn = x + noise_draw * sigma
         grad_sum = torch.zeros_like(x)
         for a in alphas:
             interp = (baseline + a * (xn - baseline)).detach().requires_grad_(True)

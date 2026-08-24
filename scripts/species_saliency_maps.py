@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -66,21 +67,35 @@ EDGE = 224
 DEFAULT_OUT = Path("outputs/saliency/roi_stats.json")
 DEFAULT_FIG_DIR = Path("outputs/saliency/figures")
 
+# Everything below used to hardcode `original`. It is now parameterised, because
+# arm 3C showed a model trained on original images with the face DELETED still
+# reaches ROC-AUC 0.831/0.780 — so an attention analysis on that background may
+# not describe a face-driven model at all. See docs/saliency_preregistration.md.
+#
+# `slug` is the background token as it appears in a run-directory leaf
+# (`{species}_{source}_{background}_{model}_{loss}_e{edge}_s{seed}`), slugified by
+# bat_stats.naming. It is what pins the checkpoint: `_green_` does NOT match
+# `_green-dilated_`, which is exactly the collision that made the published
+# command unreproducible once Phase 3 added dilated runs.
+#
 # Must be the manifest the checkpoint was TRAINED on, or the model sees a
-# different preprocessing than it learned. The tuned original-bg experiments
-# resolve `override /data: manifest_{sp}_original`, i.e. this file.
-MANIFEST_TEMPLATE = "data/manifests/{species}_original_bg_manifest.csv"
-
-# Used with --model-edge: the 320px checkpoints were trained on the aligned_320
-# crops, so the analysis has to read those same images.
-ALIGNED_MANIFEST_TEMPLATE = "data/manifests/{species}_original_aligned_{edge}_manifest.csv"
-
-# Model families with a surviving checkpoint from the resolution matrix
-# (original background, seed 42) — see gen_report_assets.find_run_dir.
-MODELS = {
-    "arcface": "arcface_{sp}_original_bg_video_tuned",
-    "adaface": "adaface_{sp}_original_bg_video_tuned",
+# different preprocessing than it learned.
+BACKGROUND_SPECS: dict[str, dict[str, str]] = {
+    "original": {
+        "slug": "original",
+        "experiment": "{model}_{sp}_original_bg_video_tuned",
+        "manifest": "data/manifests/{species}_original_bg_manifest.csv",
+        "aligned": "data/manifests/{species}_original_aligned_{edge}_manifest.csv",
+    },
+    "green": {
+        "slug": "green",
+        "experiment": "{model}_{sp}_green_bg_video_tuned",
+        "manifest": "data/manifests/{species}_green_bg_manifest.csv",
+        "aligned": "data/manifests/{species}_green_aligned_{edge}_manifest.csv",
+    },
 }
+
+MODEL_KEYS = ("arcface", "adaface")
 
 POSE_WEIGHTS = "models/preprocessing/face_pose.pt"
 
@@ -177,12 +192,23 @@ def pointing_game(saliency: np.ndarray, rois: dict[str, np.ndarray]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_untrained_like(experiment: str, ckpt: Path, device: str) -> Any:
+def _build_untrained_like(
+    experiment: str, ckpt: Path, device: str, control_seed: int = 0
+) -> Any:
     """Same architecture as the checkpoint, at its default initialisation.
 
     The class count is read from the checkpoint's head so the architecture
-    matches exactly, but no weights are loaded — the point of the control is that
-    everything except the architecture is untrained.
+    matches exactly, but no *trained* weights are loaded — the point of the
+    control is that everything except the architecture is untrained.
+
+    One thing to be precise about, because the write-up has been loose on it:
+    ``build_model`` honours the model config, and every arcface config sets
+    ``pretrained: imagenet``. So this control is an **ImageNet-pretrained
+    backbone with a randomly initialised projection and head**, not a
+    from-scratch random network. The trained-minus-untrained contrast therefore
+    isolates *bat-specific* training, which is arguably the stronger Adebayo
+    control -- but it is not what "untrained network" implies, and it must be
+    reported as what it is.
     """
     import torch
 
@@ -190,6 +216,10 @@ def _build_untrained_like(experiment: str, ckpt: Path, device: str) -> Any:
 
     state = torch.load(ckpt, map_location="cpu", weights_only=False)
     num_classes = int(state["model"]["head.weight"].shape[0])
+    # Seeded: the control's projection and head are randomly initialised, so an
+    # unseeded control makes the trained-minus-untrained contrast irreproducible
+    # for the same reason the IG noise did.
+    torch.manual_seed(control_seed)
     model = build_model(compose_config(experiment=experiment), num_classes=num_classes)
     return model.to(device).eval()
 
@@ -210,27 +240,49 @@ def _top_class_cosine(model: Any, batch: Any) -> float:
         return float((emb @ weight.t()).max().item())
 
 
-def find_run_dir_for_edge(species: str, model_key: str, edge: int) -> Path | None:
-    """Newest run for this species/model **trained at ``edge``**, with a checkpoint.
+def find_run_dir_for_edge(
+    species: str, model_key: str, edge: int, background_slug: str
+) -> Path | None:
+    """The run for this species/model/edge/**background**, with a checkpoint.
 
     ``find_run_dir`` matches on the ROC-curve filename only, which does not encode
     the input size — so with both an e112 and an e320 run present it would return
     whichever is newer and silently mix resolutions. The run directory name
     carries the edge (``..._e320_s42``), so filter on that.
+
+    It must also filter on **background**, and it must refuse to guess. The
+    earlier version did neither: it took ``max(..., key=mtime)`` over everything
+    matching species/model/edge. Once Phase 3 wrote ``green-dilated`` checkpoints
+    on 2026-08-24, re-running the published original-background command silently
+    selected a *dilated* checkpoint and loaded it into a *non-dilated* ResNet.
+    Parameter shapes are identical between the two, so ``load_state_dict`` does
+    not raise — every stride and receptive field would have been wrong with no
+    error anywhere. Underscore-bracketing the slug is what separates them:
+    ``_green_`` does not match ``_green-dilated_``.
+
+    Ambiguity is now an error rather than a coin flip. Ten folds of one cell all
+    match legitimately, so the caller is told to pin ``--checkpoint``.
     """
     base = Path("outputs/runs")
-    token = f"_e{edge}_"
     candidates = [
         d
         for d in list(base.glob("*/")) + list(base.glob("*/*/"))
-        if token in d.name
+        if f"_e{edge}_" in d.name
+        and f"_{background_slug}_" in d.name
         and d.name.startswith(f"{species}_")
         and model_key in d.name
         and resolve_ckpt(d) is not None
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+    if len(candidates) > 1:
+        listing = "\n      ".join(sorted(str(c) for c in candidates))
+        raise SystemExit(
+            f"ambiguous run directory for {species}/{model_key}/e{edge}/"
+            f"{background_slug} — {len(candidates)} candidates:\n      {listing}\n"
+            "    Pass --checkpoint to pin one. Refusing to pick by mtime."
+        )
+    return candidates[0]
 
 
 def sample_records(manifest: Path, max_per_identity: int, split: str | None) -> list[ImageRecord]:
@@ -266,8 +318,12 @@ def run_species(
     randomise: bool,
     model_edge_override: int | None = None,
     method: str = "gradcam",
+    background: str = "original",
+    checkpoint: str | None = None,
+    manifest_override: str | None = None,
 ) -> dict[str, Any] | None:
-    experiment = MODELS[model_key].format(sp=species)
+    spec = BACKGROUND_SPECS[background]
+    experiment = spec["experiment"].format(model=model_key, sp=species)
 
     # Feed the model the edge length it was TRAINED at (112 for the tuned
     # original-bg experiments), not the analysis frame size. A ResNet50 accepts
@@ -283,16 +339,38 @@ def run_species(
         else _resolve_image_size(compose_config(experiment=experiment))
     )
 
-    run_dir = find_run_dir_for_edge(species, model_key, model_edge)
-    if run_dir is None:
-        print(f"  !! no {model_key} run with a checkpoint for {species}")
-        return None
-    ckpt = resolve_ckpt(run_dir)
-    if ckpt is None:
-        print(f"  !! no checkpoint in {run_dir}")
-        return None
+    if checkpoint is not None:
+        ckpt = Path(checkpoint)
+        if not ckpt.exists():
+            print(f"  !! checkpoint not found: {ckpt}")
+            return None
+        run_dir = ckpt.parent
+        # An explicitly pinned checkpoint still has to belong to the arm being
+        # analysed. Shapes match across dilated/stock and across backgrounds, so
+        # nothing downstream would catch a mismatch.
+        if f"_{spec['slug']}_" not in run_dir.name:
+            raise SystemExit(
+                f"checkpoint {ckpt} lives in {run_dir.name}, which is not a "
+                f"'{background}' run (expected the token _{spec['slug']}_). "
+                "Refusing: parameter shapes match across arms, so this would "
+                "load silently and every result would be wrong."
+            )
+        if f"_e{model_edge}_" not in run_dir.name:
+            raise SystemExit(
+                f"checkpoint {ckpt} was trained at a different input edge than "
+                f"the requested {model_edge}px (dir: {run_dir.name})."
+            )
+    else:
+        run_dir = find_run_dir_for_edge(species, model_key, model_edge, spec["slug"])
+        if run_dir is None:
+            print(f"  !! no {model_key}/{background} run with a checkpoint for {species}")
+            return None
+        ckpt = resolve_ckpt(run_dir)
+        if ckpt is None:
+            print(f"  !! no checkpoint in {run_dir}")
+            return None
 
-    print(f"  {species}/{model_key}: {run_dir.name} (model edge {model_edge}px)")
+    print(f"  {species}/{model_key}/{background}: {run_dir.name} (model edge {model_edge}px)")
 
     if randomise:
         # Adebayo et al.: compare against an untrained network of the SAME
@@ -312,9 +390,13 @@ def run_species(
         model = load_model(experiment, ckpt, device, "embedding")
 
     manifest = Path(
-        ALIGNED_MANIFEST_TEMPLATE.format(species=species, edge=model_edge)
-        if model_edge_override is not None
-        else MANIFEST_TEMPLATE.format(species=species)
+        manifest_override
+        if manifest_override is not None
+        else (
+            spec["aligned"].format(species=species, edge=model_edge)
+            if model_edge_override is not None
+            else spec["manifest"].format(species=species)
+        )
     )
     if not manifest.exists():
         print(f"  !! {manifest} not found")
@@ -353,7 +435,15 @@ def run_species(
                 # not capped by the conv grid (edge/32 — only 4x4 at 112 px, which
                 # cannot resolve an eye). SmoothGrad averaging tames the per-pixel
                 # noise IG is otherwise prone to.
-                cam = embedding_smoothgrad_ig(model, batch, IG_STEPS, "class_logit")
+                # Per-image deterministic seed: reproducible, but not the same
+                # noise for every image (which would correlate the maps).
+                cam = embedding_smoothgrad_ig(
+                    model,
+                    batch,
+                    IG_STEPS,
+                    "class_logit",
+                    seed=zlib.crc32(str(record.path).encode()) & 0x7FFFFFFF,
+                )
             else:
                 cam = embedding_gradcam(model, batch, "class_logit")
             top_cosine = _top_class_cosine(model, batch)
@@ -457,7 +547,8 @@ def identity_level(rows: list[dict[str, Any]], column: str) -> np.ndarray:
 
 
 def plot_group_maps(
-    results: list[dict[str, Any]], fig_dir: Path, model_key: str, arm: str
+    results: list[dict[str, Any]], fig_dir: Path, model_key: str, arm: str,
+    background: str = "original",
 ) -> Path:
     fig, axes = plt.subplots(2, len(results), figsize=(4.6 * len(results), 8.6), squeeze=False)
     for column, entry in enumerate(results):
@@ -489,7 +580,10 @@ def plot_group_maps(
     cfg = {
         "species": "both",
         "source": "video",
-        "background": "original",
+        # Real background, not a literal: build_filename keys on it, so a
+        # hardcoded "original" makes a green run silently overwrite the original
+        # run's figures.
+        "background": background,
         "model": model_key,
         "loss": model_key,
     }
@@ -500,7 +594,8 @@ def plot_group_maps(
 
 
 def plot_roi_stats(
-    results: list[dict[str, Any]], fig_dir: Path, model_key: str, arm: str
+    results: list[dict[str, Any]], fig_dir: Path, model_key: str, arm: str,
+    background: str = "original",
 ) -> Path:
     regions = ("eyes", "nose", "periphery")
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
@@ -550,7 +645,10 @@ def plot_roi_stats(
     cfg = {
         "species": "both",
         "source": "video",
-        "background": "original",
+        # Real background, not a literal: build_filename keys on it, so a
+        # hardcoded "original" makes a green run silently overwrite the original
+        # run's figures.
+        "background": background,
         "model": model_key,
         "loss": model_key,
     }
@@ -562,7 +660,7 @@ def plot_roi_stats(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--model", choices=tuple(MODELS), default="arcface")
+    ap.add_argument("--model", choices=MODEL_KEYS, default="arcface")
     ap.add_argument(
         "--method",
         choices=("gradcam", "ig"),
@@ -578,6 +676,39 @@ def main() -> None:
         help="Override the model input edge (e.g. 320). Grad-CAM's conv grid is "
         "edge/32, so 112 gives a 4x4 map whose cells are larger than the eye ROI "
         "and 320 gives 10x10. ROI claims need 320.",
+    )
+    ap.add_argument(
+        "--background",
+        choices=tuple(BACKGROUND_SPECS),
+        default="original",
+        help="Which background arm to analyse. `green` is the arm arm 3C does not "
+        "invalidate: on `original` a model trained with the face DELETED still "
+        "reaches ROC-AUC 0.831/0.780, so attention measured there may describe a "
+        "scene-scoring model rather than a face-driven one.",
+    )
+    ap.add_argument(
+        "--checkpoint",
+        action="append",
+        default=None,
+        metavar="SPECIES=PATH",
+        help="Pin an exact checkpoint, e.g. --checkpoint mauritius=outputs/.../best.pt. "
+        "Repeatable, once per species. Required once more than one run matches a "
+        "cell (ten folds all match legitimately), and validated against the "
+        "background and edge tokens in the directory name.",
+    )
+    ap.add_argument(
+        "--species",
+        action="append",
+        choices=SPECIES,
+        default=None,
+        help="Restrict to one species. Default: both. The cross-species "
+        "comparison is only emitted when both are present.",
+    )
+    ap.add_argument(
+        "--manifest",
+        default=None,
+        help="Override the manifest. Must be the one the checkpoint was TRAINED "
+        "on, or the model sees preprocessing it never learned.",
     )
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--max-per-identity", type=int, default=15)
@@ -596,7 +727,18 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    print(f"=== per-species saliency ({args.model}) ===")
+    # --checkpoint is per species: one invocation analyses both, so a single bare
+    # path would silently be applied to the wrong one.
+    pinned: dict[str, str] = {}
+    for item in args.checkpoint or []:
+        if "=" not in item:
+            ap.error(f"--checkpoint must be SPECIES=PATH, got {item!r}")
+        sp, _, path = item.partition("=")
+        if sp not in SPECIES:
+            ap.error(f"--checkpoint species must be one of {SPECIES}, got {sp!r}")
+        pinned[sp] = path
+
+    print(f"=== per-species saliency ({args.model}, {args.background} background) ===")
     report: dict[str, Any] = {
         "model": args.model,
         "device": args.device,
@@ -606,6 +748,8 @@ def main() -> None:
         "nose_radius_frac": NOSE_RADIUS_FRAC,
         "max_per_identity": args.max_per_identity,
         "split": args.split or "all",
+        "background": args.background,
+        "pinned_checkpoints": pinned or None,
         "arms": {},
     }
 
@@ -613,7 +757,7 @@ def main() -> None:
         arm = "randomised_weights" if randomise else "trained"
         print(f"\n--- arm: {arm}")
         results = []
-        for species in SPECIES:
+        for species in (tuple(args.species) if args.species else SPECIES):
             entry = run_species(
                 species,
                 args.model,
@@ -623,6 +767,9 @@ def main() -> None:
                 randomise=randomise,
                 model_edge_override=args.model_edge,
                 method=args.method,
+                background=args.background,
+                checkpoint=pinned.get(species),
+                manifest_override=args.manifest,
             )
             if entry is not None:
                 results.append(entry)
@@ -644,6 +791,13 @@ def main() -> None:
                 "diagnostics": entry["diagnostics"],
                 "n_identities": int(df["identity"].nunique()) if not df.empty else 0,
                 "checkpoint": entry["checkpoint"],
+                "run_dir": entry["run_dir"],
+                # Serialised so the trained/untrained contrast can be tested at
+                # all. The two arms are built in disjoint loop iterations and
+                # never coexist in memory, so pairing has to happen offline —
+                # and on (identity, path), because pose runs separately per arm
+                # and can drop different images.
+                "per_image": entry["per_image"],
             }
             for region in ("eyes", "nose", "periphery"):
                 per_identity = identity_level(entry["per_image"], f"{region}_mass")
@@ -675,8 +829,24 @@ def main() -> None:
                     ),
                 }
             if not df.empty:
+                # Image-level, as originally reported. Kept for continuity, but
+                # it is a proportion over images clustered inside 16 / 12 bats,
+                # so a naive binomial interval on it is anticonservative.
                 summary["pointing_game"] = {
                     region: float((df["peak_roi"] == region).mean())
+                    for region in ("eyes", "nose", "periphery")
+                }
+                # Identity-level, matching the unit the density statistics use.
+                # Each bat contributes the fraction of ITS images peaking in the
+                # region, then bats are averaged equally.
+                per_bat = df.assign(
+                    **{
+                        f"_pk_{region}": (df["peak_roi"] == region).astype(float)
+                        for region in ("eyes", "nose", "periphery")
+                    }
+                ).groupby("identity")
+                summary["pointing_game_identity_level"] = {
+                    region: float(per_bat[f"_pk_{region}"].mean().mean())
                     for region in ("eyes", "nose", "periphery")
                 }
             arm_report["species"][entry["species"]] = summary
@@ -728,10 +898,10 @@ def main() -> None:
 
         if not randomise or len(results) == 2:
             arm_report["group_map_figure"] = str(
-                plot_group_maps(results, args.fig_dir, args.model, arm)
+                plot_group_maps(results, args.fig_dir, args.model, arm, args.background)
             )
             arm_report["roi_figure"] = str(
-                plot_roi_stats(results, args.fig_dir, args.model, arm)
+                plot_roi_stats(results, args.fig_dir, args.model, arm, args.background)
             )
 
         report["arms"][arm] = arm_report
