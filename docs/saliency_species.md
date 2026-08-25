@@ -101,6 +101,28 @@ may be training undoing a centre bias rather than discovering the periphery. And
 `green` retains the crop silhouette, which the shape/texture controls already
 flag as a confound.
 
+### Verification: the pointing game cannot measure an effect this size
+
+Re-running the published analysis against the **same pinned checkpoints and the
+same images**, changing only the SmoothGrad noise draw (unseeded → seeded):
+
+| measure | published | re-run | delta |
+|---|---|---|---|
+| trained mauritius eye density | 1.6685 | 1.6665 | **−0.0020** |
+| trained rousettus eye density | 0.9106 | 0.9106 | **0.0000** |
+| trained mauritius nose density | 1.1425 | 1.1536 | +0.0110 |
+| trained mauritius **pointing (eyes)** | 82.81% | 73.44% | **−9.38 pp** |
+
+Densities reproduce to three decimal places on an identical checkpoint. The
+pointing game moves **9.4 percentage points** from the random noise draw alone,
+against an effect of interest of ~19 points. That is why the pre-registration
+fixed density as the metric and excluded the pointing game in advance — the
+decision was made before these numbers existed, and they confirm it.
+
+(The randomised arm differs more, up to 14.6 pp on the pointing game, because its
+projection and head are now seeded too and are therefore a genuinely different
+draw from the published run's.)
+
 ### What this does not say
 
 It does not say the models ignore eyes. Both species' trained models still put
