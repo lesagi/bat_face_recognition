@@ -1,0 +1,16 @@
+# @package _global_
+# Occlusion arm `centre`: tuned ArcFace on mauritius green crops with the eye and nose discs destroyed (~24% of the crop).
+# Twenty folds, so the paired per-fold comparison against `none` has the same
+# structure as every other k-fold arm in this project.
+#   bat-cli train --experiment arcface_mauritius_occ_roi_centre_bg_video_tuned --fold N
+defaults:
+  - override /data: manifest_mauritius_occ_roi_centre
+  - override /model: arcface
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green_occ_centre
+  source: video

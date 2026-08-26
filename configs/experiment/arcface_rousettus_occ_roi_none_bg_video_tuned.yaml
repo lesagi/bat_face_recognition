@@ -1,0 +1,16 @@
+# @package _global_
+# Occlusion arm `none`: tuned ArcFace on rousettus green crops with nothing destroyed — the matched baseline, re-encoded through the same JPEG round-trip as the others so it is not sharper by one encode.
+# Twenty folds, so the paired per-fold comparison against `none` has the same
+# structure as every other k-fold arm in this project.
+#   bat-cli train --experiment arcface_rousettus_occ_roi_none_bg_video_tuned --fold N
+defaults:
+  - override /data: manifest_rousettus_occ_roi_none
+  - override /model: arcface
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green_occ_none
+  source: video

@@ -1,0 +1,50 @@
+# rousettus green background, ROI-occlusion arm `periphery`: everything except the eye and nose discs destroyed (~76%).
+#
+# Purpose. The pre-registered saliency test found one effect that replicated (38
+# of 40 models, both species, both backgrounds): bat-specific training moves
+# attribution AWAY from the eye/nose discs and TOWARD the periphery. That is a
+# claim about where a model looks, not about what it needs. These arms convert it
+# into an ablation. See docs/occlusion_preregistration.md.
+#
+# The design problem is area: the eye+nose discs are ~24% of the crop and the
+# periphery is ~76%, so comparing "remove the discs" against "remove the
+# periphery" would mostly measure how many pixels were destroyed. The primary
+# comparison is therefore `centre` vs `matched`, which destroy an identical pixel
+# count -- measured max |area difference| = 0.000000, overlap = 0.000000, and
+# both land on the animal (0.970 matched vs 0.904 centre).
+#
+# `periphery` is the positive control, not a hypothesis: destroying 76% of every
+# image MUST cost at least 0.05 ROC-AUC or the ablation is not removing usable
+# information and nothing may be claimed from any arm.
+#
+# green only -- `original` is 93% solvable with the face deleted (arm 3C), so an
+# occlusion test there would partly measure the background.
+#
+# Built by scripts/build_roi_occlusion.py from data/manifests/rousettus_green_bg_intersect_manifest.csv: 1042 of 1059 images
+# kept (17 dropped for weak pose keypoints, from EVERY arm so all four share
+# one image set), 12 identities.
+#
+# `background: green_occ_periphery` is a LABEL, not a filter. The CSV keeps the `green`
+# literal that bat_core.ImageRecord requires.
+manifest_path: data/manifests/rousettus_occ_roi_periphery_manifest.csv
+species: rousettus
+background: green_occ_periphery
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.25
+test_fraction: 0.25
+batch_size: 32
+num_workers: 0
+
+# --- Runtime re-split. Bounds unchanged: the build drops images, not identities.
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`; derives split_seed
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 3
+min_test_identities: 2
+max_test_identities: 5 # rousettus: 12 identities total
+min_train_identities: 4
