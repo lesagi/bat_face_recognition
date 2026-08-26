@@ -1,0 +1,146 @@
+# Pre-registration — does recognition actually depend on the periphery?
+
+**Written 2026-08-26, before the ablated datasets exist.** `git log` is the audit
+trail. Nothing below may be revised after the results are seen.
+
+## Why
+
+The pre-registered saliency test (`docs/saliency_preregistration.md`,
+`docs/saliency_species.md`) produced one effect that replicated: in 38 of 40
+models, across both species and both backgrounds, bat-specific training moves
+attribution **away** from the eye and nose discs and **toward** the periphery.
+
+That is a claim about where a model looks. It is not yet a claim about what the
+model needs. Attribution maps can be wrong about causal dependence — which is the
+whole reason this project stopped trusting them unaccompanied. So the claim gets
+converted into an ablation: destroy the pixels and measure what performance
+actually loses.
+
+## The problem this design has to solve: area
+
+The eye and nose discs together cover about **24%** of the crop; the periphery is
+the remaining **76%**. Comparing "remove the discs" against "remove the
+periphery" therefore mostly measures how many pixels were destroyed, and would
+find the periphery more important no matter what the model does.
+
+So the primary comparison is **area-matched**: the eye+nose discs against three
+discs of *identical radius and count* displaced into the periphery. Same area,
+same shape, same number of regions, same total boundary length — only the
+location differs.
+
+## Arms
+
+All on the **`green`** background, ArcFace, 20 folds, both species.
+
+| arm | what is destroyed | approx. area |
+|---|---|---|
+| `occ_none` | nothing — the matched baseline | 0% |
+| `occ_centre` | the eye and nose discs | ~24% |
+| `occ_matched` | three discs of the same radius, rotated 180° about the crop centre into the periphery | ~24% |
+| `occ_periphery` | everything except the eye and nose discs | ~76% |
+
+`green` only. `original` is excluded by design: arm 3C showed a model trained on
+`original` images with the face deleted still reaches ROC-AUC 0.831 / 0.780, so an
+occlusion test there would partly measure the background, and any result would be
+uninterpretable.
+
+`occ_none` is rebuilt through the same pipeline rather than reusing the published
+green arm, because images whose pose keypoints are too weak to place an ROI are
+dropped **from every arm**, and the baseline has to sit on that same reduced image
+set. Comparing against the published arm would confound the ablation with a
+different set of images.
+
+Destroyed regions are filled with the **mean colour of the clean crop** — a
+per-image constant, so it carries no spatial information, and the identical rule
+in every arm, so the arms differ only in *which* pixels went.
+
+## Hypotheses
+
+- **H3 (primary)** — removing the eye and nose discs costs **no more** ROC-AUC
+  than removing an area-matched periphery region. That is what the saliency result
+  predicts. Formally: the per-fold drop from `occ_none` is *equivalent* between
+  `occ_centre` and `occ_matched`.
+- **H4** — the eye and nose discs alone are **not sufficient**: `occ_periphery`
+  (which keeps only those 24%) loses substantially more than `occ_centre`.
+
+H3 is a claim of *no difference*, so an ordinary significance test cannot support
+it — a non-significant result would only mean underpowered. It is therefore
+tested by **equivalence (TOST)**, the same tool and the same margin this project
+used for the quality-parity work: **|Hedges' g| < 0.5**, declared in advance,
+meaning "differences below half a between-fold standard deviation do not matter".
+`bat_stats.tost` already implements it.
+
+Three outcomes are possible and all are reportable:
+
+| TOST | difference test | reading |
+|---|---|---|
+| equivalent | not significant | **H3 supported** — the central features are not special |
+| not equivalent | significant | **H3 refuted** — the discs matter more than matched periphery, and the saliency finding does not translate into dependence |
+| not equivalent | not significant | **inconclusive** — underpowered, stated as such |
+
+## Statistical test
+
+- **Within species, paired by fold.** Same manifest identities and the same fold
+  seed, so fold *N* of two arms holds out the same bats. Nadeau–Bengio corrected
+  t-test on the per-fold differences (`bat_stats.corrected_resampled_ttest`), which
+  is required because folds share training data.
+- **Effect size and bootstrap CI reported with every p-value**, never a bare p.
+- **The power ceiling applies.** `outputs/kfold_power_ceiling.json` puts the
+  minimum detectable difference for this design at 0.440 ROC-AUC. Differences
+  smaller than that cannot be resolved, which is exactly why H3 is framed as
+  equivalence rather than as a failure to reject.
+- **Correction**: Benjamini–Hochberg across the comparisons reported (3 ablation
+  arms × 2 species = 6).
+
+## Positive control, and why this one is not optional
+
+`occ_periphery` destroys 76% of every image. **It must lose a lot.** If it does
+not, the ablation is not removing usable information — the fill is being ignored,
+or the model is reading something the masks do not touch — and in that case
+nothing may be claimed from any arm, including H3. An equivalence result between
+two ablations that both do nothing is meaningless.
+
+Quantitatively: `occ_periphery` must drop the per-fold median ROC-AUC by at least
+**0.05** below `occ_none` in both species. Declared now.
+
+## Area check, declared now
+
+`occ_centre` and `occ_matched` must destroy areas within **2 percentage points**
+of each other, measured per image and reported as a distribution. If they do not,
+the primary comparison is void and is not reported. The displaced discs must also
+overlap the true eye/nose discs by no more than **10%** of their area, or they are
+not testing the periphery; images failing that are dropped from every arm.
+
+## Declared failure conditions
+
+- Positive control fails → nothing is claimed.
+- Area match or overlap bound fails → the primary comparison is void.
+- **H3 refuted** (`occ_centre` loses significantly more than `occ_matched`) → the
+  saliency finding does not translate into causal dependence, and
+  `docs/saliency_species.md` must say the attribution result overstated the
+  periphery. This is a real possible outcome and is written down now so it cannot
+  be reframed later.
+- If pose failures drop more than 15% of either species' images, the arm is
+  reported as covering a biased subset rather than the dataset.
+
+## Known limitations, stated in advance
+
+- **This measures dependence, not localisation.** A flat-filled disc still tells
+  the network something is missing; the model may compensate rather than fail.
+  Equal treatment across arms controls the comparison but not the absolute drop.
+- **`green` retains the crop silhouette**, already flagged in the shape/texture
+  controls. The periphery arm includes that outline, so "periphery" here means
+  fur, ears and head outline together, not fur alone.
+- **The ROI radii (0.16 × edge) are inherited unchanged** from the saliency
+  analysis and are not tuned here in either direction.
+- **The displaced discs may land on non-face background** on green, since the
+  periphery includes the flat screen. That makes `occ_matched` a conservative
+  control for H3: if anything it destroys *less* useful signal than a
+  face-restricted control would, which biases against H3 rather than for it.
+
+## Analysis code, fixed in advance
+
+`scripts/build_roi_occlusion.py` (dataset build, area and overlap checks) and
+`scripts/analyze_roi_occlusion.py` (paired tests, TOST, positive control), both
+committed before the datasets are built. Output:
+`outputs/occlusion/roi_occlusion_analysis.json`.
