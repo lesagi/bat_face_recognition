@@ -25,9 +25,16 @@ infeasible here. The aligner centres the crop on the face, so the keypoint
 centroid sits at the crop centre and a 180-degree rotation leaves 36% overlap.
 Measured before building; see Amendment 1.
 
-Destroyed pixels are filled with the **mean colour of the clean crop** — a
-per-image constant, so it carries no spatial information, and the identical rule
-in every arm, so the arms differ only in which pixels went.
+Destroyed pixels are filled with a **single global constant**, neutral grey.
+
+Not the crop's own mean colour, which is what the first version used. A per-image
+mean carries no *spatial* information but it does carry **colour** information,
+and three numbers of mean colour identify a bat at ROC-AUC 0.613 (mauritius) /
+0.734 (rousettus) with no model at all. That handed the `periphery` arm 76% of
+every image painted with an identity cue, and the positive control duly failed:
+the more the ablation destroyed, the more of the image became a summary of what
+had been destroyed. See Amendment 2 in the pre-registration. A global constant
+carries no per-image information of any kind.
 """
 
 from __future__ import annotations
@@ -47,6 +54,10 @@ from bat_data.quality_metrics import face_mask_from_green
 
 ARMS = ("none", "centre", "matched", "periphery")
 JPEG_QUALITY = 95
+
+# Neutral grey, identical for every image and both species. The one property that
+# matters is that it is not derived from the image.
+FILL_COLOUR = (128, 128, 128)
 POSE_WEIGHTS = "models/preprocessing/face_pose.pt"
 
 # green only. `original` is 93% solvable with the face deleted (arm 3C), so an
@@ -126,7 +137,9 @@ def build_species(species: str, source: str, *, device: str, force: bool) -> dic
             n_bounds_fail += 1
             continue
 
-        fill = img.reshape(-1, 3).mean(axis=0)
+        # Global constant, NOT the crop's mean. See the module docstring: a
+        # per-image mean colour is itself an identity cue worth ROC-AUC 0.61-0.73.
+        fill = np.asarray(FILL_COLOUR, dtype=np.float64)
         masks = {
             "none": np.zeros_like(centre),
             "centre": centre,
@@ -197,6 +210,7 @@ def build_species(species: str, source: str, *, device: str, force: bool) -> dic
         },
         "max_abs_area_diff": float(np.abs(df["area_matched"] - df["area_centre"]).max()) if df else None,
         "declared_bounds": {"max_area_diff": MAX_AREA_DIFF, "max_overlap": MAX_OVERLAP},
+        "fill_colour": list(FILL_COLOUR),
     }
     print(
         f"  [{species}] kept {len(kept)}/{len(manifest.records)} "

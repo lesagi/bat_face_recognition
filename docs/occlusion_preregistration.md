@@ -200,3 +200,69 @@ later.
 Pose detection succeeds on **100%** of images in both species, so the
 "drop pose failures from every arm" provision has no effect and the
 image-set-bias failure condition does not trigger.
+
+---
+
+## Amendment 2 (2026-08-26, after the first run — the positive control failed)
+
+**The first run is void by the criterion declared above, and the cause was a
+defect in the fill.** Recorded here rather than quietly re-run.
+
+### What happened
+
+| arm | mauritius median ROC-AUC | rousettus |
+|---|---|---|
+| `none` | 0.805 | 0.816 |
+| `centre` | 0.845 | 0.835 |
+| `matched` | 0.864 | 0.829 |
+| `periphery` | 0.825 | 0.834 |
+
+Destroying **76%** of every image cost **+0.004** (mauritius) and **+0.016**
+(rousettus) against the declared minimum of 0.05. Every ablation scored at or
+*above* the clean baseline. Positive control failed, so H3 and H4 were reported as
+not interpretable.
+
+### Why
+
+The fill was "the mean colour of the clean crop" — chosen because it is a
+per-image constant and therefore carries no *spatial* information. That reasoning
+was incomplete: a per-image constant still carries **colour** information, and
+colour is exactly the leak channel this project has been chasing since arm 3C.
+
+Measured directly, with no model — pairs scored only by the distance between the
+two images' mean colours:
+
+| species | ROC-AUC from mean colour alone |
+|---|---|
+| mauritius | **0.613** |
+| rousettus | **0.734** |
+
+Against trained models reaching 0.81–0.86 on these arms. So the `periphery` arm
+painted 76% of every image with a three-number summary that identifies the bat.
+The positive control could not have passed: the more of the image the ablation
+destroyed, the more of it was replaced by an identity cue.
+
+Every arm is affected, not just `periphery` — `centre` and `matched` each paint
+24% of the image with it.
+
+### The fix
+
+Fill with a **single global constant** — neutral grey (128, 128, 128), identical
+for every image and both species. A global constant carries no per-image
+information of any kind, colour included. Nothing else changes: the same masks,
+the same arms, the same image sets, the same hypotheses, metric, test, margin,
+positive control threshold and failure conditions.
+
+The first run's numbers are retained in
+`outputs/occlusion/roi_occlusion_analysis_meancolour_fill.json` as the record of a
+failed control, not as a result.
+
+### What this episode is
+
+The positive control did its job: it caught a defect in my own build that would
+otherwise have produced a confident, wrong answer about H3 — and note the
+direction it would have produced. `matched` scored *highest* of all four arms,
+which read naively says "destroying an area of periphery improves recognition".
+Without the control that would have been reported as evidence for the periphery
+finding. This is the fifth defect in this workstream caught by an internal
+consistency check rather than by inspection.
