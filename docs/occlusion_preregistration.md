@@ -144,3 +144,59 @@ not testing the periphery; images failing that are dropped from every arm.
 `scripts/analyze_roi_occlusion.py` (paired tests, TOST, positive control), both
 committed before the datasets are built. Output:
 `outputs/occlusion/roi_occlusion_analysis.json`.
+
+---
+
+## Amendment 1 (2026-08-26, before any dataset was built)
+
+**What changed:** the *construction* of `occ_matched`. **What did not change:** the
+hypotheses, the metric, the test, the equivalence margin, the positive control,
+the area and overlap bounds, or the failure conditions.
+
+The declared construction — three discs of identical radius displaced by a 180°
+rotation about the crop centre — **is infeasible on this data**, and that was
+established by measurement before anything was built. The aligner centres the
+crop on the face, so the eye/nose keypoint centroid sits essentially at the crop
+centre (measured: x = 0.504, y = 0.503 of the edge for mauritius; 0.546, 0.589
+for rousettus). Rotating about the centre therefore barely moves the discs:
+
+| displacement rule | mean overlap with the true discs | images meeting the declared bounds |
+|---|---|---|
+| 180° rotation (as declared) | **36.4%** | **3.0%** |
+| vertical reflection | 42.3% | 0.6% |
+
+Both violate the declared overlap bound of ≤10% on nearly every image, so the
+comparison as specified could not have been run.
+
+**Replacement construction.** `occ_matched` destroys the set of pixels that is
+(a) the same *count* as the eye+nose discs, (b) on the animal wherever possible,
+and (c) furthest from the eye+nose discs. Concretely: rank every pixel by
+distance from the eye/nose ROI, with on-animal pixels (from the green matte)
+ranked ahead of background, exclude the ROI itself, and take the top *N* where
+*N* is exactly the ROI's pixel count.
+
+Measured on the same sample:
+
+| property | value |
+|---|---|
+| area difference from `occ_centre` | **0.00000** — identical by construction |
+| overlap with the eye/nose discs | **0.00000** |
+| fraction of the destroyed region on the animal | mean **98.3%**, min 72.3% |
+| images meeting both declared bounds | **100%** |
+
+This is a *better* control than the one declared, not merely a feasible one. It
+is area-exact rather than approximately matched, and it destroys a comparable
+amount of *animal*: the eye+nose ROI is itself 98% (mauritius) / 90% (rousettus)
+on the animal, so both arms remove bat rather than one removing bat and the other
+removing flat green screen. That also removes the concern recorded under "Known
+limitations" that the control might land on background and thereby destroy
+nothing.
+
+The cost is that the region is a contiguous band rather than three discs, so
+shape and boundary length are no longer matched — only area, count of destroyed
+pixels, and on-animal fraction are. That is stated here rather than discovered
+later.
+
+Pose detection succeeds on **100%** of images in both species, so the
+"drop pose failures from every arm" provision has no effect and the
+image-set-bias failure condition does not trigger.
