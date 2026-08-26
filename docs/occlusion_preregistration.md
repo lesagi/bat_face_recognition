@@ -266,3 +266,34 @@ which read naively says "destroying an area of periphery improves recognition".
 Without the control that would have been reported as evidence for the periphery
 finding. This is the fifth defect in this workstream caught by an internal
 consistency check rather than by inspection.
+
+---
+
+## Amendment 3 (2026-08-26, after the grey-fill run) — outcome
+
+The re-run with a global constant fill removed the colour leak (fill-colour
+ROC-AUC exactly 0.500, down from 0.613/0.734). **The positive control still fails
+for mauritius**: `periphery` costs −0.021, i.e. destroying 76% of every image
+*improved* median ROC-AUC. rousettus passes (+0.083). The threshold was declared
+as "both species", so H3 and H4 are reported as not interpretable.
+
+Diagnosis, in `docs/occlusion_results.md`: six numbers — the per-channel mean and
+standard deviation of the face region, no spatial information — identify a bat at
+0.777 (mauritius) / 0.792 (rousettus), against trained models at 0.805 / 0.816 on
+the same images. A global statistic survives the destruction of any particular
+region, so the control could not have passed for a cue of this kind. Grey-world
+white balancing does **not** remove it (0.777 → 0.778), so it is not simple
+per-video illumination, and one video per bat leaves genuine individual colouration
+and a per-video capture signature indistinguishable.
+
+**A flaw in this pre-registration, recorded rather than glossed.** The 0.05
+control threshold was set without checking it was detectable. The per-fold spread
+in this design is ~0.12, so with 20 folds a 0.05 median shift sits at roughly 2
+standard errors, and the mauritius `periphery` interval [−0.051, +0.119] contains
+both zero and the threshold. The control was underpowered as specified. Its
+failure is therefore partly a statement about the threshold rather than only about
+the data, and this design does not separate the two.
+
+No further re-run is proposed. A third attempt would be fitting the experiment to
+the answer, and the diagnosis says the premise of the arm — that the cue is
+localised — does not hold for one of the two species.
