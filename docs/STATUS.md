@@ -161,6 +161,12 @@ arm and the six-number baseline. They are one-off historical builds, not support
 entry points, and are kept for that reason. The segmentation checkpoint they used
 is outside the tracked tree.
 
+**The narrative version.** `reports/methods_and_findings.html` is the same material
+written for a reader who knows the bats but not the statistics — every technique
+explained before it is applied, and each refuted claim shown next to what killed
+it. Its section 12 mirrors this file. Published at
+`https://claude.ai/code/artifact/293ffe46-0c91-4e74-9925-5f8f0f129a79`.
+
 **Docs map:** `quality_parity.md` (datasets) · `background_leakage.md` +
 `phase3_results.md` (the leak, and the controls) · `saliency_species.md` +
 `saliency_preregistration.md` (attention) · `occlusion_results.md` +
