@@ -40,12 +40,12 @@ DISPLAY = 224  # render size for the grid
 BATS = {
     "mauritius": {
         "manifest": "data/manifests/mauritius_original_bg_manifest.csv",
-        "path": "data/processed/mauritius/video/not_augmented/original_bg/"
+        "path": "data/processed/mauritius/video/not_augmented/base/original_bg/"
         "m--20230902_052035--20230902_052035.1408.jpg",
     },
     "rousettus": {
         "manifest": "data/manifests/rousettus_original_bg_manifest.csv",
-        "path": "data/processed/rousettus/video/not_augmented/original_bg/"
+        "path": "data/processed/rousettus/video/not_augmented/base/original_bg/"
         "r--arrowhead--VID_20250909_144129.100.jpg",
     },
 }
@@ -334,7 +334,7 @@ def render_gradcam_resolution(device: str, out: Path, target: str) -> None:
     models = [("ArcFace", "arcface"), ("AdaFace", "adaface")]
     for sp, spec in BATS.items():
         fname = Path(spec["path"]).name
-        src = Path(f"data/processed/{sp}/video/not_augmented/320/original_bg/{fname}")
+        src = Path(f"data/processed/{sp}/video/not_augmented/base_320/original_bg/{fname}")
         if not src.exists():  # fall back to the original committed crop
             src = Path(spec["path"])
         orig = np.asarray(Image.open(src).convert("RGB").resize((DISPLAY, DISPLAY)))
@@ -422,7 +422,7 @@ def pick_gallery_images(species: str, n_bats: int, per_bat: int, seed: int):
     """Seeded pick of n_bats individuals × per_bat images from the 320 build."""
     import random
 
-    root = Path(f"data/processed/{species}/video/not_augmented/320/original_bg")
+    root = Path(f"data/processed/{species}/video/not_augmented/base_320/original_bg")
     by_id: dict[str, list[Path]] = {}
     for f in sorted(root.glob("*.jpg")):
         parts = f.name.split("--")

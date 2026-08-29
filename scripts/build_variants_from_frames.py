@@ -281,7 +281,7 @@ def main() -> None:
     seg_weights = args.seg_weights or defaults["seg_weights"]
     out = Path(
         args.out_root
-        or f"data/processed/{args.species}/video/not_augmented/{args.edge}"
+        or f"data/processed/{args.species}/video/not_augmented/base_{args.edge}"
     )
     for v in VARIANTS:
         (out / v).mkdir(parents=True, exist_ok=True)

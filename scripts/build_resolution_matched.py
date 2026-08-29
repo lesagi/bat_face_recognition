@@ -245,7 +245,7 @@ def build_blur(force: bool) -> dict[str, Any]:
     # that bat's video was captured, not how its background was treated.
     written = {}
     for bg in BACKGROUNDS:
-        outdir = pathlib.Path(f"data/processed/{SRC}/video/not_augmented/blur/{bg}_bg")
+        outdir = pathlib.Path(f"data/processed/{SRC}/video/not_augmented/blur/{bg}_bg")  # <identity>/ beneath
         outdir.mkdir(parents=True, exist_ok=True)
         jobs2 = [
             (p, str(outdir / pathlib.Path(p).name), float(sigma_by_ident[i]))

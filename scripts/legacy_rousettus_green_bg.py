@@ -36,9 +36,9 @@ from ultralytics import YOLO
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE_DIR = (
-    PROJECT_ROOT / "data/processed/rousettus/video/not_augmented/original_bg"
+    PROJECT_ROOT / "data/processed/rousettus/video/not_augmented/base/original_bg"
 )
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data/processed/rousettus/video/not_augmented/green_bg"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data/processed/rousettus/video/not_augmented/base/green_bg"
 DEFAULT_CHECKPOINT = (
     PROJECT_ROOT
     / "legacy/rousesttus_segmentation/training_results/runs/segment/"
@@ -85,7 +85,7 @@ def parse_args() -> argparse.Namespace:
 
 def image_paths(source_dir: Path) -> list[Path]:
     return sorted(
-        p for p in source_dir.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+        p for p in source_dir.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
     )
 
 
@@ -194,7 +194,8 @@ def main() -> int:
     }
 
     for image_path in selected_images:
-        out_path = output_dir / image_path.name
+        out_path = output_dir / image_path.relative_to(source_dir)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         if out_path.exists() and not args.overwrite:
             report["skipped_existing"] += 1
             continue

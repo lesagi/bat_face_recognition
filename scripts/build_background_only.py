@@ -123,7 +123,7 @@ def build(species: str, background: str, *, force: bool = False) -> dict:
     src_path = _source_manifest(species, background)
     manifest = manifest_from_csv(src_path)  # verifies the .hash sidecar
 
-    outdir = pathlib.Path(f"data/processed/{species}/video/not_augmented/bgonly_{background}")
+    outdir = pathlib.Path(f"data/processed/{species}/video/not_augmented/bgonly/{background}")
     outdir.mkdir(parents=True, exist_ok=True)
     man_out = pathlib.Path(f"data/manifests/{species}_bgonly_{background}_manifest.csv")
     if man_out.exists() and not force:
@@ -146,7 +146,8 @@ def build(species: str, background: str, *, force: bool = False) -> dict:
             continue
         coverages.append(coverage)
         n_high += int(coverage >= COVERAGE_WARN)
-        dst = outdir / p.name
+        dst = outdir / rec.identity / p.name
+        dst.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(dst), out_img, [cv2.IMWRITE_JPEG_QUALITY, 95])
         n_written += 1
         # `background` stays the source literal -- bat_core.ImageRecord pins it to

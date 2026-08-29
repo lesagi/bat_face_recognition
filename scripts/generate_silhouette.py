@@ -55,7 +55,7 @@ def main() -> None:
             print(f"[{sp}] SKIP: {src_csv} not found")
             continue
         df = pd.read_csv(src_csv)
-        out_root = Path(f"data/processed/{sp}/video/not_augmented/silhouette")
+        out_root = Path(f"data/processed/{sp}/video/not_augmented/silhouette")  # <identity>/ beneath
         out_root.mkdir(parents=True, exist_ok=True)
 
         new_paths, n_ok = [], 0

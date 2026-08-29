@@ -9,7 +9,7 @@ Historical one-off, kept for provenance rather than reuse
 ---------------------------------------------------------
 Not a supported entry point and not wired into the CLI. It is retained because it
 is the only committed record of how a dataset the project still depends on was
-produced: `data/processed/rousettus/video/not_augmented/green_bg` (1093 images),
+produced: `data/processed/rousettus/video/not_augmented/base/green_bg` (1093 images),
 which underpins the published rousettus green arm, the 1059-image intersection
 manifest, every ROI-occlusion arm, and the six-number colour baseline. `data/` is
 gitignored and the segmentation checkpoint it used lives outside the tracked tree,

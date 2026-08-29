@@ -103,7 +103,7 @@ def build_species(species: str, source: str, *, device: str, force: bool) -> dic
     manifest = manifest_from_csv(pathlib.Path(source))
     pose = YOLOPoseEstimator({"weights": POSE_WEIGHTS, "device": device})
     outdirs = {
-        arm: pathlib.Path(f"data/processed/{species}/video/not_augmented/occ_roi_{arm}")
+        arm: pathlib.Path(f"data/processed/{species}/video/not_augmented/occ_roi/{arm}")
         for arm in ARMS
     }
     for d in outdirs.values():
@@ -150,7 +150,9 @@ def build_species(species: str, source: str, *, device: str, force: bool) -> dic
             out = img.copy()
             if mask.any():
                 out[mask] = fill.astype(img.dtype)
-            cv2.imwrite(str(outdirs[arm] / src.name), out, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+            dst = outdirs[arm] / rec.identity / src.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(dst), out, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
 
         kept.append(rec)
         stats.append(
@@ -182,10 +184,10 @@ def build_species(species: str, source: str, *, device: str, force: bool) -> dic
             continue
         recs = [
             ImageRecord(
-                path=outdirs[arm] / pathlib.Path(r.path).name,
+                path=outdirs[arm] / r.identity / pathlib.Path(r.path).name,
                 identity=r.identity, species=r.species, background=r.background,
                 source=r.source, augmented=r.augmented, split=r.split,
-                quality=float(compute_quality(outdirs[arm] / pathlib.Path(r.path).name)),
+                quality=float(compute_quality(outdirs[arm] / r.identity / pathlib.Path(r.path).name)),
             )
             for r in kept
         ]

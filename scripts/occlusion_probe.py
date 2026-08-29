@@ -113,7 +113,7 @@ def build_variant(species: str, arm: str, fn) -> str:
     if pathlib.Path(man).exists():
         return man
     src = pd.read_csv(f"data/manifests/{species}_original_bg_manifest.csv")
-    outdir = pathlib.Path(f"data/processed/{species}/video/not_augmented/occl_{arm}")
+    outdir = pathlib.Path(f"data/processed/{species}/video/not_augmented/occl/{arm}")
     outdir.mkdir(parents=True, exist_ok=True)
     paths, n = [], 0
     for _, row in src.iterrows():
@@ -126,7 +126,8 @@ def build_variant(species: str, arm: str, fn) -> str:
         if img is None or mask is None:
             paths.append(row["path"])
             continue
-        dst = outdir / p.name
+        dst = outdir / row["identity"] / p.name
+        dst.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(dst), fn(img, mask), [cv2.IMWRITE_JPEG_QUALITY, 95])
         paths.append(str(dst))
         n += 1
