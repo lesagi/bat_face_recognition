@@ -86,6 +86,11 @@ K-fold: `--fold N` re-splits the manifest in memory (see "Runtime re-split" belo
 
 ## Where to find things
 
+- **Start here: `docs/STATUS.md`** — what is defensible, what has been refuted (five
+  claims so far), what is open, every check that was run with its verdict, the traps
+  that silently produce wrong answers, and what to do next. Written to be picked up
+  cold.
+
 - **Phase 3 controls (start here for any species or background claim)**:
   `docs/phase3_results.md` — 624 runs. Two results override earlier docs. (1) A
   model trained on images with the face *inpainted away* scores 0.831/0.780 on
