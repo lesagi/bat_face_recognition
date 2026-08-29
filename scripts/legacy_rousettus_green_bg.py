@@ -5,6 +5,20 @@ This is intentionally a temporary data-prep script, not a supported package
 entry point. It loads the legacy rousettus YOLO segmentation checkpoint,
 segments each image in original_bg, paints non-mask pixels green, and writes
 the result with the same filename.
+
+Historical one-off, kept for provenance rather than reuse
+---------------------------------------------------------
+Not a supported entry point and not wired into the CLI. It is retained because it
+is the only committed record of how a dataset the project still depends on was
+produced: `data/processed/rousettus/video/not_augmented/green_bg` (1093 images),
+which underpins the published rousettus green arm, the 1059-image intersection
+manifest, every ROI-occlusion arm, and the six-number colour baseline. `data/` is
+gitignored and the segmentation checkpoint it used lives outside the tracked tree,
+so deleting this would leave no account of how those pixels came to exist.
+
+Was `tmp_*` at the repository root until 2026-08-29; renamed here so the name says
+what it is. PROJECT_ROOT was adjusted for the extra directory level at the same
+time -- the defaults still resolve to the repository root.
 """
 
 from __future__ import annotations
@@ -20,7 +34,7 @@ import numpy as np
 from ultralytics import YOLO
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE_DIR = (
     PROJECT_ROOT / "data/processed/rousettus/video/not_augmented/original_bg"
 )

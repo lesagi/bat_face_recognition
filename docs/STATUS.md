@@ -151,6 +151,16 @@ CONFIGS="exp_a exp_b" MLFLOW_EXP=<name> LOG_DIR=outputs/<arm> \
 uv run python scripts/aggregate_kfold.py --experiment-name <name> --output <parquet>
 ```
 
+**Dataset provenance.** `data/` is gitignored, so the only committed record of how
+some datasets were built is the scripts. In particular
+`scripts/legacy_rousettus_green_bg.py` (plus `legacy_rousettus_crop_masks.py` and
+`legacy_rousettus_crop_seg_data.py`) produced
+`data/processed/rousettus/video/not_augmented/green_bg` — 1093 images underpinning
+the published rousettus green arm, the intersection manifest, every ROI-occlusion
+arm and the six-number baseline. They are one-off historical builds, not supported
+entry points, and are kept for that reason. The segmentation checkpoint they used
+is outside the tracked tree.
+
 **Docs map:** `quality_parity.md` (datasets) · `background_leakage.md` +
 `phase3_results.md` (the leak, and the controls) · `saliency_species.md` +
 `saliency_preregistration.md` (attention) · `occlusion_results.md` +
