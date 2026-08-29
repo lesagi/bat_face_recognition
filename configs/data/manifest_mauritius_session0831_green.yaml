@@ -1,0 +1,47 @@
+# The 14 identities filmed on 2023-08-31, a subset of the pool40 images.
+# Mauritius's answer to rousettus (12 bats in a single 9-minute window): it asks
+# whether the six-number colour baseline survives when session variation is
+# largely removed. Measured before training: it does -- 0.833 median over 20
+# folds against 0.849 for the 7-week set and 0.826 for rousettus, so the cue is
+# not primarily session or lighting.
+#
+# Built by scripts/build_variants_from_frames.py (--name-style compact
+# --out-layout by-identity) and scripts/build_pool_manifests.py.
+# 680 images, 14 identities, 13-88 images per bat (median 40).
+# Baked split 8/3/3 identities; the three backgrounds share one
+# partition, so they differ only in what sits behind the bat.
+#
+# Images live under data/processed/mauritius/video/not_augmented/pool40/, one
+# subdirectory per identity so the frames can be reviewed a bat at a time, with
+# per-bat contact sheets in pool40/_review/. Filenames are
+# m--<identity>--f<frame>.jpg: the identity appears once, unlike the older
+# m--<id>--<id>.<frame>.jpg.
+#
+# NOTE the curation asymmetry: the 16 original bats had their frames manually
+# culled below the frontal filter's keeps (e.g. 22 of 29, 55 of 109); the 24 new
+# ones are the filter's raw output. Review the contact sheets before trusting a
+# result that depends on the new bats.
+#
+# `background: green_session0831` is a LABEL, not a filter. The CSV keeps the `green`
+# literal that bat_core.ImageRecord requires.
+manifest_path: data/manifests/mauritius_session0831_green_manifest.csv
+species: mauritius
+background: green_session0831
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.2
+test_fraction: 0.2
+batch_size: 32
+num_workers: 0
+
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`; derives split_seed
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 3
+min_test_identities: 2
+max_test_identities: 5
+min_train_identities: 7 # 14 identities total

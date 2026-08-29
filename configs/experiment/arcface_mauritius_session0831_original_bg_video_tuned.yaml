@@ -1,0 +1,14 @@
+# @package _global_
+# Arcface on the session0831 mauritius arm, original backgrounds.
+#   bat-cli train --experiment arcface_mauritius_session0831_original_bg_video_tuned --fold N
+defaults:
+  - override /data: manifest_mauritius_session0831_original
+  - override /model: arcface
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: original_session0831
+  source: video

@@ -1,0 +1,14 @@
+# @package _global_
+# Arcface on the pool40 mauritius arm, random backgrounds.
+#   bat-cli train --experiment arcface_mauritius_pool40_random_bg_video_tuned --fold N
+defaults:
+  - override /data: manifest_mauritius_pool40_random
+  - override /model: arcface
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: random_pool40
+  source: video

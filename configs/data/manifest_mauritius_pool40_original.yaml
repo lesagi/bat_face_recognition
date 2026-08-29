@@ -1,0 +1,47 @@
+# 40 identities — more than double the 16 the project has used, drawn from the 91
+# raw videos of which only 16 were ever processed. The point is the identity
+# count: the design's minimum detectable difference of 0.440 ROC-AUC is driven by
+# having 12-16 individuals, and this is the only route in this project to
+# improving it. Spans 9 weeks, so it is NOT session-controlled -- use
+# session0831 for that.
+#
+# Built by scripts/build_variants_from_frames.py (--name-style compact
+# --out-layout by-identity) and scripts/build_pool_manifests.py.
+# 1952 images, 40 identities, 7-94 images per bat (median 46).
+# Baked split 28/6/6 identities; the three backgrounds share one
+# partition, so they differ only in what sits behind the bat.
+#
+# Images live under data/processed/mauritius/video/not_augmented/pool40/, one
+# subdirectory per identity so the frames can be reviewed a bat at a time, with
+# per-bat contact sheets in pool40/_review/. Filenames are
+# m--<identity>--f<frame>.jpg: the identity appears once, unlike the older
+# m--<id>--<id>.<frame>.jpg.
+#
+# NOTE the curation asymmetry: the 16 original bats had their frames manually
+# culled below the frontal filter's keeps (e.g. 22 of 29, 55 of 109); the 24 new
+# ones are the filter's raw output. Review the contact sheets before trusting a
+# result that depends on the new bats.
+#
+# `background: original_pool40` is a LABEL, not a filter. The CSV keeps the `original`
+# literal that bat_core.ImageRecord requires.
+manifest_path: data/manifests/mauritius_pool40_original_manifest.csv
+species: mauritius
+background: original_pool40
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0
+
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`; derives split_seed
+fold_base_seed: 1000
+min_val_identities: 3
+max_val_identities: 6
+min_test_identities: 4
+max_test_identities: 10
+min_train_identities: 20 # 40 identities total

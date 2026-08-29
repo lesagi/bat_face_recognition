@@ -89,14 +89,27 @@ def sample_evenly(items: list[Path], n: int) -> list[Path]:
 
 
 def collect_groups(
-    frames_root: Path, prefix: str, layout: str, sample: int
+    frames_root: Path, prefix: str, layout: str, sample: int, name_style: str = "legacy"
 ) -> dict[str, list[tuple[Path, str]]]:
     """Group source frames by identity → list of (frame_path, output_name).
 
     ``subdirs`` (mauritius): identity = subdir name; frame id parsed from
-    ``__f<n>__``; output name constructed as ``<prefix>--<id>--<id>.<frame>.jpg``.
+    ``__f<n>__``.
     ``flat`` (rousettus): identity = the ``class`` token of the recognition-form
     filename ``<prefix>--<class>--<rest>``; the input filename is preserved.
+
+    ``name_style`` controls the mauritius output name:
+
+    ``legacy``   ``<prefix>--<id>--<id>.<frame>.jpg`` — what the existing dataset
+                 uses. The identity appears twice, because for mauritius the
+                 identity *is* the video stem and the id token was built from it.
+    ``compact``  ``<prefix>--<id>--f<frame:06d>.jpg`` — same three-token grammar,
+                 identity written once. Still globally unique because the class
+                 token is in the name, which matters: several joins in this
+                 project key on basename alone.
+
+    Default is ``legacy`` so re-running this script cannot silently rename the
+    frozen datasets.
     """
     groups: dict[str, list[tuple[Path, str]]] = {}
     if layout == "subdirs":
@@ -106,7 +119,12 @@ def collect_groups(
             for fp in sample_evenly(sorted(d.glob("*.jpg")), sample):
                 tok = re.search(r"__f(\d+)__", fp.name)
                 frame_id = int(tok.group(1)) if tok else len(items)
-                items.append((fp, f"{prefix}--{stem}--{stem}.{frame_id}.jpg"))
+                name = (
+                    f"{prefix}--{stem}--f{frame_id:06d}.jpg"
+                    if name_style == "compact"
+                    else f"{prefix}--{stem}--{stem}.{frame_id}.jpg"
+                )
+                items.append((fp, name))
             if items:
                 groups[stem] = items
     elif layout == "flat":
@@ -240,6 +258,21 @@ def main() -> None:
         help="Rotate to level the eyes. --no-eye-align falls back to a mask-centred square crop.",
     )
     ap.add_argument("--pose-crop-margin", type=float, default=0.12)
+    ap.add_argument(
+        "--name-style",
+        choices=("legacy", "compact"),
+        default="legacy",
+        help="compact writes <prefix>--<id>--f<frame>.jpg instead of repeating the "
+        "identity twice. Default legacy so existing datasets are untouched.",
+    )
+    ap.add_argument(
+        "--out-layout",
+        choices=("flat", "by-identity"),
+        default="flat",
+        help="by-identity writes <variant>/<identity>/<file> instead of one flat "
+        "directory per variant, so the frames can be reviewed a bat at a time. "
+        "build_manifest walks recursively, so either layout loads.",
+    )
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -256,7 +289,9 @@ def main() -> None:
     if montage_dir:
         montage_dir.mkdir(parents=True, exist_ok=True)
 
-    groups = collect_groups(frames_root, defaults["prefix"], defaults["layout"], args.sample)
+    groups = collect_groups(
+        frames_root, defaults["prefix"], defaults["layout"], args.sample, args.name_style
+    )
     if not groups:
         raise SystemExit(f"no frames found under {frames_root} (layout={defaults['layout']})")
 
@@ -329,7 +364,9 @@ def main() -> None:
                 color=(0, 0, 0),
             )
             for v, img in variants.items():
-                if cv2.imwrite(str(out / v / name), img, [cv2.IMWRITE_JPEG_QUALITY, 95]):
+                dest_dir = out / v / stem if args.out_layout == "by-identity" else out / v
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                if cv2.imwrite(str(dest_dir / name), img, [cv2.IMWRITE_JPEG_QUALITY, 95]):
                     counts[v] += 1
             if montage_dir:
                 labeled = draw_pose(af.image, af.keypoints)

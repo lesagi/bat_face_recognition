@@ -1,0 +1,14 @@
+# @package _global_
+# Adaface on the pool40 mauritius arm, original backgrounds.
+#   bat-cli train --experiment adaface_mauritius_pool40_original_bg_video_tuned --fold N
+defaults:
+  - override /data: manifest_mauritius_pool40_original
+  - override /model: adaface
+  - override /loss: adaface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: original_pool40
+  source: video
