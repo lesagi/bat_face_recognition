@@ -132,8 +132,66 @@ but any claim of the form "the model recognises facial features" now needs to
 clear the six-number baseline first, and none of the numbers in this project
 currently do.
 
-**Recommended next measurement, and it is cheap.** Score the existing green
-checkpoints against the six-number descriptor per fold, paired, exactly as
-`scripts/probe_background_leakage.py` does for the background. That gives a
-per-fold margin of "model over global colour" with a confidence interval, and it
-is the number that says whether the models have learned anything spatial at all.
+## The paired measurement — no model beats six numbers
+
+Done, in `scripts/probe_face_colour.py`, built as a sibling of
+`probe_background_leakage.py`: identical per-fold split resolution, identical pair
+construction, identical metric. Only the descriptor differs. Output:
+`outputs/leakage/face_colour_probe.json`.
+
+The descriptor scores **0.849** (mauritius) and **0.830** (rousettus) as a median
+over the same 20 folds the models were evaluated on. Paired fold by fold, model
+minus descriptor:
+
+| species | model | model | descriptor | margin | 95% CI | model wins |
+|---|---|---|---|---|---|---|
+| mauritius | Siamese | 0.823 | 0.849 | −0.014 | [−0.189, +0.099] | 9/20 |
+| mauritius | ArcFace | 0.815 | 0.849 | +0.001 | [−0.087, +0.086] | 10/20 |
+| mauritius | AdaFace | 0.849 | 0.849 | +0.042 | [−0.061, +0.112] | 13/20 |
+| rousettus | Siamese | 0.670 | 0.830 | **−0.149** | **[−0.304, −0.081]** | **2/20** |
+| rousettus | ArcFace | 0.858 | 0.830 | +0.021 | [−0.084, +0.088] | 11/20 |
+| rousettus | AdaFace | 0.873 | 0.830 | +0.052 | [−0.103, +0.115] | 12/20 |
+
+**Not one of the six margins has an interval excluding zero on the positive
+side.** The best is AdaFace on mauritius, +0.042 with a CI spanning zero. The
+Siamese network on rousettus is **significantly worse** than six global colour
+numbers — margin −0.149, interval excluding zero, winning 2 folds out of 20.
+
+Fairness check, because it would otherwise be the first objection: the descriptor
+is standardised using the **train** split's statistics, not the test split's, so
+it gets no information the model did not also have. Fitting on test instead
+(transductive) gives 0.831 / 0.831 — *lower* for mauritius. The fair version is
+not the flattering one. Without any standardisation the descriptor still reaches
+0.750 / 0.773.
+
+### What this does and does not mean
+
+It does **not** overturn the project's central claim. Individual bats *are*
+identifiable well above chance — the descriptor itself proves that, at 0.83–0.85.
+
+It does mean that **"a trained network recognises bat faces" is not supported by
+these numbers.** Three model families, two species, 20 folds each, and none of
+them demonstrably beats six numbers that contain no spatial information at all.
+Whatever the networks are contributing over a global colour summary is smaller
+than this design can resolve.
+
+And it is the same shape as the background result. `docs/background_leakage.md`
+found that no model significantly beats a scorer that never sees a face, on
+`original`. This finds that no model significantly beats a scorer that sees only
+six colour statistics, on `green`. Both follow from one video per bat: whatever is
+constant within a clip — the scene behind the animal, or the animal's own colour
+rendition — is a free identity cue that no identity-disjoint split can remove.
+
+### The open question, and why this data cannot close it
+
+The six numbers may be measuring something real. Individuals plausibly do differ
+in coat colour and texture statistics, and if so this is a legitimate biological
+answer to "what distinguishes individuals" — just not the one the project has been
+arguing for, and not one that needs a neural network. The alternative is a
+per-video capture signature that survives grey-world white balancing.
+
+One video per bat makes those indistinguishable. **Separating them needs two
+recording sessions for at least a few individuals** — the same requirement the
+background leak generates. That is the single most valuable piece of new data this
+project could collect, and it is now implied by two independent results rather
+than one.
