@@ -63,20 +63,37 @@ cvat/
 !configs/data/
 !configs/data/*.yaml
 
-# data/ holds no tracked payload, but its layout documentation must survive a
-# fresh clone -- otherwise nothing records what the 57 manifests are or which
-# directories are dead. Descend into the directories, keep ignoring their
-# contents, whitelist only the docs.
-!data/annotations/
-data/annotations/*
-!data/annotations/face_pose/
-data/annotations/face_pose/*
-!data/manifests/
-data/manifests/*
+# data/ payload stays out of git, but three things must survive a fresh clone:
+#   1. the layout documentation
+#   2. the 57 manifests -- the reproducibility contract; manifest_hash goes into
+#      every MLflow run, and docs/manifest_hash_migration.md exists because
+#      their history is scientifically meaningful (~0.7 MB compressed/version)
+#   3. the hand-made annotations -- irreplaceable human work (~0.06 MB of text)
+#
+# Images, video, extracted frames and everything under processed/ stay ignored.
+# They are write-once binaries that need a backup, not version control, and
+# git-lfs would cost a paid GitHub plan while doubling the local footprint.
+#
+# Idiom: ignore everything, re-include DIRECTORIES only (trailing slash) so git
+# descends into them, then whitelist individual files.
 !data/README.md
+
+!data/manifests/
+data/manifests/**
+!data/manifests/INDEX.md
+!data/manifests/*.csv
+!data/manifests/*.hash
+
+!data/annotations/
+data/annotations/**
+!data/annotations/**/
 !data/annotations/README.md
 !data/annotations/face_pose/README.md
-!data/manifests/INDEX.md
+# every .txt under annotations/ is a YOLO label; ** covers both the flat
+# labels/ dirs and the split labels/{train,val}/ ones
+!data/annotations/**/*.txt
+!data/annotations/**/data.yaml
+!data/annotations/**/annotations.xml
 **/chosen_model/
 
 # training outputs, run scratch, and stray auto-downloaded weights

@@ -1,0 +1,5 @@
+path: /home/sagilevi1/bat_face_rec_project/data/interim/rousettus/video/segmentation/yolo_dataset
+train: images/train
+val: images/val
+names:
+  0: bat_face
