@@ -57,8 +57,8 @@ def montage(over_dir: Path, out: Path, cols: int = 7) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--videos-dir", default="data/raw/mauritius/m_videos")
-    ap.add_argument("--output", default="data/processed/mauritius_frontal")
+    ap.add_argument("--videos-dir", default="data/raw/mauritius/video")
+    ap.add_argument("--output", default="data/work/mauritius_frontal")
     ap.add_argument("--n-videos", type=int, default=40)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--stride", type=int, default=2, help="Read every Nth frame (sequential).")

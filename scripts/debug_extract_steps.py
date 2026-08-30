@@ -69,7 +69,7 @@ def _missing(label: str, why: str) -> np.ndarray:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--videos-dir", default="data/raw/mauritius/m_videos")
+    ap.add_argument("--videos-dir", default="data/raw/mauritius/video")
     ap.add_argument("--output", default="data/processed/mauritius_aligned/_debug")
     ap.add_argument("--n-videos", type=int, default=50)
     ap.add_argument("--frames-per-video", type=int, default=6)

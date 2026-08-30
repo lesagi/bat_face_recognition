@@ -31,7 +31,7 @@ def _overlay(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--videos-dir", default="data/raw/mauritius/m_videos")
+    ap.add_argument("--videos-dir", default="data/raw/mauritius/video")
     ap.add_argument("--videos", required=True, help="Comma-separated video stems (the bats).")
     ap.add_argument("--output", default="data/processed/mauritius_seg_review")
     ap.add_argument("--seg-weights", default="models/preprocessing/face_seg_mauritius_v2.pt")

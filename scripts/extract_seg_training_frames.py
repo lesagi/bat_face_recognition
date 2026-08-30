@@ -51,7 +51,7 @@ def _contact_sheet(thumbs: list[np.ndarray], cols: int = 4) -> np.ndarray:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--videos-dir", default="data/raw/mauritius/m_videos")
+    ap.add_argument("--videos-dir", default="data/raw/mauritius/video")
     ap.add_argument("--output", default="data/processed/mauritius_seg_train_candidates")
     ap.add_argument("--detector-weights", default="legacy/face_detection/chosen_model/best.pt")
     ap.add_argument("--device", default="cuda:0")

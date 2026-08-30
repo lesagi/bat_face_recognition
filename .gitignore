@@ -62,6 +62,21 @@ cvat/
 **/data/*
 !configs/data/
 !configs/data/*.yaml
+
+# data/ holds no tracked payload, but its layout documentation must survive a
+# fresh clone -- otherwise nothing records what the 57 manifests are or which
+# directories are dead. Descend into the directories, keep ignoring their
+# contents, whitelist only the docs.
+!data/annotations/
+data/annotations/*
+!data/annotations/face_pose/
+data/annotations/face_pose/*
+!data/manifests/
+data/manifests/*
+!data/README.md
+!data/annotations/README.md
+!data/annotations/face_pose/README.md
+!data/manifests/INDEX.md
 **/chosen_model/
 
 # training outputs, run scratch, and stray auto-downloaded weights

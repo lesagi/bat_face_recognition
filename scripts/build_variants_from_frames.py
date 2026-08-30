@@ -55,13 +55,13 @@ VARIANTS = ("original_bg", "green_bg", "random_bg", "face_ellipse")
 SPECIES_DEFAULTS = {
     "mauritius": {
         "prefix": "m",
-        "frames_root": "data/processed/mauritius_frontal/_experiment_16/frames",
+        "frames_root": "data/work/mauritius_frontal/_experiment_16/frames",
         "seg_weights": "models/preprocessing/face_seg_mauritius_v2.pt",
         "layout": "subdirs",
     },
     "rousettus": {
         "prefix": "r",
-        "frames_root": "data/raw/rousettus/video/frontal_video_frames/rousettus-09_09_2025",
+        "frames_root": "data/interim/rousettus/video/frames",
         "seg_weights": (
             "legacy/rousesttus_segmentation_still/training_results/runs/"
             "segment/bat_face_seg/weights/best.pt"
