@@ -41,9 +41,66 @@ packages/
 - **Pose runs on the mask-crop, not the full frame.** `models/preprocessing/face_pose.pt` was trained on tight square face crops (`legacy/face_annotation_eyes_nose/`, 43 labeled faces filling the frame), so full-frame inference wrecks keypoints (border/nose misdetections → tilted alignment). Segmentation runs on the full frame; pose runs on the mask-centered square crop with keypoints mapped back to frame coords. See `scripts/build_variants_from_frames.py:pose_on_mask_crop`.
 - **No CSV output from new code.** The legacy TF stack emitted CSVs everywhere; the PyTorch eval/report path returns dataclasses and renders directly to the PDF. New dataset/analysis artifacts use Parquet (per-image tables) or JSON (summaries) — see `outputs/quality/`.
 - **Runtime re-split is opt-in, and `exact` sizing is frozen.** Manifests carry a baked `split` column; `bat_cli.runtime.resplit_manifest` re-partitions in memory only when `data.resplit` or `data.fold_id` is set. `IdentitySplitter(size_mode="exact")` must stay bit-identical — it reproduces the 90 published multi-seed runs (mauritius 12/2/2, rousettus 6/3/3). `size_mode="seeded"` treats `val_fraction`/`test_fraction` as **floors** and draws the actual identity counts from the seed, using a separate RNG stream so the identity-shuffle stream (and therefore `exact` mode) is untouched.
+- **A cull produces a new arm; it never mutates a published one.** `rebuild_dataset.py --arm <name>` writes `<arm>/`, `<arm>_320/` and `data/manifests/<species>_<arm>_*`. Regenerating an *existing* manifest re-splits it, changes `manifest_hash`, and severs every published MLflow run citing it. A directory walk also cannot reproduce the manifests that are not directory walks — `*_band_*` are 10-identity band-restricted subsets, `*_intersect_*` is an intersection with another background, `occl_*` are occlusion arms. The derived arms (`blur`, `recrop`, `bgonly`, `occ_roi`, `occl`, `silhouette`) each read a published manifest by name and belong to a concluded experiment, so they are rebuilt individually and on purpose.
+- **`data/curated/<species>/decisions.json` is the filter.** Do not curate by adding or deleting files under `keep/`, `unreviewed/`, or `dropped/` and leaving it at that — run `curate_frames.py --authority dirs --execute` so the JSON absorbs the change. Nothing is ever deleted, so any decision is reversible.
 - **`manifest_hash` in MLflow always means the on-disk hash.** `Manifest.from_records` folds `split` into the digest, so a re-split rehashes; log `bundle.source_manifest_hash`, never `bundle.manifest.manifest_hash`, or runs stop being comparable to the published ones.
 - **New MLflow params need an HP-audit entry.** `bat_tracking.hp_audit.filter_params` silently drops anything outside `KEEP`/`KEEP_PREFIXES` (the `split.` prefix is allowed).
 - **Hydra cfg → caller responsibility.** `bat_training` does not log Hydra cfg itself; the CLI does (avoids leaking Hydra into trainer internals).
+
+## Dataset generation (two stages)
+
+Curation and transformation are separate, because every transformed variant is
+downstream of one set of culled full-resolution frames. Filtering per variant
+directory does not scale — there are ten of them.
+
+```
+raw video ──extract, keep everything scoreable──▶ data/curated/<species>/
+                                                     decisions.json   ← edit this
+                                                     keep/ unreviewed/ dropped/
+                                                     thumbs/ review/*.html
+                                                          │
+                              rebuild_dataset.py ─────────┘
+                                                          ▼
+                            <arm>/ + <arm>_320/  ──▶  data/manifests/<species>_<arm>_*.csv
+```
+
+**Stage 1 — the cull is data, not directory state.** `decisions.json` holds one
+verdict per frame (`keep` / `drop` / `undecided`) and is the single source of
+truth. Two review surfaces feed it, and either can win; every run ends by
+relocating files so the tree matches the JSON, so the two cannot drift.
+
+```bash
+# extract the reviewable superset (every frame with a usable det+seg+pose)
+uv run python scripts/build_frontal_dataset.py --videos <list.json|stems> \
+    --keep-all --output data/curated/<species>/_staging --device cuda:0
+uv run python scripts/curate_frames.py --species <sp> --init --execute
+
+# review: open the sheets, click K/D/U, Export…  (saves to localStorage as you go)
+uv run python scripts/curate_frames.py --species <sp> --sheets
+uv run python scripts/curate_frames.py --species <sp> \
+    --authority html --import <export.json> --execute
+# …or drag rejects into dropped/ in a file manager, then
+uv run python scripts/curate_frames.py --species <sp> --authority dirs --execute
+```
+
+**Stage 2 — one command rebuilds everything downstream.**
+
+```bash
+uv run python scripts/rebuild_dataset.py --species <sp> --arm <name> --execute
+uv run python scripts/rebuild_dataset.py --list-derived   # what is NOT auto-rebuilt
+```
+
+Notes that are easy to get wrong:
+
+- **Three states, not two.** Re-extraction surfaces frames no human ever ruled
+  on. `drop` would falsely imply rejection; `keep` would silently change the
+  dataset. `undecided` is the honest answer and is excluded from builds.
+- Frames are keyed `<identity>/f<frame:06d>` — on the frame number, not the
+  filename, which carries a mask-area suffix that shifts if segmentation is
+  re-run. The key survives re-extraction; the filename does not.
+- Dry-run is the default for both scripts. Nothing moves without `--execute`.
+- `build_frontal_dataset.py` without `--keep-all` keeps its original destructive
+  behaviour, so the historical builds stay reproducible.
 
 ## Common operations
 
@@ -90,6 +147,18 @@ K-fold: `--fold N` re-splits the manifest in memory (see "Runtime re-split" belo
   claims so far), what is open, every check that was run with its verdict, the traps
   that silently produce wrong answers, and what to do next. Written to be picked up
   cold.
+
+- **Curating which frames the model sees**: `data/curated/<species>/decisions.json`
+  plus the contact sheets at `data/curated/<species>/review/index.html`. See
+  "Dataset generation" above. Current state (mauritius, 2026-09-01): a 32-identity
+  superset of 6,114 frames — all 22 usable 31-August recordings plus 10 other-day
+  bats (seed 831, `outputs/quality/curation_target_set.json`). 1,179 frames are
+  `keep`, seeded from the prior human cull and verified to reproduce it exactly
+  (100% of 1,179, zero unmatched). The 8 newly-processed 31-August bats are
+  `undecided` and need a first review pass before an arm built from this cull
+  covers all 32. `20230831_161613` is deliberately excluded — a 1.5 s false start
+  restarted 7 s later as `20230831_161620`, so treating it as its own identity
+  would put one bat in both train and test.
 
 - **Phase 3 controls (start here for any species or background claim)**:
   `docs/phase3_results.md` — 624 runs. Two results override earlier docs. (1) A
