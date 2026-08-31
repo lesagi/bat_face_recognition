@@ -179,11 +179,25 @@ Frames the gate rejected are listed first — those are the ones worth a human l
 
 
 def _index(species: str, per: list[tuple[str, int, int, int]]) -> str:
+    # Bats with no keeps at all have never been reviewed, and they are the whole
+    # job -- every other bat merely has frames a human declined to promote. Sort
+    # them to the top and say so, or they are indistinguishable in a 32-row table
+    # where every row has a nonzero undecided count.
+    per = sorted(per, key=lambda r: (r[2] > 0, r[0]))
     rows = "".join(
-        f'<tr><td><a href="{i}.html">{i}</a></td><td class="n">{n}</td>'
-        f'<td class="n">{k}</td><td class="n">{u}</td></tr>'
+        "<tr{cls}><td><a href='{i}.html'>{i}</a></td>"
+        "<td class='n'>{n}</td><td class='n'>{k}</td><td class='n'>{u}</td>"
+        "<td class='st'>{st}</td></tr>".format(
+            cls="" if k else " class='todo'",
+            i=i,
+            n=n,
+            k=k,
+            u=u,
+            st="reviewed" if k else "first pass needed",
+        )
         for i, n, k, u in per
     )
+    n_todo = sum(1 for r in per if not r[2])
     tot, totk, totu = sum(p[1] for p in per), sum(p[2] for p in per), sum(p[3] for p in per)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -195,13 +209,19 @@ th,td{{padding:8px 14px;text-align:left;border-bottom:1px solid var(--line)}}
 th{{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}}
 td.n{{text-align:right;font-variant-numeric:tabular-nums}}
 tr:last-child td{{border-bottom:none}}
+tr.todo{{background:var(--und-bg)}}
+tr.todo td:first-child{{box-shadow:inset 3px 0 0 var(--und)}}
+td.st{{font-size:12px;color:var(--muted)}}
+tr.todo td.st{{color:var(--und);font-weight:600}}
 </style></head><body>
 <header><h1>{species} · stage-1 frame review</h1>
-<span class="sub">{len(per)} identities · {tot} frames · {totk} keep · {totu} undecided</span></header>
-<main><p class="hint">One page per bat. Decisions are stored per page in this browser;
+<span class="sub">{len(per)} identities · {tot} frames · {totk} keep · {totu} undecided</span>
+<span class="tallies"><span class="t undecided">{n_todo} awaiting a first pass</span></span></header>
+<main><p class="hint">Highlighted rows have never been reviewed — start there.
+Decisions are stored per page in this browser;
 export each page you finish and fold them in with
 <code>curate_frames.py --authority html --import &lt;file&gt;</code>.</p>
-<table><thead><tr><th>identity</th><th>frames</th><th>keep</th><th>undecided</th></tr></thead>
+<table><thead><tr><th>identity</th><th>frames</th><th>keep</th><th>undecided</th><th>status</th></tr></thead>
 <tbody>{rows}</tbody></table></main></body></html>"""
 
 
