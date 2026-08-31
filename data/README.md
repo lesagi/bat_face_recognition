@@ -1,7 +1,12 @@
 # `data/` layout
 
-Five top-level directories, each meaning exactly one thing. Nothing here is
-tracked by git (`.gitignore` excludes `data/*`), so deletions are permanent.
+Five top-level directories, each meaning exactly one thing.
+
+Almost nothing here is tracked by git — **deletions are permanent**. The
+exceptions are the layout docs, the 57 manifests + `.hash` sidecars, and the
+YOLO labels / `data.yaml` / `annotations.xml` under `annotations/` (~9 MB of
+text). Every image, video and frame is ignored: they are write-once binaries
+that need a **backup**, not version control.
 
 | dir | holds | size |
 |---|---|---|
@@ -11,6 +16,31 @@ tracked by git (`.gitignore` excludes `data/*`), so deletions are permanent.
 | `annotations/` | **YOLO training data** for the preprocessing models | 598 M |
 | `work/` | **curation workspaces** — not datasets | 1.9 G |
 | `manifests/` | 57 manifest CSVs + `.hash` sidecars + generated `INDEX.md` | 7.8 M |
+
+## Source video
+
+`raw/mauritius/video/` holds all 91 mauritius `.mp4`, so every mauritius frame
+under `interim/` is re-derivable here.
+
+**Rousettus source video is deliberately not stored in this repo** — it is held
+off-machine, and kept out to save space (`/home` runs near full). What is here
+is `interim/rousettus/video/frames/`: 1093 already-extracted 1080×1920 frames
+from 12 clips, one clip per identity, session 2025-09-09
+(`VID_20250909_143734` … `VID_20250909_144641`).
+
+This is by design, not an omission — the two species have asymmetric front
+ends. `scripts/build_variants_from_frames.py` documents rousettus as starting
+from *"a flat dir `<frames-root>/*.jpg`"*, while mauritius starts from `.mp4`
+via `scripts/build_frontal_dataset.py --videos-dir`. Nothing in the pipeline
+reads rousettus video.
+
+Consequence worth knowing: **`interim/rousettus/video/frames/` is the only copy
+on this machine.** Losing it means going back to the off-machine originals and
+re-extracting, whereas mauritius frames can be rebuilt from `raw/` at any time.
+
+One clip per bat is also why the `original` background arm is unusable for
+rousettus — same-bat pairs always share a background. See
+`docs/background_leakage.md`.
 
 ## The rule that matters
 
