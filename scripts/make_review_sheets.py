@@ -23,6 +23,7 @@ Design constraints worth stating, because they rule out the obvious choices:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 
@@ -88,8 +89,21 @@ a{color:var(--accent)}
 _JS = """
 const S=['keep','drop','undecided'];
 const KEY='batcuration:'+ID;
+const STAMPKEY=KEY+':seed';
+// Stored edits are only meaningful against the seed they were made on. Once an
+// export has been imported, decisions.json IS those edits and the page reseeds
+// from it -- but localStorage would otherwise keep overriding the fresh seed
+// forever, so a page could show decisions the JSON no longer holds. Drop the
+// cache whenever this identity's seed has moved. Other bats' in-progress work
+// is untouched: the stamp covers one identity only.
 let store={};
-try{store=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){store={}}
+try{
+  if(localStorage.getItem(STAMPKEY)!==SEED_STAMP){
+    localStorage.removeItem(KEY);
+    localStorage.setItem(STAMPKEY,SEED_STAMP);
+  }
+  store=JSON.parse(localStorage.getItem(KEY)||'{}');
+}catch(e){store={}}
 const cards=[...document.querySelectorAll('figure')];
 function paint(){
   const t={keep:0,drop:0,undecided:0};
@@ -100,7 +114,7 @@ function paint(){
   }
   for(const s of S)document.querySelector('.t.'+s+' b').textContent=t[s];
 }
-function persist(){try{localStorage.setItem(KEY,JSON.stringify(store))}catch(e){}}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(store));localStorage.setItem(STAMPKEY,SEED_STAMP)}catch(e){}}
 function set(c,d){store[c.dataset.key]=d;persist();paint()}
 function cycle(c){
   const cur=store[c.dataset.key]||c.dataset.seed;
@@ -137,6 +151,13 @@ paint();
 
 
 def _page(identity: str, rows: list[dict]) -> str:
+    # Fingerprint of the seeded decisions for this bat, so the page can tell when
+    # decisions.json has moved past whatever the browser cached.
+    stamp = hashlib.sha1(
+        "".join(
+            f'{r["key"]}={r["decision"]};' for r in sorted(rows, key=lambda x: x["key"])
+        ).encode()
+    ).hexdigest()[:12]
     cards = []
     for r in rows:
         gate = "gate: keep" if r["auto_keep"] else (r["gate_reason"] or "gate: reject")
@@ -174,7 +195,7 @@ Frames the gate rejected are listed first — those are the ones worth a human l
 <div class="grid">
 {chr(10).join(cards)}
 </div></main>
-<script>const ID={json.dumps(identity)};{_JS}</script>
+<script>const ID={json.dumps(identity)};const SEED_STAMP={json.dumps(stamp)};{_JS}</script>
 </body></html>"""
 
 

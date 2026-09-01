@@ -332,6 +332,11 @@ def main() -> None:
     )
     ap.add_argument("--sheets", action="store_true", help="(Re)generate the review HTML and exit.")
     ap.add_argument(
+        "--no-sheets",
+        action="store_true",
+        help="Skip the automatic contact-sheet refresh after --execute.",
+    )
+    ap.add_argument(
         "--execute", action="store_true", help="Actually move files and write decisions.json."
     )
     args = ap.parse_args()
@@ -367,6 +372,16 @@ def main() -> None:
                 json.dumps(metrics, indent=1, sort_keys=True)
             )
         save_decisions(args.species, dec)
+        # The contact sheets are a snapshot of decisions.json, so an import that
+        # is not followed by a regeneration leaves the index contradicting the
+        # data it describes -- still listing a bat as unreviewed after you
+        # reviewed it. Refresh them here rather than relying on the operator to
+        # remember a second command.
+        if not args.no_sheets:
+            from make_review_sheets import build_sheets
+
+            n = build_sheets(args.species)
+            print(f"  refreshed {n} contact sheet(s)")
     else:
         dec.pop("_metrics_pending", None)
     report(args.species, dec, plan, executed)
