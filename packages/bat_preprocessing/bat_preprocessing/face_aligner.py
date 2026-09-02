@@ -40,6 +40,10 @@ class AlignedFace(NamedTuple):
     image: np.ndarray  # (edge, edge, 3) BGR uint8 aligned crop
     keypoints: np.ndarray  # (K, 3) pose keypoints in crop pixel coords (x, y, conf)
     mask: np.ndarray  # (edge, edge) uint8 0/1 — segmentation mask warped into crop space
+    # The composed source→crop affine (2x3). Exposed so a caller can derive a second
+    # crop from the SAME source pixels in one warp, rather than resampling this
+    # output a second time. Optional and last, so existing construction is unaffected.
+    matrix: np.ndarray | None = None
 
 
 class FaceAligner:
@@ -462,7 +466,7 @@ class FaceAligner:
         kpts = pose.keypoints if pose is not None else np.zeros((0, 3), dtype=np.float32)
         kpts_in_crop = self._transform_keypoints(kpts, matrix)
 
-        return AlignedFace(image=aligned, keypoints=kpts_in_crop, mask=mask_in_crop)
+        return AlignedFace(image=aligned, keypoints=kpts_in_crop, mask=mask_in_crop, matrix=matrix)
 
     def elliptical_face_mask(
         self,

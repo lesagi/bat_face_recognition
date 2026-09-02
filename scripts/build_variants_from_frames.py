@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import statistics
 from dataclasses import replace
 from pathlib import Path
 
@@ -225,15 +226,121 @@ def montage_row(images: list[np.ndarray], gap: int = 4) -> np.ndarray:
     return np.hstack(tiles)
 
 
+# Disc radius as a fraction of the crop edge. Must match
+# `species_saliency_maps.EYE_RADIUS_FRAC` / `NOSE_RADIUS_FRAC` -- the ROI is defined
+# once and this crop is sized by it.
+DISC_MIN_CONF = 0.25
+# Canonical face geometry for --crop eyes, as fractions of the output edge.
+# Chosen from measurement, not taste: at 0.38 the nose still sits inside the frame
+# at p95 of nose_drop for both species (y = 0.81 mauritius, 0.69 rousettus) while
+# nothing is upscaled at edge 192 (0% / 0.4%). Larger fills more frame but pushes
+# the nose out; smaller wastes resolution on background.
+CANON_INTEROCULAR = 0.38
+CANON_EYE_Y = 0.32
+
+
+def eyes_similarity(
+    frame: np.ndarray,
+    seg_mask: np.ndarray,
+    af,
+    head_edge: int,
+    out_edge: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
+    """Pin the two eyes to fixed canonical pixels: a similarity alignment.
+
+    Returns ``(image, mask, keypoints, total_scale)`` or ``None`` when the pose is
+    too weak to place the eyes.
+
+    Why this rather than a tighter square. A square crop -- however it is sized --
+    leaves face scale free to vary, because the crop tracks the head bounding box
+    while the face inside it does not. Measured on the existing crops, a mask-centred
+    disc-bounding square varied 0.73-0.99 of the head crop (p5-p95), i.e. it *added*
+    scale variance. The cause is head pitch: `offset_y` correlates +0.888 (mauritius)
+    with `nose_drop`, so a nodding head slides the eye/nose triangle down and the
+    square grows to catch it.
+
+    Fixing the interocular distance in output pixels removes that degree of freedom
+    outright. Framing becomes identical by construction -- across images and, more to
+    the point here, across species: the two species' median interocular differs by
+    1.54x against 1.82x for the head-crop side, so this also equalises anatomical face
+    scale, which no crop geometry does.
+
+    Only the two eyes define the transform, so pitch does not disturb it; the nose is
+    left free to sit wherever the animal's head puts it, which is real anatomy rather
+    than framing noise.
+
+    Composed onto `af.matrix` (source -> head crop) and applied as ONE warp of the
+    original frame. Working in head-crop space is deliberate: the aligner has already
+    straightened the eye line there, so this inherits its roll correction and its eye
+    ordering. Deriving the rotation here from raw keypoints would flip the image
+    whenever the detector returned the two eyes in the other order.
+    """
+    if af.matrix is None:
+        return None
+    kp = af.keypoints
+    if kp is None or kp.shape[0] < 3 or float(np.min(kp[:3, 2])) < DISC_MIN_CONF:
+        return None
+
+    le, re_ = kp[0, :2].astype(np.float64), kp[1, :2].astype(np.float64)
+    inter = float(np.hypot(*(re_ - le)))
+    if inter < 1e-6:
+        return None
+
+    scale = (CANON_INTEROCULAR * out_edge) / inter
+    mid = (le + re_) / 2.0
+    crop_to_out = np.array(
+        [
+            [scale, 0.0, out_edge * 0.5 - scale * mid[0]],
+            [0.0, scale, CANON_EYE_Y * out_edge - scale * mid[1]],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    src_to_crop = np.vstack([af.matrix.astype(np.float64), [0.0, 0.0, 1.0]])
+    m = (crop_to_out @ src_to_crop)[:2]
+
+    # Total source->output scale, so the upscale check means the same thing here as
+    # for the head crop: >1 is interpolated detail that was never sampled.
+    total_scale = float(np.sqrt(abs(np.linalg.det(m[:, :2]))))
+    interp = cv2.INTER_AREA if total_scale < 1.0 else cv2.INTER_CUBIC
+    img = cv2.warpAffine(
+        frame,
+        m,
+        (out_edge, out_edge),
+        flags=interp,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0),
+    )
+    binary = (seg_mask > 0).astype(np.uint8)
+    msk = cv2.warpAffine(
+        binary,
+        m,
+        (out_edge, out_edge),
+        flags=cv2.INTER_NEAREST,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    kp_out = kp.copy().astype(np.float64)
+    kp_out[:, :2] = kp_out[:, :2] * scale + np.array(
+        [out_edge * 0.5 - scale * mid[0], CANON_EYE_Y * out_edge - scale * mid[1]]
+    )
+    return img, msk, kp_out, total_scale
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--species", choices=("mauritius", "rousettus"), default="mauritius")
     ap.add_argument("--frames-root", default="", help="Override the species default frames root.")
-    ap.add_argument("--out-root", default="", help="Default: data/processed/<species>/video/not_augmented/<edge>")
+    ap.add_argument(
+        "--out-root",
+        default="",
+        help="Default: data/processed/<species>/video/not_augmented/<edge>",
+    )
     ap.add_argument("--montage-dir", default="", help="If set, write a per-bat variant montage.")
     ap.add_argument("--sample", type=int, default=0, help="Frames per bat (0 = all).")
     ap.add_argument("--device", default="cuda:0")
-    ap.add_argument("--seg-weights", default="", help="Override the species default seg checkpoint.")
+    ap.add_argument(
+        "--seg-weights", default="", help="Override the species default seg checkpoint."
+    )
     ap.add_argument("--pose-weights", default="models/preprocessing/face_pose.pt")
     ap.add_argument("--edge", type=int, default=224)
     ap.add_argument("--margin", type=float, default=0.03)
@@ -266,8 +373,17 @@ def main() -> None:
         "identity twice. Default legacy so existing datasets are untouched.",
     )
     ap.add_argument(
+        "--crop",
+        choices=("head", "eyes"),
+        default="head",
+        help="head = mask-centred square around the whole head (the historical crop). "
+        "eyes = similarity alignment pinning the two eyes to fixed canonical pixels, "
+        "so face scale is identical across images and across species. Use --edge 192 "
+        "for eyes: the canonical geometry was measured against that.",
+    )
+    ap.add_argument(
         "--out-layout",
-        choices=("flat", "by-identity"),
+        choices=("flat", "by-identity", "bg-crop-edge"),
         default="flat",
         help="by-identity writes <variant>/<identity>/<file> instead of one flat "
         "directory per variant, so the frames can be reviewed a bat at a time. "
@@ -280,8 +396,7 @@ def main() -> None:
     frames_root = Path(args.frames_root or defaults["frames_root"])
     seg_weights = args.seg_weights or defaults["seg_weights"]
     out = Path(
-        args.out_root
-        or f"data/processed/{args.species}/video/not_augmented/base_{args.edge}"
+        args.out_root or f"data/processed/{args.species}/video/not_augmented/base_{args.edge}"
     )
     for v in VARIANTS:
         (out / v).mkdir(parents=True, exist_ok=True)
@@ -316,6 +431,8 @@ def main() -> None:
     per_bat = {}
     n_aligned = 0
     n_upscale = 0
+    n_crop_skipped = 0
+    scales: list[float] = []
     for stem, items in sorted(groups.items()):
         rows = []
         w = 0
@@ -337,7 +454,20 @@ def main() -> None:
             if af is None:
                 continue
             side = mask_side_px(s.mask, fr.shape[:2], args.margin)
-            if side is not None:
+            if args.crop == "eyes":
+                got = eyes_similarity(fr, s.mask, af, af.image.shape[0], args.edge)
+                if got is None:
+                    n_crop_skipped += 1
+                    continue
+                eimg, emask, ekpts, total_scale = got
+                af = af._replace(image=eimg, mask=emask, keypoints=ekpts)
+                scales.append(total_scale)
+                n_aligned += 1
+                # For a similarity alignment the crop side is not the right yardstick:
+                # what matters is whether the source was magnified. >1 is invented detail.
+                if total_scale > 1.0:
+                    n_upscale += 1
+            elif side is not None:
                 n_aligned += 1
                 if side < args.edge:
                     n_upscale += 1
@@ -364,7 +494,12 @@ def main() -> None:
                 color=(0, 0, 0),
             )
             for v, img in variants.items():
-                dest_dir = out / v / stem if args.out_layout == "by-identity" else out / v
+                if args.out_layout == "bg-crop-edge":
+                    dest_dir = out / v / args.crop / str(args.edge) / stem
+                elif args.out_layout == "by-identity":
+                    dest_dir = out / v / stem
+                else:
+                    dest_dir = out / v
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 if cv2.imwrite(str(dest_dir / name), img, [cv2.IMWRITE_JPEG_QUALITY, 95]):
                     counts[v] += 1
@@ -378,6 +513,14 @@ def main() -> None:
         print(f"  {stem}: {w} frames → variants")
     print("\nper-variant totals:", counts)
     print("identities:", len(per_bat), "| total per variant:", counts["original_bg"])
+    if args.crop == "eyes":
+        med = statistics.median(scales) if scales else float("nan")
+        print(
+            f"eyes alignment: interocular pinned to {CANON_INTEROCULAR:.2f}x{args.edge}"
+            f" = {CANON_INTEROCULAR * args.edge:.0f}px, eye line at y="
+            f"{CANON_EYE_Y * args.edge:.0f}px; median source->output scale {med:.3f}"
+            f" ({n_crop_skipped} frame(s) skipped for weak pose)"
+        )
     if n_aligned:
         pct = 100.0 * n_upscale / n_aligned
         print(
