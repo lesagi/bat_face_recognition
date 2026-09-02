@@ -54,6 +54,10 @@ CURATED = pathlib.Path("data/curated")
 PROCESSED = pathlib.Path("data/processed")
 MANIFESTS = pathlib.Path("data/manifests")
 BACKGROUNDS = ("original_bg", "green_bg", "random_bg", "face_ellipse")
+# The clean arms the occlusion step runs on. green and random only: `original` is
+# 93% solvable with the face deleted, and `face_ellipse` already removes its own
+# periphery, so an occlusion result on either would not mean what it says.
+OCCLUSION_BACKGROUNDS = ("green", "random")
 
 # Derived arms, for --list-derived. Each is tied to a published manifest and a
 # concluded experiment, which is why none of them is rebuilt automatically.
@@ -67,7 +71,8 @@ DERIVED = {
 }
 
 
-def variants_cmd(species: str, edge: int, out: pathlib.Path, device: str) -> list[str]:
+def variants_cmd(species: str, crop: str, edge: int, prefix: str, device: str) -> list[str]:
+    """One pass emits all four backgrounds for a given (crop, edge)."""
     return [
         sys.executable,
         "scripts/build_variants_from_frames.py",
@@ -76,45 +81,69 @@ def variants_cmd(species: str, edge: int, out: pathlib.Path, device: str) -> lis
         "--frames-root",
         str(CURATED / species / "keep"),
         "--out-root",
-        str(out),
+        str(PROCESSED / species / "video/not_augmented"),
+        "--crop",
+        crop,
         "--edge",
         str(edge),
+        "--out-layout",
+        "bg-crop-edge",
         "--name-style",
         "compact",
-        "--out-layout",
-        "by-identity",
         "--device",
         device,
+        *(["--variant-prefix", prefix] if prefix else []),
     ]
 
 
-def manifest_cmds(species: str, arm: str, val: float, test: float, seed: int) -> list[list[str]]:
+def manifest_cmds(
+    species: str, crop: str, edge: int, prefix: str, val: float, test: float, seed: int
+) -> list[list[str]]:
     cmds = []
-    for root, suffix in ((arm, ""), (f"{arm}_320", "_320")):
-        for bg in BACKGROUNDS:
-            src = PROCESSED / species / "video/not_augmented" / root / bg
-            tag = bg if bg.endswith("_bg") else f"{bg}_bg"
-            cmds.append(
-                [
-                    "uv",
-                    "run",
-                    "bat-cli",
-                    "build-manifest",
-                    "--input-dir",
-                    str(src),
-                    "--output",
-                    str(MANIFESTS / f"{species}_{arm}_{tag}{suffix}_manifest.csv"),
-                    "--species",
-                    species,
-                    "--val-fraction",
-                    str(val),
-                    "--test-fraction",
-                    str(test),
-                    "--seed",
-                    str(seed),
-                ]
-            )
+    for bg in BACKGROUNDS:
+        src = PROCESSED / species / "video/not_augmented" / f"{prefix}{bg}" / crop / str(edge)
+        out = MANIFESTS / f"{species}_{prefix}{bg}_{crop}_{edge}_manifest.csv"
+        cmds.append(
+            [
+                "uv",
+                "run",
+                "bat-cli",
+                "build-manifest",
+                "--input-dir",
+                str(src),
+                "--output",
+                str(out),
+                "--species",
+                species,
+                "--val-fraction",
+                str(val),
+                "--test-fraction",
+                str(test),
+                "--seed",
+                str(seed),
+            ]
+        )
     return cmds
+
+
+def occlusion_cmds(species: str, crop: str, edge: int, prefix: str, device: str) -> list[list[str]]:
+    return [
+        [
+            sys.executable,
+            "scripts/build_occlusion_arms.py",
+            "--species",
+            species,
+            "--crop",
+            crop,
+            "--edge",
+            str(edge),
+            "--prefix",
+            prefix,
+            "--device",
+            device,
+            "--execute",
+        ]
+    ]
 
 
 def check_cull(species: str) -> tuple[int, int, int]:
@@ -131,30 +160,43 @@ def check_cull(species: str) -> tuple[int, int, int]:
     return n_keep, on_disk, idents
 
 
-def collides(species: str, arm: str) -> list[pathlib.Path]:
-    """Anything this run would overwrite. An arm name should be new, or reused knowingly."""
+def collides(species: str, prefix: str, crops: list[str], edges: list[int]) -> list[pathlib.Path]:
+    """Anything this run would overwrite. A prefix should be new, or reused knowingly."""
     hits = []
-    for root in (arm, f"{arm}_320"):
-        d = PROCESSED / species / "video/not_augmented" / root
-        if d.exists():
-            hits.append(d)
-    hits += sorted(MANIFESTS.glob(f"{species}_{arm}_*_manifest.csv"))
+    na = PROCESSED / species / "video/not_augmented"
+    for bg in BACKGROUNDS:
+        for crop in crops:
+            for edge in edges:
+                d = na / f"{prefix}{bg}" / crop / str(edge)
+                if d.exists():
+                    hits.append(d)
+    hits += sorted(MANIFESTS.glob(f"{species}_{prefix}*_manifest.csv"))
     return hits
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--species", default="mauritius")
-    ap.add_argument("--arm", default="curated", help="Name for this cull's dataset arm.")
+    ap.add_argument(
+        "--prefix",
+        default="",
+        help="Names this cull's dataset, as a prefix on the background directory and "
+        "the manifest (e.g. 'day31' -> day31_green_bg/). Empty is the canonical path.",
+    )
+    ap.add_argument("--crops", default="head,eyes", help="Comma list: head and/or eyes.")
+    ap.add_argument(
+        "--edges",
+        default="192",
+        help="Comma list of output edges. 192 is the measured value at which neither "
+        "species upscales under the eyes alignment (0%% / 0.4%%).",
+    )
     ap.add_argument("--device", default="cuda:0")
-    ap.add_argument("--only", default="", help="Comma list from: images, images_320, manifests.")
+    ap.add_argument("--only", default="", help="Comma list from: images, manifests, occlusion.")
     ap.add_argument("--val-fraction", type=float, default=0.15)
     ap.add_argument("--test-fraction", type=float, default=0.15)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--execute", action="store_true", help="Actually run; default is a dry run.")
-    ap.add_argument(
-        "--force", action="store_true", help="Proceed even though the arm already exists."
-    )
+    ap.add_argument("--force", action="store_true", help="Proceed even though the target exists.")
     ap.add_argument("--list-derived", action="store_true", help="Print the derived arms and exit.")
     args = ap.parse_args()
 
@@ -165,20 +207,43 @@ def main() -> None:
         print()
         return
 
-    na = PROCESSED / args.species / "video/not_augmented"
+    prefix = (
+        "" if not args.prefix else (args.prefix if args.prefix.endswith("_") else f"{args.prefix}_")
+    )
+    crops = [c.strip() for c in args.crops.split(",") if c.strip()]
+    edges = [int(e) for e in args.edges.split(",") if e.strip()]
+    bad = set(crops) - {"head", "eyes"}
+    if bad:
+        raise SystemExit(f"unknown crop(s) {sorted(bad)}; known: head, eyes")
+
     steps: dict[str, list[list[str]]] = {
-        "images": [variants_cmd(args.species, 224, na / args.arm, args.device)],
-        "images_320": [variants_cmd(args.species, 320, na / f"{args.arm}_320", args.device)],
-        "manifests": manifest_cmds(
-            args.species, args.arm, args.val_fraction, args.test_fraction, args.seed
-        ),
+        "images": [
+            variants_cmd(args.species, c, e, prefix, args.device) for c in crops for e in edges
+        ],
+        "manifests": [
+            cmd
+            for c in crops
+            for e in edges
+            for cmd in manifest_cmds(
+                args.species, c, e, prefix, args.val_fraction, args.test_fraction, args.seed
+            )
+        ],
+        # Occlusion runs on `head` only: inside an eyes-aligned crop the discs occupy a
+        # different area fraction, so `span` - `periphery` would not mean there what it
+        # means on head, and the two could not be compared.
+        "occlusion": [
+            cmd
+            for e in edges
+            for cmd in occlusion_cmds(args.species, "head", e, prefix, args.device)
+            if "head" in crops
+        ],
     }
-    order = ["images", "images_320", "manifests"]
+    order = ["images", "manifests", "occlusion"]
     want = [s.strip() for s in args.only.split(",") if s.strip()] or order
     unknown = set(want) - set(order)
     if unknown:
         raise SystemExit(f"unknown step(s) {sorted(unknown)}; known: {order}")
-    want = [s for s in order if s in want]  # declared order always wins
+    want = [s for s in order if s in want]
 
     n_keep, on_disk, idents = check_cull(args.species)
     print(
@@ -187,20 +252,20 @@ def main() -> None:
     )
     if n_keep != on_disk:
         raise SystemExit(
-            "  !! decisions.json and keep/ disagree -- run `curate_frames.py --execute` first,\n"
-            "     otherwise this would build from a stale frame set."
+            "  !! decisions.json and keep/ disagree -- run `curate_frames.py --execute` "
+            "first,\n     otherwise this would build from a stale frame set."
         )
     if on_disk == 0:
         raise SystemExit("  !! nothing marked keep; there is no dataset to build.")
 
-    print(f"  arm       {args.arm}")
-    existing = collides(args.species, args.arm)
+    print(f"  dataset   {prefix or '(canonical, no prefix)'}   crops={crops}  edges={edges}")
+    existing = collides(args.species, prefix, crops, edges)
     if existing:
-        print(f"  !! this arm already exists ({len(existing)} path(s)); it would be overwritten:")
+        print(f"  !! target already exists ({len(existing)} path(s)); it would be overwritten:")
         for e in existing[:6]:
             print(f"       {e}")
         if not args.force:
-            raise SystemExit("     pick a new --arm, or pass --force to overwrite.")
+            raise SystemExit("     pick a new --prefix, or pass --force to overwrite.")
 
     print(f"  plan      {len(want)} step(s)")
     for s in want:
@@ -220,8 +285,8 @@ def main() -> None:
                 raise SystemExit(f"\n  step {s} failed (exit {rc}): {' '.join(cmd)}")
         print(f"     done in {time.time() - t0:.0f}s")
 
-    print(f"\n  arm '{args.arm}' built. Manifests:")
-    for m in sorted(MANIFESTS.glob(f"{args.species}_{args.arm}_*_manifest.csv")):
+    print("\n  built. Manifests:")
+    for m in sorted(MANIFESTS.glob(f"{args.species}_{prefix}*_manifest.csv")):
         print(f"    {m}")
     print()
 

@@ -64,6 +64,7 @@ from bat_cli.runtime import (  # noqa: E402
     load_manifest,
     resplit_manifest,
 )
+from bat_data import manifest_from_csv  # noqa: E402
 from bat_data.quality_metrics import face_mask_from_green  # noqa: E402
 from bat_stats import bootstrap_ci, corrected_resampled_ttest  # noqa: E402
 
@@ -89,20 +90,33 @@ def face_colour_descriptor(image_path: Path) -> np.ndarray | None:
     return np.concatenate([px.mean(axis=0) / 255.0, px.std(axis=0) / 255.0])
 
 
-def probe_fold(species: str, fold: int, root: Path) -> dict[str, Any] | None:
-    """Descriptor ROC-AUC over the same test pairs the model was scored on."""
-    cfg = compose_config(
-        experiment=EXPERIMENT.format(sp=species),
-        overrides=(
-            f"data.fold_id={fold}",
-            "data.resplit=true",
-            "data.split_size_mode=seeded",
-        ),
-    )
-    manifest = load_manifest(cfg, root=root)
-    manifest, info = resplit_manifest(manifest, cfg)
-    if info is None:
-        return None
+def probe_fold(
+    species: str, fold: int, root: Path, manifest_path: Path | None = None
+) -> dict[str, Any] | None:
+    """Descriptor ROC-AUC over the same test pairs the model was scored on.
+
+    With `manifest_path` the manifest is read directly and its baked split is used,
+    bypassing Hydra composition and the runtime re-split. That is what makes this
+    runnable against an arbitrary arm -- the Hydra path pins one hardcoded experiment
+    (`arcface_{sp}_green_bg_video_tuned`), so without it the probe can only ever
+    measure the one image set, and the colour-normalisation acceptance test could not
+    be run at all.
+    """
+    if manifest_path is not None:
+        manifest = manifest_from_csv(manifest_path)
+    else:
+        cfg = compose_config(
+            experiment=EXPERIMENT.format(sp=species),
+            overrides=(
+                f"data.fold_id={fold}",
+                "data.resplit=true",
+                "data.split_size_mode=seeded",
+            ),
+        )
+        manifest = load_manifest(cfg, root=root)
+        manifest, info = resplit_manifest(manifest, cfg)
+        if info is None:
+            return None
 
     def collect(split: str) -> tuple[np.ndarray, list[str], int]:
         vals, ids, skipped = [], [], 0
@@ -156,6 +170,14 @@ def main() -> int:
     ap.add_argument("--folds", type=int, nargs="*", default=list(range(20)))
     ap.add_argument("--model-results", type=Path, default=MODEL_RESULTS)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="Probe this manifest directly, using its baked split, instead of "
+             "composing the pinned Hydra experiment. Use it to test an arbitrary "
+             "arm -- e.g. a colour-normalised one, which must fall to ~0.50.",
+    )
     args = ap.parse_args()
 
     root = find_project_root(None)
@@ -164,6 +186,21 @@ def main() -> int:
 
     print("=== six-number face-colour baseline, per fold, green background ===")
     print("descriptor: per-channel mean + std inside the face matte. No spatial content.\n")
+
+    if args.manifest is not None:
+        # One manifest, one baked split: folds and the model comparison do not apply.
+        r = probe_fold(species[0], 0, root, manifest_path=args.manifest)
+        if r is None:
+            raise SystemExit(f"could not probe {args.manifest}")
+        auc = r.get("roc_auc")
+        print(f"  manifest : {args.manifest}")
+        print(f"  ROC-AUC from the 6 colour numbers: {auc:.4f}")
+        print(
+            "  -> colour cue removed"
+            if auc is not None and abs(auc - 0.5) < 0.05
+            else "  -> colour still carries identity; normalisation did NOT work"
+        )
+        return 0
 
     per_fold = [
         r for sp in species for f in args.folds if (r := probe_fold(sp, f, root)) is not None

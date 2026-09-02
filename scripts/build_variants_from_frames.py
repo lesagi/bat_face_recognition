@@ -373,6 +373,12 @@ def main() -> None:
         "identity twice. Default legacy so existing datasets are untouched.",
     )
     ap.add_argument(
+        "--variant-prefix",
+        default="",
+        help="Prepended to the background directory name, e.g. 'day31_' -> "
+             "day31_green_bg/. Names a dataset version without adding a path level.",
+    )
+    ap.add_argument(
         "--crop",
         choices=("head", "eyes"),
         default="head",
@@ -495,7 +501,7 @@ def main() -> None:
             )
             for v, img in variants.items():
                 if args.out_layout == "bg-crop-edge":
-                    dest_dir = out / v / args.crop / str(args.edge) / stem
+                    dest_dir = out / f"{args.variant_prefix}{v}" / args.crop / str(args.edge) / stem
                 elif args.out_layout == "by-identity":
                     dest_dir = out / v / stem
                 else:
