@@ -64,6 +64,9 @@ button{font:inherit;padding:6px 12px;border-radius:7px;border:1px solid var(--li
   background:var(--panel);color:var(--ink);cursor:pointer}
 button:hover{border-color:var(--accent)}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--keep-bg);border-color:var(--keep);color:var(--keep);font-weight:600}
+button.primary:hover{border-color:var(--keep);filter:brightness(.97)}
+button[disabled]{opacity:.5;cursor:default}
 main{padding:18px 20px 60px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
 figure{margin:0;background:var(--panel);border:2px solid var(--line);border-radius:10px;
@@ -130,6 +133,25 @@ cards.forEach(c=>{
     else if(e.key==='Enter'||e.key===' '){cycle(c);e.preventDefault()}
   });
 });
+const saveBtn=document.getElementById('save'),status=document.getElementById('status');
+// Only reachable when served by scripts/serve_review.py. Opened straight off the
+// filesystem there is nothing to POST to, so the button would be a dead control.
+if(location.protocol==='file:'){saveBtn.hidden=true}
+else saveBtn.addEventListener('click',async()=>{
+  const frames={};
+  for(const c of cards)frames[c.dataset.key]=store[c.dataset.key]||c.dataset.seed;
+  saveBtn.disabled=true;status.textContent='saving…';
+  try{
+    const r=await fetch('/_save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({identity:ID,frames})});
+    const j=await r.json();
+    if(!j.ok){status.textContent='failed: '+(j.error||'unknown');saveBtn.disabled=false;return}
+    status.textContent=j.changed+' changed, '+j.moved+' file(s) moved — reloading';
+    // The seed has moved, so this page is stale by construction. Reloading picks up
+    // the new stamp, which clears this bat's localStorage and reseeds from the JSON.
+    setTimeout(()=>location.reload(),600);
+  }catch(e){status.textContent='failed: '+e;saveBtn.disabled=false}
+});
 document.getElementById('exp').addEventListener('click',()=>{
   const frames={};
   for(const c of cards)frames[c.dataset.key]=store[c.dataset.key]||c.dataset.seed;
@@ -183,15 +205,19 @@ def _page(identity: str, rows: list[dict]) -> str:
   </span>
   <button id="allk">All keep</button>
   <button id="reset">Reset</button>
+  <button id="save" class="primary">Save to server</button>
   <button id="exp">Export…</button>
+  <span class="sub" id="status"></span>
 </header>
 <main>
 <p class="hint">Click a card to cycle, or focus one and press
 <kbd>K</kbd> keep · <kbd>D</kbd> drop · <kbd>U</kbd> undecided.
 Every click is saved in this browser straight away, so you can stop and come back.
 Frames the gate rejected are listed first — those are the ones worth a human look.
-<strong>Export…</strong> writes the file you feed back to
-<code>curate_frames.py --authority html</code>.</p>
+<strong>Save to server</strong> applies them straight to
+<code>decisions.json</code> and moves the files, no terminal needed.
+<strong>Export…</strong> still downloads a file for
+<code>curate_frames.py --authority html</code> if you prefer that route.</p>
 <div class="grid">
 {chr(10).join(cards)}
 </div></main>
