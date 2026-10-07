@@ -1,0 +1,14 @@
+# @package _global_
+# ArcFace on the `lit12` identity-selection arm, green background.
+#   bat-cli train --experiment arcface_mauritius_lit12_green_bg_video_tuned --fold N
+defaults:
+  - override /data: manifest_mauritius_lit12_green
+  - override /model: arcface
+  - override /loss: arcface_tuned
+  - override /trainer: embedding_tuned
+  - override /evaluation: verification
+  - override /preprocessing: yolo
+
+data:
+  background: green_lit12
+  source: video

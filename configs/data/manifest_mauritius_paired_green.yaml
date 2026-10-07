@@ -1,0 +1,35 @@
+# Identity-selection arm `paired` of the cull2 build: 12 identities.
+#
+# the 12 bats matched 1:1 to the 12 rousettus bats on lighting (Hungarian assignment, contrast gaps 0.0-9.2). Colour leakage 0.815, against rousettus 0.816.
+#
+# Built by scripts/rebuild_dataset.py (--prefix cull2 --crops head --edges 224) then
+# scripts/build_arm_manifests.py, which re-splits over THIS arm's identities rather
+# than inheriting the parent split -- otherwise the arms would get different
+# val/test sizes by accident and a comparison between them would partly measure that.
+#
+# Leakage numbers above are outputs/quality/arm_colour_leakage.json: the median over
+# 200 seeded 2-bat splits of verification ROC-AUC from six global colour numbers.
+#
+# `background: green_paired` is a LABEL, not a filter; the CSV keeps the `green`
+# literal that bat_core.ImageRecord requires.
+manifest_path: data/manifests/mauritius_cull2_paired_green_bg_head_224_manifest.csv
+species: mauritius
+background: green_paired
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0
+
+resplit: false
+split_size_mode: exact # exact | seeded
+fold_id: null # set via `bat-cli train --fold N`
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 2
+min_test_identities: 2
+max_test_identities: 3
+min_train_identities: 6
