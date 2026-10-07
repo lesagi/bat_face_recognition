@@ -1,0 +1,32 @@
+# Resolution-matched variant of the `paired` arm: 12 identities.
+#
+# The 12 bats are the ones `pair_species_bats.py` matched 1:1 to the 12 rousettus
+# bats on LIGHTING. This arm additionally matches RESOLUTION, per pair: each bat is
+# Gaussian-blurred per bat until gradient energy matches its partner's. Matches by construction (ratio 1.02, 11/12 within 1.25x) but is not a thing a camera does.
+#
+# Identities and split are copied from the `paired` arm, so these arms differ in
+# pixel detail only -- not in which bats landed in test.
+#
+# Built by scripts/build_pair_matched_blur.py.
+# Numbers above are outputs/quality/pair_blur_build*.json.
+manifest_path: data/manifests/mauritius_cull2_pairblur_green_bg_head_224_manifest.csv
+species: mauritius
+background: green_pairblur
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0
+
+resplit: false
+split_size_mode: exact
+fold_id: null
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 2
+min_test_identities: 2
+max_test_identities: 3
+min_train_identities: 6

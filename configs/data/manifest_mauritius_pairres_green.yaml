@@ -1,0 +1,32 @@
+# Resolution-matched variant of the `paired` arm: 12 identities.
+#
+# The 12 bats are the ones `pair_species_bats.py` matched 1:1 to the 12 rousettus
+# bats on LIGHTING. This arm additionally matches RESOLUTION, per pair: each bat is
+# re-cropped so each bat has its partner's native resolution (factors 1.53-2.42x). Physically motivated -- it reproduces 'filmed further away' -- and under-degrades by construction: sharpness ratio 4.04 -> 1.83.
+#
+# Identities and split are copied from the `paired` arm, so these arms differ in
+# pixel detail only -- not in which bats landed in test.
+#
+# Built by scripts/build_pair_matched_recrop.py.
+# Numbers above are outputs/quality/pair_recrop_build*.json.
+manifest_path: data/manifests/mauritius_cull2_pairres_green_bg_head_224_manifest.csv
+species: mauritius
+background: green_pairres
+source: video
+augmented: false
+split_mode: identity_disjoint
+split_seed: 42
+val_fraction: 0.15
+test_fraction: 0.15
+batch_size: 32
+num_workers: 0
+
+resplit: false
+split_size_mode: exact
+fold_id: null
+fold_base_seed: 1000
+min_val_identities: 2
+max_val_identities: 2
+min_test_identities: 2
+max_test_identities: 3
+min_train_identities: 6
