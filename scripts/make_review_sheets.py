@@ -264,7 +264,7 @@ def _index(species: str, per: list[tuple[str, int, int, int]]) -> str:
         lit = light.get(r[0], {})
         return (
             0 if lit.get("lighting_match") == "good" else 1,
-            lit.get("distance_to_rousettus", 1e9),
+            lit.get("outside_rousettus_range", 1e9),
             r[2] > 0,
             r[0],
         )
@@ -307,9 +307,10 @@ def _index(species: str, per: list[tuple[str, int, int, int]]) -> str:
     if light:
         d = json.loads(pathlib.Path("outputs/quality/bat_lighting.json").read_text())
         ref = (
-            f"Lighting match is |face−background contrast − rousettus "
-            f"({d['reference']['contrast']:+.0f})|, "
-            f"within {d['good_threshold']:.0f} = good."
+            f"Good = face−background contrast inside the range the rousettus set "
+            f"itself spans ({d['reference']['contrast_range'][0]:+.0f} to "
+            f"{d['reference']['contrast_range'][1]:+.0f}, median "
+            f"{d['reference']['contrast_median']:+.0f}), measured inside the head crop."
         )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
