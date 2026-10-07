@@ -40,7 +40,7 @@ import threading
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import curate_frames as cf  # noqa: E402
-from make_review_sheets import build_sheets  # noqa: E402
+from make_review_sheets import build_sheets, stamps_from_decisions  # noqa: E402
 
 MAX_BODY = 4 * 1024 * 1024  # a 250-frame bat's payload is ~20 KB; this is slack, not a target
 _LOCK = threading.Lock()
@@ -88,6 +88,37 @@ def apply_payload(species: str, payload: dict) -> dict:
     }
 
 
+def status(species: str) -> dict:
+    """Live counts straight from decisions.json, plus each bat's seed stamp.
+
+    The index is static HTML regenerated on save, so a tab left open goes stale the
+    moment another tab saves. Polling this keeps the numbers honest without
+    re-rendering 43 pages.
+
+    The stamp is what lets the index flag *unsaved* work. A successful save
+    regenerates the sheets and the page reloads onto a new stamp, which clears that
+    bat's localStorage -- so a non-empty cache whose stamp still matches the server
+    means edits made and not yet sent.
+    """
+    dec = cf.load_decisions(species)
+    per: dict[str, dict] = {}
+    for rec in dec["frames"].values():
+        e = per.setdefault(rec["identity"], {s: 0 for s in cf.STATES})
+        e[rec["decision"]] += 1
+    stamps = stamps_from_decisions(species)
+    for i, e in per.items():
+        e["n"] = sum(e[s] for s in cf.STATES)
+        e["stamp"] = stamps.get(i, "")
+    return {
+        "species": species,
+        "totals": {
+            s: sum(1 for v in dec["frames"].values() if v["decision"] == s) for s in cf.STATES
+        },
+        "n_identities": len(per),
+        "bats": per,
+    }
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     species = "mauritius"
 
@@ -98,6 +129,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def do_GET(self) -> None:  # noqa: N802  (http.server's required spelling)
+        if self.path.rstrip("/") == "/_status":
+            with _LOCK:
+                self._json(200, status(self.species))
+            return
+        super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802  (http.server's required spelling)
         if self.path.rstrip("/") != "/_save":

@@ -172,14 +172,28 @@ paint();
 """
 
 
+def seed_stamp(pairs: dict[str, str]) -> str:
+    """Fingerprint of one bat's decisions: {frame key -> decision}.
+
+    Shared with `serve_review.py`, which computes it straight from decisions.json to
+    answer /_status. Both sides must agree, or the index would report unsaved edits
+    that are not there (or miss ones that are), so there is exactly one definition.
+    """
+    body = "".join(f"{k}={pairs[k]};" for k in sorted(pairs))
+    return hashlib.sha1(body.encode()).hexdigest()[:12]
+
+
+def stamps_from_decisions(species: str) -> dict[str, str]:
+    """Per-identity seed stamps, read from decisions.json."""
+    dec = json.loads((CURATED / species / "decisions.json").read_text())
+    per: dict[str, dict[str, str]] = {}
+    for key, rec in dec["frames"].items():
+        per.setdefault(rec["identity"], {})[key] = rec["decision"]
+    return {i: seed_stamp(p) for i, p in per.items()}
+
+
 def _page(identity: str, rows: list[dict]) -> str:
-    # Fingerprint of the seeded decisions for this bat, so the page can tell when
-    # decisions.json has moved past whatever the browser cached.
-    stamp = hashlib.sha1(
-        "".join(
-            f'{r["key"]}={r["decision"]};' for r in sorted(rows, key=lambda x: x["key"])
-        ).encode()
-    ).hexdigest()[:12]
+    stamp = seed_stamp({r["key"]: r["decision"] for r in rows})
     cards = []
     for r in rows:
         gate = "gate: keep" if r["auto_keep"] else (r["gate_reason"] or "gate: reject")
@@ -257,7 +271,7 @@ def _index(species: str, per: list[tuple[str, int, int, int]]) -> str:
 
     per = sorted(per, key=key)
     cells = []
-    for i, n, k, u in per:
+    for i, n, k, u, dr in per:
         lit = light.get(i, {})
         match = lit.get("lighting_match", "unknown")
         cls = []
@@ -266,26 +280,29 @@ def _index(species: str, per: list[tuple[str, int, int, int]]) -> str:
         if match == "poor":
             cls.append("poor")
         cells.append(
-            "<tr{cls} data-match='{m}'><td><a href='{i}.html'>{i}</a></td>"
-            "<td class='n'>{n}</td><td class='n'>{k}</td><td class='n'>{u}</td>"
+            "<tr{cls} data-match='{m}' data-id='{i}'><td><a href='{i}.html'>{i}</a></td>"
+            "<td class='n' data-f='n'>{n}</td><td class='n keep' data-f='keep'>{k}</td>"
+            "<td class='n drop' data-f='drop'>{d}</td>"
+            "<td class='n und' data-f='undecided'>{u}</td>"
             "<td class='n'>{c}</td><td class='lm {m}'>{m}</td>"
-            "<td class='st'>{st}</td></tr>".format(
+            "<td class='sv'></td><td class='st'>{st}</td></tr>".format(
                 cls=f" class='{' '.join(cls)}'" if cls else "",
                 m=match,
                 i=i,
                 n=n,
                 k=k,
+                d=dr,
                 u=u,
                 c=f"{lit['contrast']:+.0f}" if "contrast" in lit else "–",
                 st="reviewed" if k else "first pass needed",
             )
         )
     rows = "".join(cells)
-    n_good = sum(1 for i, _, _, _ in per if light.get(i, {}).get("lighting_match") == "good")
+    n_good = sum(1 for i, _, _, _, _ in per if light.get(i, {}).get("lighting_match") == "good")
     n_todo_good = sum(
-        1 for i, _, k, _ in per if not k and light.get(i, {}).get("lighting_match") == "good"
+        1 for i, _, k, _, _ in per if not k and light.get(i, {}).get("lighting_match") == "good"
     )
-    tot, totk, totu = sum(p[1] for p in per), sum(p[2] for p in per), sum(p[3] for p in per)
+    tot = sum(p[1] for p in per)
     ref = ""
     if light:
         d = json.loads(pathlib.Path("outputs/quality/bat_lighting.json").read_text())
@@ -313,26 +330,36 @@ td.lm.good{{color:var(--keep)}}
 td.lm.poor{{color:var(--drop)}}
 td.lm.unknown{{color:var(--muted);font-weight:400}}
 tr.poor{{opacity:.5}}
+td.sv{{font-size:12px;font-weight:600}}
+td.sv.ok{{color:var(--muted);font-weight:400}}
+td.sv.pending{{color:var(--drop)}}
+#live.stale{{color:var(--drop)}}
+td.keep{{color:var(--keep)}} td.drop{{color:var(--drop)}} td.und{{color:var(--und)}}
 .bar{{display:flex;gap:10px;align-items:center;margin:0 0 14px;flex-wrap:wrap}}
 label{{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center;cursor:pointer}}
 </style></head><body>
 <header><h1>{species} · stage-1 frame review</h1>
-<span class="sub">{len(per)} identities · {tot} frames · {totk} keep · {totu} undecided</span>
+<span class="sub">{len(per)} identities · {tot} frames · <span id="live"></span></span>
 <span class="tallies">
-  <span class="t keep">{n_good} good lighting</span>
-  <span class="t undecided">{n_todo_good} of those need a first pass</span>
+  <span class="t keep" id="tk">keep <b>–</b></span>
+  <span class="t drop" id="td">drop <b>–</b></span>
+  <span class="t undecided" id="tu">undecided <b>–</b></span>
+  <span class="t" id="unsaved" hidden></span>
 </span></header>
 <main>
 <p class="hint">Sorted by lighting match, best first — review from the top and stop
-when you have enough bats. {ref} Poor matches would be dropped from the
-species-matched arm anyway, so tagging them is wasted effort.</p>
+when you have enough bats. <strong>{n_good} bats match well, {n_todo_good} of those
+still need a first pass.</strong> {ref} Poor matches would be dropped from the
+species-matched arm anyway, so tagging them is wasted effort.
+The counts below come live from the server; <em>saved</em> means this browser has no
+edits the server has not seen.</p>
 <div class="bar">
   <label><input type="checkbox" id="hide" checked> Hide poor lighting matches</label>
   <label><input type="checkbox" id="todo"> Only bats needing a first pass</label>
   <span class="sub" id="count"></span>
 </div>
-<table><thead><tr><th>identity</th><th>frames</th><th>keep</th><th>undecided</th>
-<th>contrast</th><th>lighting</th><th>status</th></tr></thead>
+<table><thead><tr><th>identity</th><th>frames</th><th>keep</th><th>drop</th><th>undecided</th>
+<th>contrast</th><th>lighting</th><th>saved</th><th>status</th></tr></thead>
 <tbody>{rows}</tbody></table></main>
 <script>
 const rows=[...document.querySelectorAll('tbody tr')];
@@ -348,6 +375,51 @@ function apply(){{
   document.getElementById('count').textContent=shown+' of '+rows.length+' shown';
 }}
 hide.addEventListener('change',apply);todo.addEventListener('change',apply);apply();
+
+// This page is static HTML, regenerated on save -- so a tab left open goes stale the
+// moment another tab saves. Poll the server for the real counts instead of trusting
+// what was baked in at render time.
+const live=document.getElementById('live');
+function pendingFor(id,stamp){{
+  // A successful save reloads the sheet onto a new stamp, which clears that bat's
+  // cache. So a non-empty cache still matching the server's stamp = edits not sent.
+  try{{
+    if(localStorage.getItem('batcuration:'+id+':seed')!==stamp)return 0;
+    const s=JSON.parse(localStorage.getItem('batcuration:'+id)||'{{}}');
+    return Object.keys(s).length;
+  }}catch(e){{return 0}}
+}}
+async function refresh(){{
+  let d;
+  try{{d=await (await fetch('/_status',{{cache:'no-store'}})).json()}}
+  catch(e){{live.textContent='offline — counts below are from the last render';
+           live.className='stale';return}}
+  document.querySelector('#tk b').textContent=d.totals.keep;
+  document.querySelector('#td b').textContent=d.totals.drop;
+  document.querySelector('#tu b').textContent=d.totals.undecided;
+  let dirty=0;
+  for(const r of rows){{
+    const b=d.bats[r.dataset.id]; if(!b)continue;
+    for(const f of ['n','keep','drop','undecided']){{
+      const td=r.querySelector("[data-f='"+f+"']"); if(td)td.textContent=b[f];
+    }}
+    const pend=pendingFor(r.dataset.id,b.stamp);
+    const sv=r.querySelector('.sv');
+    sv.textContent=pend?('● '+pend+' unsaved'):'saved';
+    sv.className='sv '+(pend?'pending':'ok');
+    if(pend)dirty++;
+    r.classList.toggle('todo',b.keep===0);
+  }}
+  const u=document.getElementById('unsaved');
+  u.hidden=!dirty; u.className='t drop';
+  u.textContent=dirty+' bat'+(dirty===1?'':'s')+' with unsaved edits';
+  live.textContent='live · updated '+new Date().toLocaleTimeString();
+  live.className='';
+  apply();
+}}
+refresh(); setInterval(refresh,10000);
+addEventListener('focus',refresh);           // returning from a sheet tab
+addEventListener('storage',refresh);         // another tab edited localStorage
 </script>
 </body></html>"""
 
@@ -386,6 +458,7 @@ def build_sheets(species: str) -> int:
                 len(rows),
                 sum(1 for r in rows if r["decision"] == "keep"),
                 sum(1 for r in rows if r["decision"] == "undecided"),
+                sum(1 for r in rows if r["decision"] == "drop"),
             )
         )
     (out / "index.html").write_text(_index(species, per))
