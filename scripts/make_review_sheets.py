@@ -199,33 +199,81 @@ Frames the gate rejected are listed first — those are the ones worth a human l
 </body></html>"""
 
 
+def _lighting(species: str) -> dict[str, dict]:
+    """Per-bat lighting scores, if `rank_bats_by_lighting.py` has been run."""
+    p = pathlib.Path("outputs/quality/bat_lighting.json")
+    if not p.exists():
+        return {}
+    d = json.loads(p.read_text())
+    return {b["identity"]: b for b in d.get("bats", [])}
+
+
 def _index(species: str, per: list[tuple[str, int, int, int]]) -> str:
-    # Bats with no keeps at all have never been reviewed, and they are the whole
-    # job -- every other bat merely has frames a human declined to promote. Sort
-    # them to the top and say so, or they are indistinguishable in a 32-row table
-    # where every row has a nonzero undecided count.
-    per = sorted(per, key=lambda r: (r[2] > 0, r[0]))
-    rows = "".join(
-        "<tr{cls}><td><a href='{i}.html'>{i}</a></td>"
-        "<td class='n'>{n}</td><td class='n'>{k}</td><td class='n'>{u}</td>"
-        "<td class='st'>{st}</td></tr>".format(
-            cls="" if k else " class='todo'",
-            i=i,
-            n=n,
-            k=k,
-            u=u,
-            st="reviewed" if k else "first pass needed",
+    """The worklist.
+
+    Two orderings compete here, and lighting wins. Reviewing a bat whose lighting
+    does not match the rousettus set is wasted effort no matter how many frames it
+    has -- it would be excluded from the matched arm anyway -- so bats are ranked by
+    |contrast - rousettus| first and by review state second. The filter hides the
+    poor matches outright, which is the point: the reviewer should not have to know
+    which bats are worth their time.
+    """
+    light = _lighting(species)
+
+    def key(r):
+        lit = light.get(r[0], {})
+        return (
+            0 if lit.get("lighting_match") == "good" else 1,
+            lit.get("distance_to_rousettus", 1e9),
+            r[2] > 0,
+            r[0],
         )
-        for i, n, k, u in per
+
+    per = sorted(per, key=key)
+    cells = []
+    for i, n, k, u in per:
+        lit = light.get(i, {})
+        match = lit.get("lighting_match", "unknown")
+        cls = []
+        if not k:
+            cls.append("todo")
+        if match == "poor":
+            cls.append("poor")
+        cells.append(
+            "<tr{cls} data-match='{m}'><td><a href='{i}.html'>{i}</a></td>"
+            "<td class='n'>{n}</td><td class='n'>{k}</td><td class='n'>{u}</td>"
+            "<td class='n'>{c}</td><td class='lm {m}'>{m}</td>"
+            "<td class='st'>{st}</td></tr>".format(
+                cls=f" class='{' '.join(cls)}'" if cls else "",
+                m=match,
+                i=i,
+                n=n,
+                k=k,
+                u=u,
+                c=f"{lit['contrast']:+.0f}" if "contrast" in lit else "–",
+                st="reviewed" if k else "first pass needed",
+            )
+        )
+    rows = "".join(cells)
+    n_good = sum(1 for i, _, _, _ in per if light.get(i, {}).get("lighting_match") == "good")
+    n_todo_good = sum(
+        1 for i, _, k, _ in per if not k and light.get(i, {}).get("lighting_match") == "good"
     )
-    n_todo = sum(1 for r in per if not r[2])
     tot, totk, totu = sum(p[1] for p in per), sum(p[2] for p in per), sum(p[3] for p in per)
+    ref = ""
+    if light:
+        d = json.loads(pathlib.Path("outputs/quality/bat_lighting.json").read_text())
+        ref = (
+            f"Lighting match is |face−background contrast − rousettus "
+            f"({d['reference']['contrast']:+.0f})|, "
+            f"within {d['good_threshold']:.0f} = good."
+        )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{species} · stage-1 review</title><style>{_CSS}
 table{{border-collapse:collapse;background:var(--panel);border:1px solid var(--line);
-  border-radius:10px;overflow:hidden;width:100%;max-width:640px}}
+  border-radius:10px;overflow:hidden;width:100%;max-width:780px}}
 th,td{{padding:8px 14px;text-align:left;border-bottom:1px solid var(--line)}}
 th{{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}}
 td.n{{text-align:right;font-variant-numeric:tabular-nums}}
@@ -234,16 +282,48 @@ tr.todo{{background:var(--und-bg)}}
 tr.todo td:first-child{{box-shadow:inset 3px 0 0 var(--und)}}
 td.st{{font-size:12px;color:var(--muted)}}
 tr.todo td.st{{color:var(--und);font-weight:600}}
+td.lm{{font-size:12px;font-weight:600}}
+td.lm.good{{color:var(--keep)}}
+td.lm.poor{{color:var(--drop)}}
+td.lm.unknown{{color:var(--muted);font-weight:400}}
+tr.poor{{opacity:.5}}
+.bar{{display:flex;gap:10px;align-items:center;margin:0 0 14px;flex-wrap:wrap}}
+label{{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center;cursor:pointer}}
 </style></head><body>
 <header><h1>{species} · stage-1 frame review</h1>
 <span class="sub">{len(per)} identities · {tot} frames · {totk} keep · {totu} undecided</span>
-<span class="tallies"><span class="t undecided">{n_todo} awaiting a first pass</span></span></header>
-<main><p class="hint">Highlighted rows have never been reviewed — start there.
-Decisions are stored per page in this browser;
-export each page you finish and fold them in with
-<code>curate_frames.py --authority html --import &lt;file&gt;</code>.</p>
-<table><thead><tr><th>identity</th><th>frames</th><th>keep</th><th>undecided</th><th>status</th></tr></thead>
-<tbody>{rows}</tbody></table></main></body></html>"""
+<span class="tallies">
+  <span class="t keep">{n_good} good lighting</span>
+  <span class="t undecided">{n_todo_good} of those need a first pass</span>
+</span></header>
+<main>
+<p class="hint">Sorted by lighting match, best first — review from the top and stop
+when you have enough bats. {ref} Poor matches would be dropped from the
+species-matched arm anyway, so tagging them is wasted effort.</p>
+<div class="bar">
+  <label><input type="checkbox" id="hide" checked> Hide poor lighting matches</label>
+  <label><input type="checkbox" id="todo"> Only bats needing a first pass</label>
+  <span class="sub" id="count"></span>
+</div>
+<table><thead><tr><th>identity</th><th>frames</th><th>keep</th><th>undecided</th>
+<th>contrast</th><th>lighting</th><th>status</th></tr></thead>
+<tbody>{rows}</tbody></table></main>
+<script>
+const rows=[...document.querySelectorAll('tbody tr')];
+const hide=document.getElementById('hide'),todo=document.getElementById('todo');
+function apply(){{
+  let shown=0;
+  for(const r of rows){{
+    const poor=r.dataset.match==='poor';
+    const needs=r.classList.contains('todo');
+    const ok=(!hide.checked||!poor)&&(!todo.checked||needs);
+    r.hidden=!ok; if(ok)shown++;
+  }}
+  document.getElementById('count').textContent=shown+' of '+rows.length+' shown';
+}}
+hide.addEventListener('change',apply);todo.addEventListener('change',apply);apply();
+</script>
+</body></html>"""
 
 
 def build_sheets(species: str) -> int:

@@ -368,9 +368,14 @@ def main() -> None:
         executed = execute(plan)
         metrics = dec.pop("_metrics_pending", None)
         if metrics:
-            (root(args.species) / "metrics.json").write_text(
-                json.dumps(metrics, indent=1, sort_keys=True)
-            )
+            # Merge, never replace. A second --init (a new batch of videos staged
+            # alongside an existing cull) only measures the frames it staged, so
+            # writing wholesale would drop the gate reason and geometry for every
+            # frame curated earlier -- which the contact sheets read.
+            mp = root(args.species) / "metrics.json"
+            merged = json.loads(mp.read_text()) if mp.exists() else {}
+            merged.update(metrics)
+            mp.write_text(json.dumps(merged, indent=1, sort_keys=True))
         save_decisions(args.species, dec)
         # The contact sheets are a snapshot of decisions.json, so an import that
         # is not followed by a regeneration leaves the index contradicting the
