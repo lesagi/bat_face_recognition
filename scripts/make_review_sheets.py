@@ -298,6 +298,8 @@ def _index(species: str, per: list[tuple[str, int, int, int]]) -> str:
             )
         )
     rows = "".join(cells)
+    n_all = len(per)
+    n_poor = sum(1 for i, _, _, _, _ in per if light.get(i, {}).get("lighting_match") == "poor")
     n_good = sum(1 for i, _, _, _, _ in per if light.get(i, {}).get("lighting_match") == "good")
     n_todo_good = sum(
         1 for i, _, k, _, _ in per if not k and light.get(i, {}).get("lighting_match") == "good"
@@ -331,6 +333,8 @@ td.lm.good{{color:var(--keep)}}
 td.lm.poor{{color:var(--drop)}}
 td.lm.unknown{{color:var(--muted);font-weight:400}}
 tr.poor{{opacity:.5}}
+tr.dirty{{outline:2px solid var(--drop);outline-offset:-2px;opacity:1}}
+#unsaved a{{color:inherit}}
 td.sv{{font-size:12px;font-weight:600}}
 td.sv.ok{{color:var(--muted);font-weight:400}}
 td.sv.pending{{color:var(--drop)}}
@@ -355,7 +359,7 @@ species-matched arm anyway, so tagging them is wasted effort.
 The counts below come live from the server; <em>saved</em> means this browser has no
 edits the server has not seen.</p>
 <div class="bar">
-  <label><input type="checkbox" id="hide" checked> Hide poor lighting matches</label>
+  <label><input type="checkbox" id="hide" checked> Hide poor lighting matches <span class="sub">({n_poor} of {n_all})</span></label>
   <label><input type="checkbox" id="todo"> Only bats needing a first pass</label>
   <span class="sub" id="count"></span>
 </div>
@@ -366,14 +370,19 @@ edits the server has not seen.</p>
 const rows=[...document.querySelectorAll('tbody tr')];
 const hide=document.getElementById('hide'),todo=document.getElementById('todo');
 function apply(){{
-  let shown=0;
+  let shown=0,hiddenPoor=0;
   for(const r of rows){{
     const poor=r.dataset.match==='poor';
     const needs=r.classList.contains('todo');
-    const ok=(!hide.checked||!poor)&&(!todo.checked||needs);
-    r.hidden=!ok; if(ok)shown++;
+    // Unsaved work always stays visible. Hiding it is how the banner ended up
+    // reporting a bat the table no longer contained.
+    const dirty=r.classList.contains('dirty');
+    const ok=dirty||((!hide.checked||!poor)&&(!todo.checked||needs));
+    r.hidden=!ok;
+    if(ok)shown++; else if(poor)hiddenPoor++;
   }}
-  document.getElementById('count').textContent=shown+' of '+rows.length+' shown';
+  document.getElementById('count').textContent=
+    shown+' of '+rows.length+' shown'+(hiddenPoor?' · '+hiddenPoor+' poor-lighting bats hidden':'');
 }}
 hide.addEventListener('change',apply);todo.addEventListener('change',apply);apply();
 
@@ -398,7 +407,7 @@ async function refresh(){{
   document.querySelector('#tk b').textContent=d.totals.keep;
   document.querySelector('#td b').textContent=d.totals.drop;
   document.querySelector('#tu b').textContent=d.totals.undecided;
-  let dirty=0;
+  const dirtyIds=[];
   for(const r of rows){{
     const b=d.bats[r.dataset.id]; if(!b)continue;
     for(const f of ['n','keep','drop','undecided']){{
@@ -408,12 +417,16 @@ async function refresh(){{
     const sv=r.querySelector('.sv');
     sv.textContent=pend?('● '+pend+' unsaved'):'saved';
     sv.className='sv '+(pend?'pending':'ok');
-    if(pend)dirty++;
+    r.classList.toggle('dirty',!!pend);
+    if(pend)dirtyIds.push(r.dataset.id);
     r.classList.toggle('todo',b.keep===0);
   }}
   const u=document.getElementById('unsaved');
-  u.hidden=!dirty; u.className='t drop';
-  u.textContent=dirty+' bat'+(dirty===1?'':'s')+' with unsaved edits';
+  u.hidden=!dirtyIds.length; u.className='t drop';
+  // Name them. "1 bat with unsaved edits" with no way to find it is not an
+  // indicator, it is a puzzle.
+  u.innerHTML='unsaved: '+dirtyIds.map(
+    id=>"<a href='"+id+".html'>"+id+"</a>").join(', ');
   live.textContent='live · updated '+new Date().toLocaleTimeString();
   live.className='';
   apply();

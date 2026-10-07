@@ -45,9 +45,18 @@ from bat_preprocessing import YOLOSegmenter
 
 CURATED = pathlib.Path("data/curated")
 OUT_JSON = pathlib.Path("outputs/quality/bat_lighting.json")
+# The same checkpoints `build_variants_from_frames.py` uses, so a mask measured here
+# is the mask the dataset was actually built with. The rousettus path is easy to get
+# wrong: the directory is `rousesttus_segmentation_still` (with `_still`, and the
+# typo in "rousesttus" is real). The near-identical `rousesttus_segmentation` without
+# `_still` -- which this script used to name, and which some legacy scripts still
+# default to -- is not present in this checkout and fails on open.
 SEG_WEIGHTS = {
     "mauritius": "models/preprocessing/face_seg_mauritius_v2.pt",
-    "rousettus": "legacy/rousesttus_segmentation/training_results/runs/segment/bat_face_seg/weights/best.pt",
+    "rousettus": (
+        "legacy/rousesttus_segmentation_still/training_results/runs/"
+        "segment/bat_face_seg/weights/best.pt"
+    ),
 }
 STATE_DIRS = ("keep", "unreviewed", "dropped")
 # Crop margin, matching `build_variants_from_frames.py --margin`.
