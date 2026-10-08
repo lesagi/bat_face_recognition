@@ -160,6 +160,18 @@ document.getElementById('exp').addEventListener('click',()=>{
   a.href=URL.createObjectURL(blob);a.download='decisions_'+ID+'.json';a.click();
   URL.revokeObjectURL(a.href);
 });
+document.getElementById('gate').addEventListener('click',()=>{
+  // A starting point, not a decision. The automatic frontal filter already ruled on
+  // every frame; this writes that ruling into the page so the job becomes "correct
+  // the gate" rather than "judge 200 frames from scratch". Nothing is saved until
+  // you press Save, and every card is still one click from changing.
+  const n=cards.length;
+  if(!confirm('Set all '+n+' frames to the automatic gate\u2019s verdict?\n'
+    +'This only fills the page \u2014 review and correct it, then Save.'))return;
+  for(const c of cards)store[c.dataset.key]=c.dataset.gate==='keep'?'keep':'drop';
+  persist();paint();
+  status.textContent='filled from the gate \u2014 review, then Save';
+});
 document.getElementById('allk').addEventListener('click',()=>{
   if(confirm('Mark every frame on this page KEEP?'))
     {for(const c of cards)store[c.dataset.key]='keep';persist();paint()}
@@ -198,7 +210,8 @@ def _page(identity: str, rows: list[dict]) -> str:
     for r in rows:
         gate = "gate: keep" if r["auto_keep"] else (r["gate_reason"] or "gate: reject")
         cards.append(
-            f'<figure data-key="{r["key"]}" data-seed="{r["decision"]}">'
+            f'<figure data-key="{r["key"]}" data-seed="{r["decision"]}" '
+            f'data-gate="{"keep" if r["auto_keep"] else "reject"}">'
             f'<img loading="lazy" src="../thumbs/{identity}/{r["file"]}" alt="frame {r["frame"]}">'
             f'<figcaption><span>f{r["frame"]:06d}</span>'
             f'<span class="reason">{gate}</span>'
@@ -217,6 +230,7 @@ def _page(identity: str, rows: list[dict]) -> str:
     <span class="t drop">drop <b>0</b></span>
     <span class="t undecided">undecided <b>0</b></span>
   </span>
+  <button id="gate">Apply gate</button>
   <button id="allk">All keep</button>
   <button id="reset">Reset</button>
   <button id="save" class="primary">Save to server</button>
