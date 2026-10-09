@@ -66,6 +66,14 @@ def main() -> int:
     ap.add_argument("--backgrounds", nargs="+", default=["green_bg", "original_bg", "random_bg"])
     ap.add_argument("--arms", nargs="+", default=["paired", "lit", "all"])
     ap.add_argument(
+        "--min-keeps",
+        type=int,
+        default=10,
+        help="Exclude bats with fewer kept frames than this. A bat with 3 frames "
+        "contributes almost no same-identity pairs, and lands in a 2-identity "
+        "test split often enough to add real variance for no information.",
+    )
+    ap.add_argument(
         "--subsample",
         type=int,
         default=0,
@@ -88,6 +96,16 @@ def main() -> int:
 
         for arm in args.arms:
             ids = arm_identities(arm, available)
+            if args.min_keeps:
+                counts = {i: sum(1 for r in base.records if r.identity == i) for i in ids}
+                thin = sorted(i for i in ids if counts[i] < args.min_keeps)
+                if thin:
+                    print(
+                        f"  {arm}/{bg}: dropping {len(thin)} thin bat(s) "
+                        f"(<{args.min_keeps} frames): "
+                        + ", ".join(f"{i}={counts[i]}" for i in thin)
+                    )
+                ids = [i for i in ids if counts[i] >= args.min_keeps]
             tag = arm
             if args.subsample and len(ids) > args.subsample:
                 ids = sorted(random.Random(args.seed).sample(ids, args.subsample))
