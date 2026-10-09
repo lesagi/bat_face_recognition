@@ -72,6 +72,10 @@ main{padding:18px 20px 60px}
 figure{margin:0;background:var(--panel);border:2px solid var(--line);border-radius:10px;
   overflow:hidden;cursor:pointer;transition:border-color .12s}
 figure:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+figure:focus{outline:none}
+/* Which card the keys will act on. Needed because a mouse click does not
+   trigger :focus-visible, so after clicking there was no cursor to see. */
+figure.current{box-shadow:0 0 0 3px var(--accent);position:relative}
 figure[data-d=keep]{border-color:var(--keep)}
 figure[data-d=drop]{border-color:var(--drop);opacity:.55}
 figure[data-d=undecided]{border-color:var(--und);border-style:dashed}
@@ -123,16 +127,43 @@ function cycle(c){
   const cur=store[c.dataset.key]||c.dataset.seed;
   set(c,S[(S.indexOf(cur)+1)%S.length]);
 }
-cards.forEach(c=>{
-  c.tabIndex=0;
-  c.addEventListener('click',()=>cycle(c));
-  c.addEventListener('keydown',e=>{
-    const m={k:'keep',d:'drop',u:'undecided'}[e.key.toLowerCase()];
-    if(m){set(c,m);e.preventDefault();
-      (c.nextElementSibling||c).focus?.();}
-    else if(e.key==='Enter'||e.key===' '){cycle(c);e.preventDefault()}
-  });
+// Keyboard handling lives on the DOCUMENT, not on each card.
+// Per-card listeners only fire when that card holds focus, and on load nothing does
+// -- so every keypress went to <body> and was silently dropped. A tracked cursor also
+// means the keys work the moment the page opens, with no click or Tab first.
+let cur=0;
+function markCurrent(scroll){
+  cards.forEach((c,i)=>c.classList.toggle('current',i===cur));
+  const c=cards[cur];
+  if(c){c.focus({preventScroll:true});
+    if(scroll)c.scrollIntoView({block:'nearest',behavior:'smooth'});}
+}
+function move(step){
+  // Skip cards the filter has hidden, so the cursor never lands out of sight.
+  let i=cur, n=cards.length;
+  for(let k=0;k<n;k++){
+    i=(i+step+n)%n;
+    if(!cards[i].hidden){cur=i;break}
+  }
+  markCurrent(true);
+}
+cards.forEach((c,i)=>{
+  c.tabIndex=-1;
+  c.addEventListener('click',()=>{cur=i;markCurrent(false);cycle(c)});
 });
+document.addEventListener('keydown',e=>{
+  // Let the buttons and checkboxes keep their own keys.
+  const tag=(e.target.tagName||'').toUpperCase();
+  if(tag==='INPUT'||tag==='BUTTON'||tag==='TEXTAREA'||tag==='SELECT')return;
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  const c=cards[cur]; if(!c)return;
+  const m={k:'keep',d:'drop',u:'undecided'}[e.key.toLowerCase()];
+  if(m){set(c,m);move(1);e.preventDefault();return}
+  if(e.key==='ArrowRight'||e.key==='ArrowDown'){move(1);e.preventDefault();return}
+  if(e.key==='ArrowLeft'||e.key==='ArrowUp'){move(-1);e.preventDefault();return}
+  if(e.key==='Enter'||e.key===' '){cycle(c);e.preventDefault()}
+});
+markCurrent(false);
 const saveBtn=document.getElementById('save'),status=document.getElementById('status');
 // Only reachable when served by scripts/serve_review.py. Opened straight off the
 // filesystem there is nothing to POST to, so the button would be a dead control.
@@ -238,8 +269,11 @@ def _page(identity: str, rows: list[dict]) -> str:
   <span class="sub" id="status"></span>
 </header>
 <main>
-<p class="hint">Click a card to cycle, or focus one and press
-<kbd>K</kbd> keep · <kbd>D</kbd> drop · <kbd>U</kbd> undecided.
+<p class="hint">The blue ring shows which card the keys act on — it starts on the
+first card, so you can type straight away without clicking.
+<kbd>K</kbd> keep · <kbd>D</kbd> drop · <kbd>U</kbd> undecided (each advances to the
+next), arrow keys move without deciding, <kbd>Enter</kbd> cycles. Clicking a card also
+moves the ring there.
 Every click is saved in this browser straight away, so you can stop and come back.
 Frames the gate rejected are listed first — those are the ones worth a human look.
 <strong>Save to server</strong> applies them straight to
