@@ -192,16 +192,15 @@ document.getElementById('exp').addEventListener('click',()=>{
   a.href=URL.createObjectURL(blob);a.download='decisions_'+ID+'.json';a.click();
   URL.revokeObjectURL(a.href);
 });
-document.getElementById('gate').addEventListener('click',()=>{
-  // A starting point, not a decision. The automatic frontal filter already ruled on
-  // every frame; this writes that ruling into the page so the job becomes "correct
-  // the gate" rather than "judge 200 frames from scratch". Nothing is saved until
-  // you press Save, and every card is still one click from changing.
-  const n=cards.length;
-  if(!confirm('Set all '+n+' frames to the automatic gate verdict? This only fills the page - review and correct it, then Save.'))return;
-  for(const c of cards)store[c.dataset.key]=c.dataset.gate==='keep'?'keep':'drop';
-  persist();paint();
-  status.textContent='filled from the gate \u2014 review, then Save';
+document.getElementById('alld').addEventListener('click',()=>{
+  // The fastest correct workflow, measured. Only ~15% of frames get kept, so marking
+  // everything drop and clicking back the keeps costs about 15 actions per 100
+  // frames. Prefilling KEEPS costs more, not less: the automatic gate's verdict needs
+  // 32 corrections per 100, and even a model fitted on past decisions needs 17-18,
+  // against 15 for starting from nothing. See scripts/score_frames_for_review.py.
+  if(confirm('Mark every frame on this page DROP? Then click back the ones to keep.'))
+    {for(const c of cards)store[c.dataset.key]='drop';persist();paint();
+     status.textContent='all set to drop - now click the keepers';}
 });
 document.getElementById('allk').addEventListener('click',()=>{
   if(confirm('Mark every frame on this page KEEP?'))
@@ -309,7 +308,7 @@ def _page(identity: str, rows: list[dict]) -> str:
     <span class="t drop">drop <b>0</b></span>
     <span class="t undecided">undecided <b>0</b></span>
   </span>
-  <button id="gate">Apply gate</button>
+  <button id="alld">All drop</button>
   <button id="allk">All keep</button>
   <button id="reset">Reset</button>
   <button id="save" class="primary">Save to server</button>
@@ -323,7 +322,10 @@ first card, so you can type straight away without clicking.
 next), arrow keys move without deciding, <kbd>Enter</kbd> cycles. Clicking a card also
 moves the ring there.
 Every click is saved in this browser straight away, so you can stop and come back.
-Frames the gate rejected are listed first — those are the ones worth a human look.
+Frames are ordered <strong>most-likely-keep first</strong>, learned from your own past
+decisions, so the ones worth keeping cluster at the top — scan down and stop when they
+dry up. The order never decides anything; every frame still starts where
+<code>decisions.json</code> has it.
 <strong>Save to server</strong> applies them straight to
 <code>decisions.json</code> and moves the files, no terminal needed.
 <strong>Export…</strong> still downloads a file for
@@ -333,6 +335,15 @@ Frames the gate rejected are listed first — those are the ones worth a human l
 </div></main>
 <script>const ID={json.dumps(identity)};const SEED_STAMP={json.dumps(stamp)};{_JS}</script>
 </body></html>"""
+
+
+def _review_scores(species: str) -> dict[str, float]:
+    """Per-frame P(you keep it), from `score_frames_for_review.py`. Ordering only."""
+    p = pathlib.Path("outputs/quality/review_scores.json")
+    if not p.exists():
+        return {}
+    d = json.loads(p.read_text())
+    return d.get("scores", {}) if d.get("species") == species else {}
 
 
 def _lighting(species: str) -> dict[str, dict]:
@@ -543,6 +554,7 @@ def build_sheets(species: str) -> int:
     out = root / "review"
     out.mkdir(parents=True, exist_ok=True)
 
+    scores = _review_scores(species)
     by_ident: dict[str, list[dict]] = {}
     for key, rec in dec["frames"].items():
         m = met.get(key, {})
@@ -559,8 +571,13 @@ def build_sheets(species: str) -> int:
 
     per = []
     for identity, rows in sorted(by_ident.items()):
-        # Gate-rejected frames first: they are the ones a human decision changes.
-        rows.sort(key=lambda r: (r["auto_keep"], r["frame"]))
+        # Most-likely-keep first, so the ~15% worth keeping cluster at the top and
+        # the reviewer can stop scanning once they dry up. Falls back to the old
+        # gate-rejected-first order when no scores have been computed yet.
+        if scores:
+            rows.sort(key=lambda r: (-scores.get(r["key"], 0.0), r["frame"]))
+        else:
+            rows.sort(key=lambda r: (r["auto_keep"], r["frame"]))
         html = _page(identity, rows)
         _check_js(_extract_js(html), f"{identity}.html")
         (out / f"{identity}.html").write_text(html)
