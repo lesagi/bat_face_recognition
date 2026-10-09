@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
+import re
 
 CURATED = pathlib.Path("data/curated")
 STATES = ("keep", "drop", "undecided")
@@ -197,8 +198,7 @@ document.getElementById('gate').addEventListener('click',()=>{
   // the gate" rather than "judge 200 frames from scratch". Nothing is saved until
   // you press Save, and every card is still one click from changing.
   const n=cards.length;
-  if(!confirm('Set all '+n+' frames to the automatic gate\u2019s verdict?\n'
-    +'This only fills the page \u2014 review and correct it, then Save.'))return;
+  if(!confirm('Set all '+n+' frames to the automatic gate verdict? This only fills the page - review and correct it, then Save.'))return;
   for(const c of cards)store[c.dataset.key]=c.dataset.gate==='keep'?'keep':'drop';
   persist();paint();
   status.textContent='filled from the gate \u2014 review, then Save';
@@ -233,6 +233,54 @@ def stamps_from_decisions(species: str) -> dict[str, str]:
     for key, rec in dec["frames"].items():
         per.setdefault(rec["identity"], {})[key] = rec["decision"]
     return {i: seed_stamp(p) for i, p in per.items()}
+
+
+def _extract_js(html: str) -> str:
+    """Everything inside <script> tags, concatenated."""
+    return "\n".join(re.findall(r"<script>(.*?)</script>", html, re.S))
+
+
+def _check_js(js: str, where: str) -> None:
+    """Reject a script with an unterminated string literal.
+
+    A literal newline inside a JS string is a syntax error, and the browser then
+    runs NONE of the script -- every button and key on the page goes dead at once,
+    with nothing visible until someone opens the console. That is exactly what
+    shipped: a `\n` escape collapsed into a real newline while generating the
+    "Apply gate" confirm text, and the page looked completely normal.
+
+    This is not a JS parser. It walks the source tracking quote state and comments,
+    and raises if a quote is still open at a line end -- which is the one failure
+    mode this generator can actually produce.
+    """
+    quote = None
+    in_block = False
+    for n, line in enumerate(js.split("\n"), 1):
+        i = 0
+        while i < len(line):
+            c = line[i]
+            nxt = line[i + 1] if i + 1 < len(line) else ""
+            if in_block:
+                if c == "*" and nxt == "/":
+                    in_block = False
+                    i += 1
+            elif quote:
+                if c == "\\":
+                    i += 1
+                elif c == quote:
+                    quote = None
+            elif c == "/" and nxt == "/":
+                break
+            elif c == "/" and nxt == "*":
+                in_block = True
+                i += 1
+            elif c in "\"'`":
+                quote = c
+            i += 1
+        if quote and quote != "`":  # backticks legally span lines
+            raise AssertionError(
+                f"{where}: unterminated {quote} string at line {n}: {line.strip()[:70]}"
+            )
 
 
 def _page(identity: str, rows: list[dict]) -> str:
@@ -513,7 +561,9 @@ def build_sheets(species: str) -> int:
     for identity, rows in sorted(by_ident.items()):
         # Gate-rejected frames first: they are the ones a human decision changes.
         rows.sort(key=lambda r: (r["auto_keep"], r["frame"]))
-        (out / f"{identity}.html").write_text(_page(identity, rows))
+        html = _page(identity, rows)
+        _check_js(_extract_js(html), f"{identity}.html")
+        (out / f"{identity}.html").write_text(html)
         per.append(
             (
                 identity,
@@ -523,7 +573,9 @@ def build_sheets(species: str) -> int:
                 sum(1 for r in rows if r["decision"] == "drop"),
             )
         )
-    (out / "index.html").write_text(_index(species, per))
+    idx = _index(species, per)
+    _check_js(_extract_js(idx), "index.html")
+    (out / "index.html").write_text(idx)
     return len(per)
 
 
